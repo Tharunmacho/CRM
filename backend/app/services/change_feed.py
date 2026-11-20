@@ -406,12 +406,35 @@ def _commit_hook(conn):
     payload = pending.payload()
     if payload is None:
         return
+    raw = conn.connection.driver_connection if hasattr(conn.connection, "driver_connection") else None
+    if raw is not None and hasattr(raw, "pgconn") and not getattr(raw, "autocommit", True):
+        # One round trip instead of two: the NOTIFY and the COMMIT travel in the same message (a hosted database costs a full
+        # network round trip per statement). The NOTIFY still joins this very transaction and is delivered only if the COMMIT
+        # succeeds. The driver then finds nothing left to commit. A failed COMMIT is raised like any other commit failure.
+        try:
+            from psycopg import sql
+            statement = sql.SQL("SELECT pg_notify({channel}, {payload}); COMMIT").format(
+                channel=sql.Literal(CHANNEL), payload=sql.Literal(payload)).as_string(raw)
+            with raw.cursor() as cursor:
+                cursor.execute(statement, prepare=False)
+        except Exception as error:
+            raise _as_sqlalchemy_error(conn, error) from error
+        return
     try:
         # The raw DBAPI cursor: no events, no statement log, and the NOTIFY joins this very transaction.
         with conn.connection.cursor() as cursor:
             cursor.execute("SELECT pg_notify(%s::text, %s::text)", (CHANNEL, payload))
     except Exception as error:  # never fail a save because the announcement could not be queued
         log.warning("Live change notification skipped (%s).", type(error).__name__)
+
+
+def _as_sqlalchemy_error(conn, error):
+    """The error the driver's own commit would have raised through SQLAlchemy (IntegrityError, OperationalError ...)."""
+    from sqlalchemy import exc
+    dbapi = getattr(conn.dialect, "loaded_dbapi", None) or conn.dialect.dbapi
+    if isinstance(error, dbapi.Error):
+        return exc.DBAPIError.instance(None, None, error, dbapi.Error, dialect=conn.dialect)
+    return error
 
 
 def _rollback_hook(conn):

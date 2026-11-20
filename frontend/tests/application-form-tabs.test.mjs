@@ -63,14 +63,10 @@ test('a "Still missing" item jumps to the section that holds its field or docume
   assert.deepEqual(counts, { personal: 2, passport: 1, documents: 1 })
 })
 
-test('a wide screen shows Personal with Passport and Education with Experience; a narrow one shows only the chosen section', () => {
-  assert.deepEqual(tabs.visibleCards('personal', true), [1, 2])
-  assert.deepEqual(tabs.visibleCards('passport', true), [1, 2])
-  assert.deepEqual(tabs.visibleCards('education', true), [3, 4])
-  assert.deepEqual(tabs.visibleCards('experience', true), [3, 4])
-  assert.deepEqual(['personal', 'passport', 'education', 'experience'].map((tab) => tabs.visibleCards(tab, false)), [[1], [2], [3], [4]])
+test('Personal, Passport, Education and Experience are each their own tab: one card on screen at every width', () => {
+  assert.deepEqual(['personal', 'passport', 'education', 'experience'].map((tab) => tabs.visibleCards(tab)), [[1], [2], [3], [4]])
   for (const tab of ['overview', 'documents', 'invoice', 'notes']) {
-    assert.deepEqual(tabs.visibleCards(tab, true), [], tab)
+    assert.deepEqual(tabs.visibleCards(tab), [], tab)
     assert.equal(tabs.isDetailTab(tab), false)
   }
   assert.equal(tabs.paneIdFor('passport'), 'af-pane-details')
@@ -95,6 +91,7 @@ test('a tab’s spoken name carries its count', () => {
   assert.equal(tabs.tabAccessibleName('Notes', { count: 4, kind: 'notes' }), 'Notes, 4 notes')
   assert.equal(tabs.tabAccessibleName('Notes', { count: 0, kind: 'overdue' }), 'Notes, a note is overdue')
   assert.equal(tabs.tabAccessibleName('Personal', { count: 0, kind: 'missing' }), 'Personal')
+  assert.equal(tabs.tabAccessibleName('Passport', { count: 0, kind: 'done' }), 'Passport, complete')
 })
 
 /* ------------------------------------------------------------------ The documents grid */
@@ -194,8 +191,8 @@ test('the tab stylesheet is loaded last by the screen and sizes the cards by the
   const css = await src('styles/application-form-tabs.css')
   const imports = [...screen.matchAll(/import '@\/styles\/([\w-]+)\.css'/g)].map((match) => match[1])
   assert.equal(imports.at(-1), 'application-form-tabs')
-  assert.match(css, /@container affc \(min-width: 560px\)/)
-  assert.match(css, /@container affc \(min-width: 700px\)/)
+  assert.match(css, /@container affc \(min-width: 720px\)/)
+  assert.doesNotMatch(css, /aff-table-head { display: grid/, 'qualifications and employers are mini-cards, never a table that cuts values')
   assert.match(css, /\.af-tabs \{ position: sticky; top: 0/)
   assert.match(css, /\.af-pane\[hidden\]/, 'the hidden attribute still hides a flex or grid panel')
   assert.doesNotMatch(css, /overflow-x: ?(scroll|auto)[^}]*\.af-scroll/, 'the page itself never scrolls sideways')
@@ -205,7 +202,7 @@ test('the tab stylesheet is loaded last by the screen and sizes the cards by the
 
 test('every spacing value in the tab stylesheet is on the 4 / 8 / 12 / 16 / 20 / 24 / 32 scale', async () => {
   const css = (await src('styles/application-form-tabs.css')).replace(/\/\*[\s\S]*?\*\//g, '')
-  const allowed = new Set([0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64])
+  const allowed = new Set([0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64, 96])
   const bad = []
   for (const match of css.matchAll(/(?:^|[;{\s])((?:padding|margin|gap|row-gap|column-gap)(?:-(?:top|right|bottom|left|block|inline))?)\s*:\s*([^;}]+)/g)) {
     for (const px of match[2].matchAll(/(-?\d+(?:\.\d+)?)px/g)) if (!allowed.has(Math.abs(Number(px[1])))) bad.push(`${match[1]}: ${match[2].trim()}`)
@@ -213,7 +210,7 @@ test('every spacing value in the tab stylesheet is on the 4 / 8 / 12 / 16 / 20 /
   assert.deepEqual(bad, [])
 })
 
-test('the design rules hold: 48px tab bar, 40px controls with an 8px radius, 28px section icon, 24px chips, 20px count pills, 36px buttons', async () => {
+test('the design rules hold: 48px tab bar, 40px controls with an 8px radius, 32px section icon, 24px chips, 20px count pills, 36px buttons', async () => {
   const css = await src('styles/application-form-tabs.css')
   assert.match(css, /\.af \.af-tablist \{[^}]*height: 48px/)
   assert.match(css, /\.af \.af-tab \{[^}]*height: 48px/)
@@ -221,8 +218,8 @@ test('the design rules hold: 48px tab bar, 40px controls with an 8px radius, 28p
   assert.match(css, /\.af-tab-count \{[^}]*min-width: 20px; height: 20px/)
   assert.match(css, /\.af-main :is\(\.ui-input:not\(textarea\), \.custom-select-trigger, \.date-picker-trigger\) \{[^}]*height: 40px/)
   assert.match(css, /border: 1px solid var\(--border-control\); border-radius: 8px/)
-  assert.match(css, /\.aff-tile \{ width: 28px; height: 28px/)
-  assert.match(css, /\.aff \.aff-grid \{ gap: 16px 12px; \}/, '16px between rows, 12px between columns')
+  assert.match(css, /\.aff-tile \{ width: 32px; height: 32px/)
+  assert.match(css, /\.aff \.aff-grid \{ gap: 16px; \}/, '16px between rows and columns')
   assert.match(css, /\.aff-lab, \.af \.aff \.ac-lab \{ height: 20px/, 'every label row is the same height, so controls share a top edge')
   assert.match(css, /\.ui-button\.min-h-10 \{ min-height: 36px/)
   assert.match(css, /\.af-docgroup \.af-docrow \{[^}]*min-height: 88px/)
@@ -243,10 +240,10 @@ test('the context strip reads client, job, recruiter, stage and DOC as equal cel
 
 test('on a phone the document groups fold (the first one with something to collect is open) and every target is 44px', async () => {
   const docs = await src('features/application-form/components/documents-section.tsx')
-  assert.match(docs, /PHONE_QUERY = '\(max-width: 760px\)'/)
+  assert.match(docs, /PHONE_QUERY = '\(max-width: 768px\)'/)
   assert.match(docs, /aria-expanded=\{isOpen\(group\.key\)\}/)
   assert.match(docs, /hidden=\{!isOpen\(group\.key\)\}/)
   const css = await src('styles/application-form-tabs.css')
-  const phone = css.slice(css.indexOf('@media (max-width: 760px)'))
+  const phone = css.slice(css.indexOf('@media (max-width: 768px)'))
   for (const rule of [/\.af-docbtn \{ height: 44px/, /\.af-bar-back \{[^}]*height: 44px/, /\.af-missing button \{ height: 44px/, /\.af-context-change \{ width: 100%; height: 44px/, /font-size: 16px/]) assert.match(phone, rule)
 })

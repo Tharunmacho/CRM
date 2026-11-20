@@ -659,6 +659,8 @@ class ApplicationStage(Base, PkMixin):
     __table_args__ = (
         UniqueConstraint("application_id", "stage", "attempt"),
         CheckConstraint("stage between 1 and 12", name="ck_stage_range"),
+        # "Stage moves between two dates" (the Daily work report, the weekly staff report, done-today marks): a range read of completed_at (migration 0051).
+        Index("ix_crm_application_stages_completed_at", "completed_at"),
         {"comment": "Recorded attempts and outcomes for each stage of a candidate application."},
     )
 
@@ -707,6 +709,8 @@ class Task(Base, PkMixin):
             "created_at",
             postgresql_where=text("completed_at is null and cancelled_at is null"),
         ),
+        # Tasks completed in a date range (the report's "done" counts) read this instead of the whole table (migration 0051).
+        Index("ix_workflow_tasks_completed_at", "completed_at", postgresql_where=text("completed_at is not null")),
         {"comment": "Assigned recruitment work, including initial calls and application-stage tasks."},
     )
 
@@ -929,6 +933,9 @@ class MailMessage(Base, PkMixin):
     __table_args__ = (
         UniqueConstraint("account_id", "provider_message_id"),
         Index("ix_email_messages_received_at", "received_at"),
+        # Narrow partial indexes for the inbox counts and the stored/filtered message views (migration 0050).
+        Index("ix_email_messages_inbox_counts", "account_id", "unread", postgresql_where=text("remote_deleted IS FALSE AND folder = 'INBOX'")),
+        Index("ix_email_messages_visible_feed", text("received_at DESC"), text("id DESC"), postgresql_where=text("remote_deleted IS FALSE")),
         {"comment": "Provider email messages associated with connected inbox accounts and, optionally, candidates."},
     )
 
@@ -1161,9 +1168,11 @@ class AuditEntry(Base, PkMixin):
     """Every create, edit, stage change, reassignment and upload, with user and time."""
 
     __tablename__ = "system_audit_log"
-    __table_args__ = {
-        "comment": "Recorded CRM actions with actor, affected entity and event metadata."
-    }
+    __table_args__ = (
+        # The latest entry of one record (who closed a placement, the document-status marks, a record's history) in index order (migration 0051).
+        Index("ix_system_audit_log_entity_at", "entity_type", "entity_id", text("at DESC")),
+        {"comment": "Recorded CRM actions with actor, affected entity and event metadata."},
+    )
 
     actor_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
     action: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -1365,6 +1374,8 @@ class StaffAttendanceSession(Base, PkMixin, TimestampMixin):
         CheckConstraint("checked_out_at IS NULL OR checked_out_at >= checked_in_at", name="ck_staff_attendance_time_order"),
         Index("ix_staff_attendance_one_open", "user_id", unique=True, postgresql_where=text("checked_out_at IS NULL")),
         Index("ix_staff_attendance_user_time", "user_id", "checked_in_at"),
+        # The first punch of everyone and the sessions of a date range, across all staff (the weekly staff report, migration 0051).
+        Index("ix_staff_attendance_checked_in_at", "checked_in_at"),
         {"comment": "Explicit staff check-in/check-out intervals. Attendance is independent of browser presence; corrections are audited."},
     )
 

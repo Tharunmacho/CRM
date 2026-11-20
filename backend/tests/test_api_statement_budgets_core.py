@@ -309,7 +309,7 @@ SPEC: list[tuple] = [
     ("GET", f"/api/tasks/missed-updates?day={today}", None, {A: 2, MG: 2}, None),
     ("GET", "/api/workflow/settings", None, {A: 4, MG: 2}, None),  # the very first read creates the one settings row
     ("GET", "/api/daily-work", None, {A: 8, MG: 8, ST: 7}, None),
-    ("GET", "/api/follow-up", None, {A: 7, MG: 7, ST: 6}, None),
+    ("GET", "/api/follow-up", None, {A: 6, MG: 6, ST: 5}, None),
     ("GET", "/api/daily-goals", None, {A: 3, MG: 3}, None),
     ("GET", "/api/attendance", None, {A: 4, MG: 4, ST: 4}, None),
     ("GET", "/api/attendance?staffId=budget-staff-0", None, {A: 4, MG: 5}, None),
@@ -341,8 +341,8 @@ SPEC: list[tuple] = [
     ("GET", "/api/intake-acknowledgements/whatsapp/budget-wa", None, {A: 5, ST: 5}, None),
     ("GET", "/api/health", None, {A: 3}, None),
     ("POST", "/api/notifications/read-all", None, {ST: 2}, None),
-    ("POST", "/api/presence/heartbeat", pulse, {ST: 10}, "POST /api/presence/heartbeat (first)"),
-    ("POST", "/api/presence/heartbeat", pulse, {ST: 10}, "POST /api/presence/heartbeat (steady)"),
+    ("POST", "/api/presence/heartbeat", pulse, {ST: 9}, "POST /api/presence/heartbeat (first)"),
+    ("POST", "/api/presence/heartbeat", pulse, {ST: 9}, "POST /api/presence/heartbeat (steady)"),
     ("POST", "/api/auth/login", {"email": "budget-staff-0@example.test", "password": PASSWORD}, {A: 2}, None),
 ]
 

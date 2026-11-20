@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api, fileHref, takeEarlyRead } from '@/shared/api/client'
 import { peekReport, rememberReport } from '@/shared/state/snapshot-cache'
+import { createCoalescer } from '@/shared/lib/coalesce'
 import { liveInterval } from '@/shared/state/live'
+import { isPresenceNoise } from '@/shared/state/live-events'
 
 export interface Option { id: string; label: string }
 export interface OrderMetrics { id: string; ref: string; company: string; client: string; designation: string; status: string; openings: number; matched: number; selected: number; deployed: number }
@@ -83,6 +85,8 @@ const REFRESH_MS = 60_000
 const FOCUS_REFRESH_MIN_MS = 15_000
 /** Reports are heavy: when the desk is busy a change burst re-reads them at most this often. */
 const LIVE_REPORT_WINDOW_MS = 1_500
+/** Staff heartbeats announce `attendance` + `reports` all day (see isPresenceNoise); a report re-reads for those at most this often. */
+const PRESENCE_NOISE_GAP_MS = 20_000
 
 /**
  * Clear prior scope immediately, abort on navigation, and refresh visible desks.
@@ -119,16 +123,21 @@ export function useReportData<T>(path: string | null, sessionId: string, revisio
       } finally { finishedAt = Date.now(); if (request === controller) request = null; if (active) setReading(null) }
     }
     void read(true)
+    const afterNoise = createCoalescer(() => void read(true), { waitMs: PRESENCE_NOISE_GAP_MS, maxWaitMs: PRESENCE_NOISE_GAP_MS })
     // Any business change makes the numbers stale ('reports' follows every change). A read that was already running
     // began before the change, so it is abandoned and a new one starts.
     const stopLive = liveInterval(() => void read(true), REFRESH_MS, topics, {
       debounceMs: LIVE_REPORT_WINDOW_MS,
-      onChange: () => { request?.abort(); request = null; void read(true) },
+      onChange: (change) => {
+        if (isPresenceNoise(change)) { afterNoise(); return } // a heartbeat, not a business change: one read later, not one now
+        afterNoise.cancel() // the read below answers it too
+        request?.abort(); request = null; void read(true)
+      },
     })
     const visible = () => void read()
     document.addEventListener('visibilitychange', visible)
     window.addEventListener('focus', visible)
-    return () => { active = false; request?.abort(); stopLive(); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
+    return () => { active = false; afterNoise.cancel(); request?.abort(); stopLive(); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
   }, [key, path, reload])
   const remembered = !path ? null : snapshot?.key === key ? snapshot.data : peekReport<T>(sessionId, path, revision)
   return { data: remembered, error: failure?.key === key ? failure.message : '', refreshing: reading === key, refresh: () => setReload(n => n + 1) }

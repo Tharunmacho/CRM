@@ -24,7 +24,7 @@
             response.catch(function () {})
             early[key] = { path: path, startedAt: Date.now(), response: response }
           }
-          start('session', '/auth/session?workspace=true&compact=true')
+          start('session', '/auth/session?workspace=true&compact=true&slim=true')
           var here = location.pathname
           /* The dashboard cards read the live workspace and one small lead count, so there is no dashboard request to start early. */
           /* Screen code for this URL, injected at build time; fetched alongside the entry bundle. */

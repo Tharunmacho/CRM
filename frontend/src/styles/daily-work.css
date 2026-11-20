@@ -239,5 +239,24 @@
   .dw-panel-head .tk-select { min-width: 0; width: 100%; }
 }
 
+/* ---------- The filter bar above the Tasks table: Current process, Declined, Rejected, Travelled, All (each with its count) ----------
+ * Pills in one row (it scrolls inside itself on a phone, never the page); the chosen one is the primary tint. The caption under it says in one sentence
+ * what a closed view means. While the next view loads the rows on screen stay and are dimmed. */
+.dw-views-wrap { padding: 0 20px 14px; }
+.dw-views { display: flex; gap: 6px; padding: 2px; overflow-x: auto; scrollbar-width: thin; }
+.dw-view { display: inline-flex; flex: none; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 14px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--text-muted); cursor: pointer; }
+.dw-view:hover { background: var(--tint-2); color: var(--text-main); }
+.dw-view.is-active { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); font-weight: 600; color: var(--primary-deep); }
+[data-theme='dark'] .dw-view.is-active { color: var(--primary); }
+.dw-view:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.dw-view-count { min-width: 24px; padding: 0 7px; border-radius: 999px; background: var(--tint-2); font-size: 11.5px; font-weight: 600; line-height: 20px; text-align: center; color: var(--text-muted); }
+.dw-view.is-active .dw-view-count { background: var(--primary); color: var(--on-primary); }
+.dw-views-caption { margin: 10px 2px 0; font-size: 12.5px; line-height: 1.45; color: var(--text-muted); }
+.dw-scroll.is-busy { opacity: .55; transition: opacity .15s; }
+@media (min-width: 1360px) { .dw-panel:has(> .dw-scroll, > .tk-table-wrap) .dw-views-wrap { padding-inline: 0; } }
+@media (max-width: 640px) { .dw-views-wrap { padding-inline: 16px; } }
+@media (max-width: 640px), (pointer: coarse) { .dw-view { height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .dw-scroll.is-busy { transition: none; } }
+
 /* ---------- Tab strip and follow-up ---------- */
 .dw-tabs { margin-bottom: 16px; }

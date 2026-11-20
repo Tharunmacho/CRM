@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Lock, Unlink } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { roleWord } from '@/shared/model/role-labels'
-import { Select } from '@/shared/ui/primitives'
+import { Button, Select } from '@/shared/ui/primitives'
 import { SuggestInput } from '@/shared/ui/suggest-input'
-import { SOURCE_OPTIONS, cleanAgencyName, jobOptionText, jobUnavailableReason } from '../form-model'
+import { PICKERS_LOCKED_TEXT, SOURCE_OPTIONS, cleanAgencyName, jobOptionText, jobUnavailableReason } from '../form-model'
 import { applicationOptions, applicationOptionText } from '../paper-model'
 import type { ApplicationRef, AssignmentChange, AssignmentData } from '../types'
 import type { AssignmentField } from '../use-application-form'
@@ -42,6 +42,8 @@ export function AssignmentBar({
   onSwitchApplication,
   stageControl,
   canManageJobs = false,
+  pickersLocked = false,
+  onUnmap,
 }: {
   assignment: AssignmentData
   saving: Partial<Record<AssignmentField, boolean>>
@@ -53,6 +55,10 @@ export function AssignmentBar({
   onSwitchApplication?: (applicationId: string) => void
   stageControl?: ReactNode
   canManageJobs?: boolean
+  /** The placement is past prescreening: Client and Job show as locked values (the server would refuse a change) and Unmap is offered. */
+  pickersLocked?: boolean
+  /** Opens the existing "remove from this job" confirmation; only for people who can work the candidate. */
+  onUnmap?: () => void
 }) {
   const { options, can } = assignment
   const [clientId, setClientId] = useState(assignment.client?.id ?? '')
@@ -62,6 +68,7 @@ export function AssignmentBar({
 
   const client = options.clients.find((item) => item.id === clientId)
   const editJob = can.job
+  const locked = editJob && pickersLocked
   const jobs = useMemo(() => {
     const list = [...(client?.jobs ?? [])]
     // The job the candidate is on stays in its list even when it is closed or filled now.
@@ -127,7 +134,9 @@ export function AssignmentBar({
     <section className="af-assign" aria-label="Client, job, source, agency and recruiter">
       <Field id="client" label="Client" error={errors.client}
         hint={editJob && clientId && clientId !== serverClientId ? 'Now choose a job for this client.' : undefined}>
-        {editJob ? (
+        {locked ? (
+          <p className="af-assign-locked" id="af-assign-client" aria-disabled="true"><Lock aria-hidden="true" /><span>{assignment.client?.name || NOT_SET}</span></p>
+        ) : editJob ? (
           <Select id="af-assign-client" searchable value={clientId} aria-label="Client" onChange={(event) => setClientId(event.target.value)}>
             <option value="">{assignment.client && !client ? assignment.client.name : 'Select a client'}</option>
             {options.clients.map((item) => <option key={item.id} value={item.id}>{item.companyName && item.companyName !== item.name ? `${item.name} · ${item.companyName}` : item.name}</option>)}
@@ -138,8 +147,10 @@ export function AssignmentBar({
       </Field>
 
       <Field id="job" label="Job" saving={saving.job} error={errors.job}
-        hint={editJob && noAvailableJobs ? <>{jobs.length ? 'These jobs are filled, closed or on hold. A job must be reopened before assigning another candidate.' : 'No jobs have been added for this client.'}{canManageJobs && <> <Link to="/jobs">Manage jobs</Link></>}</> : !editJob && assignment.job && (assignment.job.ref || assignment.job.country) ? [assignment.job.ref, assignment.job.country].filter(Boolean).join(' · ') : undefined}>
-        {editJob ? (
+        hint={editJob && noAvailableJobs ? <>{jobs.length ? 'These jobs are filled, closed or on hold. A job must be reopened before assigning another candidate.' : 'No jobs have been added for this client.'}{canManageJobs && <> <Link to="/jobs">Manage jobs</Link></>}</> : (!editJob || locked) && assignment.job && (assignment.job.ref || assignment.job.country) ? [assignment.job.ref, assignment.job.country].filter(Boolean).join(' · ') : undefined}>
+        {locked && !several ? (
+          <p className="af-assign-locked" id="af-assign-job" aria-disabled="true"><Lock aria-hidden="true" /><span>{assignment.job ? (assignment.job.title || assignment.job.ref) : NOT_SET}</span></p>
+        ) : editJob && !locked ? (
           <Select id="af-assign-job" searchable value={jobSelectValue} aria-label="Job" disabled={!clientId && !several} onChange={(event) => pickJob(event.target.value)}>
             <option value="">{clientId ? jobs.length ? 'No job chosen' : 'No open jobs available' : 'Choose a client first'}</option>
             {owned.map((item) => <option key={item.id} value={`app:${item.id}`}>{applicationOptionText(item, item.id === activeApplicationId)}</option>)}
@@ -148,6 +159,7 @@ export function AssignmentBar({
             ))}
           </Select>
         ) : several ? (
+          // Locked or read only with several placements: the list only switches between them.
           <Select id="af-assign-job" value={jobSelectValue} aria-label="Job" onChange={(event) => pickJob(event.target.value)}>
             {owned.map((item) => <option key={item.id} value={`app:${item.id}`}>{applicationOptionText(item, item.id === activeApplicationId)}</option>)}
           </Select>
@@ -166,6 +178,14 @@ export function AssignmentBar({
           <p className="af-assign-value" id="af-assign-source">{assignment.source.label || NOT_SET}</p>
         )}
       </Field>
+
+      {locked && (
+        <div className="af-assign-lock" role="note">
+          <Lock aria-hidden="true" />
+          <p>{PICKERS_LOCKED_TEXT}</p>
+          {onUnmap && <Button size="sm" icon={<Unlink />} onClick={onUnmap}>Unmap candidate</Button>}
+        </div>
+      )}
 
       <Field id="agency" label="Agency" saving={saving.agency} error={errors.agency}>
         {can.agency ? (

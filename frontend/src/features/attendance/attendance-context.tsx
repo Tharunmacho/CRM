@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, fileHref } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
+import { createCoalescer } from '@/shared/lib/coalesce'
 import { liveInterval } from '@/shared/state/live'
 import { activeAttendanceSession, type AttendanceResponse, type PresenceSummary, type StaffAttendance } from './model'
 import { createPresenceReporter } from './presence-reporter'
@@ -17,10 +18,29 @@ interface AttendanceContextValue {
   revision: number
   refresh: () => Promise<void>
   clock: () => Promise<void>
+  /** A component that shows the attendance clock calls this (through useAttendance) so the provider reads attendance only while one is mounted. */
+  register: () => () => void
 }
 const AttendanceContext = createContext<AttendanceContextValue | null>(null)
 
-/** Presence reports foreground interaction only; it never changes the attendance clock. */
+/**
+ * A focus, visibility or network event re-reads attendance only if the last read is older than this: a tab coming
+ * back fires focus, visibilitychange and sometimes online in the same moment.
+ */
+const RESUME_GAP_MS = 5_000
+/**
+ * Every staff member's heartbeat (every 30 s while the tab is in use) is announced on the same `attendance` topic as a
+ * check-in. A burst of change events re-reads your own attendance once, this long after the first; a real check-in or check-out from this
+ * page comes back in the response itself, and anything else is caught by the poll below.
+ */
+const LIVE_GAP_MS = 20_000
+
+/**
+ * Presence reports foreground interaction only; it never changes the attendance clock.
+ *
+ * Attendance is read only while something that shows it is mounted (the Attendance page): the sidebar and the other
+ * screens do not use it, so they no longer pay a request on every page. The heartbeat below does not depend on it.
+ */
 export function AttendanceProvider({ children }: { children: ReactNode }) {
   const { me } = useStore()
   const [own, setOwn] = useState<StaffAttendance | null>(null)
@@ -39,12 +59,17 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
   const lifecycleVersion = useRef(0)
   const clockContext = useRef<string | null>(null)
   const intentRecovered = useRef(false)
+  const lastReadAt = useRef(0)
+  const [demand, setDemand] = useState(0)
+  const register = useCallback(() => { setDemand((count) => count + 1); return () => setDemand((count) => count - 1) }, [])
+  const demanded = demand > 0
 
   const refresh = useCallback(async () => {
     if (me.role === 'admin') { setLoading(false); return }
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
+    lastReadAt.current = Date.now()
     const version = mutationVersion.current
     try {
       const result = await api.get<AttendanceResponse>('/attendance?staffId=' + encodeURIComponent(me.id), { signal: controller.signal })
@@ -68,18 +93,27 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     } finally { if (active.current && !controller.signal.aborted) setLoading(false) }
   }, [me.id, me.role])
 
+  // Who is signed in: start clean for this person. The reading itself follows demand (next effect).
   useEffect(() => {
     active.current = true
     lifecycleVersion.current += 1
     busyRef.current = false; setBusy(false); intent.current = null; setPendingKind(undefined)
-    intentRecovered.current = false; clockContext.current = null
+    intentRecovered.current = false; clockContext.current = null; lastReadAt.current = 0
     setOwn(null); setLoading(true); setError(''); setPresenceError('')
+    return () => { active.current = false; lifecycleVersion.current += 1; request.current?.abort() }
+  }, [me.id, me.role])
+
+  useEffect(() => {
+    if (!demanded) return undefined
     void refresh()
-    const interval = liveInterval(() => { if (document.visibilityState === 'visible' && !busyRef.current) void refresh() }, 30_000, ['attendance'])
-    const resume = () => { if (document.visibilityState === 'visible' && !busyRef.current) void refresh() }
+    const again = () => { if (document.visibilityState === 'visible' && !busyRef.current) void refresh() }
+    // A burst of change events (other people's heartbeats included) becomes one read, LIVE_GAP_MS after the first.
+    const onLive = createCoalescer(again, { waitMs: LIVE_GAP_MS, maxWaitMs: LIVE_GAP_MS })
+    const interval = liveInterval(again, 30_000, ['attendance'], { onChange: () => onLive() })
+    const resume = () => { if (Date.now() - lastReadAt.current > RESUME_GAP_MS) again() }
     window.addEventListener('focus', resume); window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume)
-    return () => { active.current = false; lifecycleVersion.current += 1; request.current?.abort(); interval(); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
-  }, [refresh])
+    return () => { onLive.cancel(); request.current?.abort(); interval(); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
+  }, [refresh, demanded])
 
   useEffect(() => {
     if (me.role !== 'staff') return
@@ -154,11 +188,13 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     } finally { if (active.current && lifecycle === lifecycleVersion.current) { busyRef.current = false; setBusy(false); setLoading(false) } }
   }
 
-  return <AttendanceContext.Provider value={{ own, loading, error, presenceError, busy, pendingKind, refreshedAt, revision, refresh, clock }}>{children}</AttendanceContext.Provider>
+  return <AttendanceContext.Provider value={{ own, loading, error, presenceError, busy, pendingKind, refreshedAt, revision, refresh, clock, register }}>{children}</AttendanceContext.Provider>
 }
 
 export function useAttendance() {
   const value = useContext(AttendanceContext)
+  const register = value?.register
+  useEffect(() => register?.(), [register])
   if (!value) throw new Error('Attendance must be inside the workspace provider')
   return value
 }

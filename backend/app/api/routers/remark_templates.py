@@ -21,6 +21,7 @@ from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AuditEntry, RemarkTemplate, Role, User
 from app.db.session import get_db
 from app.core.roles import is_admin_level
+from app.services.response_cache import cached, scope_of
 
 router = APIRouter(prefix="/api/remark-templates", tags=["remark-templates"])
 admin = require_admin_level()
@@ -81,11 +82,17 @@ def list_templates(all: bool = False, db: Session = Depends(get_db), user: User 
     query = select(RemarkTemplate).order_by(RemarkTemplate.sort_order, RemarkTemplate.created_at, RemarkTemplate.id)
     if not everything:
         query = query.where(RemarkTemplate.active.is_(True))
-    try:
-        return {"items": [_out(row) for row in db.scalars(query)]}
-    except ProgrammingError:   # the migration has not been run on this database yet
-        db.rollback()
-        raise HTTPException(503, NOT_INSTALLED)
+
+    def read() -> dict:
+        try:
+            return {"items": [_out(row) for row in db.scalars(query)]}
+        except ProgrammingError:   # the migration has not been run on this database yet
+            db.rollback()
+            raise HTTPException(503, NOT_INSTALLED)
+
+    # The same short list for everybody and rarely changed: kept for half a minute and dropped at once by any change to the templates
+    # (the "settings" change-feed topic, which every template write announces), so a recruiter's dropdown never waits on the database.
+    return cached(("remark-templates", scope_of(db), everything), ("settings",), 30, read)
 
 
 @router.post("", status_code=201)

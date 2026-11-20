@@ -63,7 +63,30 @@ def _rows(name: str, statement: Select, *ordering):
     return select(func.json_agg(record, type_=JSON)).scalar_subquery().label(name)
 
 
-def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = True, categories: bool = True) -> Select:
+# The document slots the desk snapshot reports on (data.DOCUMENT_SLOTS has the labels; a test keeps the two in step).
+DESK_DOCUMENT_SLOTS = ("resume", "passport", "aadhaar", "source_bundle", "photo", "education", "experience")
+
+
+def document_counts():
+    """(subquery, column): how many files each candidate holds per desk slot, as one JSON object per candidate ({"passport": 2}).
+
+    The compact snapshot carries this instead of every file's name, id, uploader and timestamps (about half of each
+    candidate's bytes): the screens that list candidates only need to know which slots hold a file, and the few that
+    show the files read one candidate's own profile when it opens. One grouped pass over the attachments, joined on.
+    """
+    per_slot = (
+        select(Attachment.entity_id.label("candidate_id"), Attachment.slot.label("slot"), func.count().label("n"))
+        .where(Attachment.entity_type == "candidate", Attachment.slot.in_(DESK_DOCUMENT_SLOTS))
+        .group_by(Attachment.entity_id, Attachment.slot).subquery("per_slot")
+    )
+    per_candidate = (
+        select(per_slot.c.candidate_id, func.jsonb_object_agg(per_slot.c.slot, per_slot.c.n).label("counts"))
+        .group_by(per_slot.c.candidate_id).subquery("per_candidate")
+    )
+    return per_candidate, func.coalesce(per_candidate.c.counts, cast(literal("{}"), JSONB)).label("document_counts")
+
+
+def snapshot_statement(user_id: str, *, compact: bool = False, slim: bool = False, settings: bool = True, categories: bool = True) -> Select:
     supervisor = select(User.role.in_(ADMIN_LEVEL_ROLES)).where(User.id == user_id).scalar_subquery()
     owned_candidates = select(Candidate.id).where(Candidate.owner_id == user_id)
     visible_tasks = or_(supervisor, Task.owner_id == user_id)
@@ -78,6 +101,11 @@ def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = 
             literal("").label("resume_text") if column.name == "resume_text" else column
             for column in candidate_fields.selected_columns
         ))
+    if slim:
+        # Slim: per-slot file counts replace every candidate's file list (see `document_counts`).
+        counted, counts_column = document_counts()
+        candidate_fields = candidate_fields.add_columns(counts_column).select_from(
+            Candidate.__table__.outerjoin(counted, counted.c.candidate_id == Candidate.id))
     # Placement summaries remain shared for Data Bank availability; another
     # recruiter's draft and detailed stage/task history do not cross the boundary.
     application_fields = application_fields.with_only_columns(*(
@@ -126,8 +154,10 @@ def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = 
             candidate_fields,
             ("created_at", True), ("id", False),
         ),
-        _rows("files", candidate_files, ("version", False)),
-        _rows("manual_documents", manual_documents_statement()),
+        # The slim desk carries per-slot counts on each candidate instead (above); the file lists, and the audit-log
+        # read for manual checklist marks, are for the full snapshot and the one-candidate profile.
+        *([] if slim else [_rows("files", candidate_files, ("version", False)),
+                              _rows("manual_documents", manual_documents_statement())]),
         _rows("agreements", agreements),
         _rows("applications", application_fields),
         _rows(
@@ -146,11 +176,11 @@ def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = 
     )
 
 
-def read_snapshot(db: Session, user_id: str, *, compact: bool = False) -> dict[str, list[dict] | dict | str | None]:
+def read_snapshot(db: Session, user_id: str, *, compact: bool = False, slim: bool = False) -> dict[str, list[dict] | dict | str | None]:
     use_settings = agency_settings.assume_present()
     use_categories = use_settings and agency_settings.assume_categories_present()
     try:
-        row = db.execute(snapshot_statement(user_id, compact=compact, settings=use_settings, categories=use_categories)).mappings().one()
+        row = db.execute(snapshot_statement(user_id, compact=compact, slim=slim, settings=use_settings, categories=use_categories)).mappings().one()
     except ProgrammingError as error:
         if not use_settings:
             raise
@@ -166,7 +196,7 @@ def read_snapshot(db: Session, user_id: str, *, compact: bool = False) -> dict[s
             use_categories = False
         else:
             raise
-        row = db.execute(snapshot_statement(user_id, compact=compact, settings=use_settings, categories=use_categories)).mappings().one()
+        row = db.execute(snapshot_statement(user_id, compact=compact, slim=slim, settings=use_settings, categories=use_categories)).mappings().one()
         if use_settings:
             agency_settings.mark_present(True)
     else:

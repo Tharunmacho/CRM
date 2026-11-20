@@ -35,47 +35,100 @@ def _who(user: User, staff: str | None):
     return supervisor, [user.id] if user.role == Role.staff else [], None
 
 
-def _read(db: Session, user: User, staff: str | None, counts_of, rows_of):
-    """Run the counts, the rows and (for supervisors) the roster in one round; returns (supervisor, selector, shown, roster, counts, rows)."""
-    supervisor, selector, everyone = _who(user, staff)
-    if supervisor:
-        counts, roster, fetched = daily_work.read_together(
-            db, lambda s: counts_of(s, everyone),
-            lambda s: list(s.execute(select(User.id, User.name, User.active).where(User.role == Role.staff, not_deleted_user()).order_by(User.name, User.id)).all()),
-            lambda s: rows_of(s, selector))
-        if staff not in (None, "all") and staff not in {r.id for r in roster}:
+def _roster(session):
+    return list(session.execute(select(User.id, User.name, User.active).where(User.role == Role.staff, not_deleted_user())
+                                .order_by(User.name, User.id)).all())
+
+
+def _shown(supervisor, staff, selector, roster) -> list:
+    """The recruiters the page covers; a supervisor naming one who does not exist gets a 404."""
+    if not supervisor:
+        return selector
+    if staff not in (None, "all"):
+        if staff not in {r.id for r in roster}:
             raise HTTPException(404, "Recruiter not found")
-        shown = [staff] if staff not in (None, "all") else [r.id for r in roster]
-        return supervisor, selector, shown, roster, counts, fetched
-    if not selector:
-        return supervisor, selector, [], [], {}, []
-    counts, fetched = daily_work.read_together(db, lambda s: counts_of(s, selector), lambda s: rows_of(s, selector))
-    return supervisor, selector, selector, [], counts, fetched
+        return [staff]
+    return [r.id for r in roster]
+
+
+def _run(db, named: dict) -> dict:
+    """Run these independent reads together (one round trip) and return their results by name."""
+    return dict(zip(named, daily_work.read_together(db, *named.values()))) if named else {}
 
 
 @router.get("/daily-work")
-def daily_work_today(staff: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def daily_work_today(staff: str | None = None, view: Literal["current", "declined", "rejected", "travelled", "all"] = "current",
+                     db: Session = Depends(get_db), user: User = Depends(current_user)):
     """
     Today's candidates. A recruiter gets their own candidates that still have prescreening to do (new, in process or needs review,
     with no application yet or one at stage 1; no daily cap, slots or deadlines): the ones still to work first, then "done today".
     Admin and MD get every recruiter's, or one recruiter's for `staff=<id>`, plus a per-recruiter count (to work, done today).
     A read only: nothing is allocated.
+
+    `view` (default `current`, exactly the list above) also reaches the candidates whose placement ended: `declined` (their own no),
+    `rejected` (any other negative closure), `travelled` (a deployed placement) and `all` (current plus those three). Every item carries
+    `outcome` {kind, label, reason, stage, at}; `viewCounts` {current, declined, rejected, travelled} counts each view for the same scope.
     """
     # Every open tab refetches when a task or candidate changes; tabs of the same person (or a second supervisor) share one build.
-    return cached(("daily-work", scope_of(db), user.id, user.role.value, staff), WORK_TOPICS, WORK_SECONDS, lambda: _daily_work(db, user, staff))
+    return cached(("daily-work", scope_of(db), user.id, user.role.value, staff, view), WORK_TOPICS, WORK_SECONDS, lambda: _daily_work(db, user, staff, view))
 
 
-def _daily_work(db: Session, user: User, staff: str | None) -> dict:
+def _daily_work(db: Session, user: User, staff: str | None, view: str = "current") -> dict:
     now = datetime.now(timezone.utc)
-    supervisor, selector, shown, roster, counts, fetched = _read(
-        db, user, staff, lambda s, owners: daily_work.owner_counts(s, owners, now=now), lambda s, owners: daily_work.fetch_rows(s, owners, now=now))
-    # Then the placements and open tasks behind the rows, side by side, and last the remarks.
-    items = daily_work.load_rows(db, selector, now=now, parallel=True, fetched=fetched) if fetched else []
+    supervisor, selector, _everyone = _who(user, staff)
+    kinds = daily_work.outcome_kinds(view)
+    current = view in ("current", "all")
+    wide = isinstance(selector, list)     # a recruiter, or one recruiter picked by a supervisor: everything in one round of reads
+    shown, roster, counts, rows, outcome_rows, counts_by_view = [], [], {}, [], [], {"declined": 0, "rejected": 0, "travelled": 0}
+    items: list[dict] = []
+    outcome_items: list[dict] = []
+    if supervisor or selector:
+        named: dict = {}
+        if not current:
+            named["counts"] = lambda s: daily_work.owner_counts(s, selector, now=now)
+        elif wide:
+            named.update(zip(("rows", "placed", "tasks", "facts", "remarks"), daily_work.wide_reads(selector, now=now)))
+        else:
+            named["rows"] = lambda s: daily_work.fetch_rows(s, selector, now=now)
+        if supervisor:
+            named["roster"] = _roster
+        named["views"] = lambda s: daily_work.view_counts(s, selector)
+        if kinds:
+            named["outcome"] = lambda s: daily_work.fetch_outcome_rows(s, selector, kinds)
+        got = _run(db, named)
+        roster = got.get("roster", [])
+        shown = _shown(supervisor, staff, selector, roster)
+        counts_by_view = got["views"]
+        rows = got.get("rows", [])
+        outcome_rows = got.get("outcome", [])
+        if current:
+            # The rows ARE the counts unless the row cap cut them off (then one grouped statement tells the exact numbers).
+            counts = daily_work.counts_from_rows(rows) if len(rows) < daily_work.MAX_ROWS else daily_work.owner_counts(db, selector, now=now)
+        else:
+            counts = got["counts"]
+        if view == "all":   # a candidate on today's list is listed once, as a current row
+            listed = {row[0].id for row in rows}
+            outcome_rows = [row for row in outcome_rows if row[0].id not in listed]
+        # What needs the rows' ids (everything the recruiter's own page already read in the first round): one more round, side by side.
+        later: dict = {}
+        if rows and not wide:
+            later.update(zip(("placed", "tasks", "facts", "remarks"), daily_work.placement_reads([row[0].id for row in rows], now=now)))
+        if outcome_rows:
+            later.update(zip(("outcome_remarks", "outcome_facts", "outcome_by"), daily_work.outcome_reads([row[1].id for row in outcome_rows])))
+        got.update(_run(db, later))
+        if rows:
+            items = daily_work.assemble_rows(rows, got["placed"], got["tasks"], got["facts"], got["remarks"], now=now)
+        if outcome_rows:
+            outcome_items = daily_work.assemble_outcome_rows(outcome_rows, got["outcome_remarks"], got["outcome_facts"], got["outcome_by"])
     summary = daily_work.summarise([counts.get(uid, (0, 0)) for uid in shown])
+    listed_outcomes = sum(counts_by_view[kind] for kind in kinds)
     result = {
         "agencyDate": daily_work.agency_today(now).isoformat(), "serverTime": now,
-        "staffCount": len(shown), "summary": summary, "items": items,
-        "truncated": len(items) < summary["total"] and len(items) >= daily_work.MAX_ROWS,
+        "staffCount": len(shown), "summary": summary, "view": view,
+        "viewCounts": {"current": summary["total"], **counts_by_view},
+        "items": items + outcome_items,
+        "truncated": (current and len(items) < summary["total"] and len(items) >= daily_work.MAX_ROWS)
+                     or (len(outcome_rows) >= daily_work.MAX_OUTCOME_ROWS and listed_outcomes > len(outcome_rows)),
     }
     if supervisor:
         result["staff"] = [{"userId": r.id, "name": r.name, "active": r.active, "summary": daily_work.summarise([counts.get(r.id, (0, 0))])}
@@ -95,9 +148,26 @@ def follow_up(staff: str | None = None, db: Session = Depends(get_db), user: Use
 
 def _follow_up(db: Session, user: User, staff: str | None) -> dict:
     now = datetime.now(timezone.utc)
-    supervisor, selector, shown, roster, counts, fetched = _read(
-        db, user, staff, lambda s, owners: daily_work.follow_up_counts(s, owners), lambda s, owners: daily_work.fetch_follow_up(s, owners))
-    items = daily_work.load_follow_up(db, selector, now=now, fetched=fetched, parallel=True) if fetched else []
+    supervisor, selector, _everyone = _who(user, staff)
+    wide = isinstance(selector, list)
+    shown, roster, counts, items = [], [], {}, []
+    if supervisor or selector:
+        named: dict = {}
+        if wide:
+            named.update(zip(("rows", "remarks", "tasks", "facts"), daily_work.follow_up_wide_reads(selector, now=now)))
+        else:
+            named["rows"] = lambda s: daily_work.fetch_follow_up(s, selector)
+        if supervisor:
+            named["roster"] = _roster
+        got = _run(db, named)
+        roster = got.get("roster", [])
+        shown = _shown(supervisor, staff, selector, roster)
+        rows = got["rows"]
+        counts = daily_work.follow_up_counts_from_rows(rows) if len(rows) < daily_work.MAX_ROWS else daily_work.follow_up_counts(db, selector)
+        if rows and not wide:
+            got.update(zip(("remarks", "tasks", "facts"), daily_work.read_together(db, *daily_work.follow_up_reads([app.id for app, *_ in rows], sorted({cand.id for _, cand, *_ in rows}), now=now))))
+        if rows:
+            items = daily_work.assemble_follow_up(rows, got["remarks"], got["tasks"], got["facts"], now=now)
     total = sum(counts.get(uid, 0) for uid in shown)
     result = {"serverTime": now, "staffCount": len(shown), "summary": {"total": total}, "items": items,
               "truncated": len(items) < total and len(items) >= daily_work.MAX_ROWS}
@@ -108,15 +178,17 @@ def _follow_up(db: Session, user: User, staff: str | None) -> dict:
 
 
 @router.get("/daily-work/export")
-def tasks_export_file(format: Literal["xlsx"] = "xlsx", staff: str | None = None, db: Session = Depends(get_db),
-                      user: User = Depends(current_user)):
+def tasks_export_file(format: Literal["xlsx"] = "xlsx", staff: str | None = None,
+                      view: Literal["current", "declined", "rejected", "travelled", "all"] = "current",
+                      db: Session = Depends(get_db), user: User = Depends(current_user)):
     """
     The Tasks table as an Excel file (`tasks-<agency day>.xlsx`, sheet "Tasks"): S.No, DOC, Recruiter, Job, Client, Country, Candidate,
-    Care ID, Agency, Advance, Stage, Today, Remark; one row per candidate in the order the screen lists them. `staff=<userId|all>` and
-    the permissions are those of `GET /api/daily-work`: admin and MD any recruiter or all, a recruiter only themself.
+    Care ID, Agency, Advance, Stage, Today, Remark, Notes; one row per candidate in the order the screen lists them. `staff=<userId|all>` and
+    the permissions are those of `GET /api/daily-work`: admin and MD any recruiter or all, a recruiter only themself. `view` is the
+    page's view: the candidates whose placement ended read "Declined at 5 · Offer letter" in the Stage column.
     """
-    daily = daily_work_today(staff, db, user)
-    follow = follow_up(staff, db, user)
+    daily = daily_work_today(staff=staff, view=view, db=db, user=user)
+    follow = follow_up(staff=staff, db=db, user=user) if view in ("current", "all") else {"items": []}
     rows = tasks_export.table(db, daily["items"], follow["items"], daily["agencyDate"])
     return Response(tasks_export.xlsx_bytes(rows), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={
         "Content-Disposition": f'attachment; filename="tasks-{daily["agencyDate"]}.xlsx"', "Cache-Control": "private, no-store"})

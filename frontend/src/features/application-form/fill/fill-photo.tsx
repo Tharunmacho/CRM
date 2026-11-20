@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Camera, Loader2 } from 'lucide-react'
+import { Camera, Loader2, UserRound } from 'lucide-react'
 import { fileHref } from '@/shared/api/client'
 import { documentFileError } from '@/shared/lib/document-files'
 import type { DocumentKind, FormDocument } from '../types'
@@ -25,7 +25,8 @@ export function PhotoTile({ photo, canWork, busy, upload }: { photo: FormDocumen
     <div className="aff-photo" data-field="documents.photo">
       {/* With a photo the picture is the button too: clicking the frame opens the same file picker as Replace photo. */}
       <button type="button" className="aff-photo-frame" data-has-photo={photo ? 'true' : 'false'} disabled={!canWork || working} tabIndex={-1} aria-hidden="true" onClick={() => input.current?.click()}>
-        {photo?.url ? <img src={fileHref(photo.url)} alt="" /> : <><Camera aria-hidden="true" /><span>Photo</span></>}
+        {photo?.url ? <img src={fileHref(photo.url)} alt="" /> : <UserRound className="aff-photo-empty" aria-hidden="true" />}
+        {canWork && <span className="aff-photo-cam" aria-hidden="true"><Camera /></span>}
         {working && <span className="aff-photo-busy"><Loader2 aria-hidden="true" />Uploading…</span>}
       </button>
       {photo?.url && <span className="sr-only">Candidate photo uploaded</span>}

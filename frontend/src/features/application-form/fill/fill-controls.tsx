@@ -1,5 +1,5 @@
 import { useCallback, useId, useMemo, type CSSProperties, type ReactElement, type ReactNode, cloneElement, isValidElement } from 'react'
-import { Sparkles } from 'lucide-react'
+import { AlertCircle, Sparkles } from 'lucide-react'
 import '@/styles/application-form-fill.css'
 import { cn } from '@/shared/lib/cn'
 import { DatePicker } from '@/shared/ui/date-picker'
@@ -38,14 +38,22 @@ export function useFillEnv(ctx: FormContext): FillEnv {
   return { form, draft, saved, errors, updated, write, writeMany }
 }
 
-/** "From passport" / "From resume": a value a document filled in and nobody has changed since. */
+/**
+ * "From passport" / "From resume": a value a document filled in and nobody has changed since. A small quiet icon at the end of the
+ * label row; the words are its tooltip and its spoken name, so a label is never crowded by a wide chip.
+ */
 export function SourceBadge({ kind }: { kind: SourceChip }) {
+  const text = `${SOURCE_CHIP_TEXT[kind]}. Check it before you save.`
   return (
-    <span className="aff-from" title={`${SOURCE_CHIP_TEXT[kind]}. Check it before you save.`}>
+    <span className="aff-from" role="img" aria-label={text} title={text}>
       <Sparkles aria-hidden="true" />
-      <span className="aff-from-text">{SOURCE_CHIP_TEXT[kind]}</span>
     </span>
   )
+}
+
+/** The error under a field: a red icon and the sentence, announced when it appears. */
+export function FieldError({ id, children }: { id?: string; children: ReactNode }) {
+  return <p id={id} className="aff-note is-error" role="alert"><AlertCircle aria-hidden="true" /><span>{children}</span></p>
 }
 
 const todayKey = () => new Date().toISOString().slice(0, 10)
@@ -112,8 +120,14 @@ export function FillFieldView({ env, field, canWork, aux, hint, disabled, onWrit
     )
   }
 
-  const notes = error ? <p className="aff-note is-error" role="alert">{error}</p> : shownHint ? <p className="aff-note">{shownHint}</p> : null
-  const invalid = error ? { 'aria-invalid': true as const } : {}
+  const noteId = `${id}-note`
+  const notes = error ? <FieldError id={noteId}>{error}</FieldError> : shownHint ? <p id={noteId} className="aff-note">{shownHint}</p> : null
+  // The control says it is invalid and required, and points at the sentence under it.
+  const invalid = {
+    ...(error ? { 'aria-invalid': true as const } : {}),
+    ...(field.required ? { 'aria-required': true as const } : {}),
+    ...(notes ? { 'aria-describedby': noteId } : {}),
+  }
 
   // The languages box carries its own label row, so the wrapper only adds the data-field hook and the notes.
   if (field.control === 'languages') {

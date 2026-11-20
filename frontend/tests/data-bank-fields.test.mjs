@@ -154,6 +154,14 @@ test('documents on file use the shared labels in the shared order, folding the o
   assert.deepEqual(documentsOnFile([]), [])
 })
 
+test('the compact workspace lists a slot that holds a file without its versions: it still counts as on file', () => {
+  assert.deepEqual(documentsOnFile([
+    { key: 'passport', versions: [], fileUploaded: true },
+    { key: 'resume', versions: [], fileUploaded: false },
+    { key: 'photo', fileUploaded: true },
+  ]), ['Passport', 'Photo'])
+})
+
 test('the documents column writes the shared labels', () => {
   const held = { ...candidate, documents: [{ key: 'photo', label: 'Photograph', versions: [{}] }, { key: 'passport', label: 'Passport copy', versions: [{}] }] }
   const rows = Object.fromEntries(fields.bankFieldRows(held, context).map((row) => [row.key, row]))

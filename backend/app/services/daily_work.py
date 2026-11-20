@@ -56,7 +56,7 @@ from app.services.advance_text import advance_status
 from app.services.agency_display import agency_display_expression
 from app.services.parallel_reads import _SLOTS
 from app.db.models import (
-    Application, ApplicationStage, ApplicationStatus, Candidate, CandidateStatus, Client, ClosureReason, Company, DailyGoal, Designation,
+    Application, ApplicationStage, ApplicationStatus, AuditEntry, Candidate, CandidateStatus, Client, ClosureReason, Company, DailyGoal, Designation,
     Order, Remark, Source, Task, TaskKind, User,
 )
 from app.domain.stages import ADVANCE_STAGE, TOTAL_STAGES, VISA_STAGE, stage_by_no
@@ -243,24 +243,40 @@ def fetch_rows(db, owner_ids, *, now: datetime | None = None, tz=None) -> list:
         .limit(MAX_ROWS)).all()
 
 
-def _task_updates(db, candidate_ids, summary_key, summary_ids, *, now, tz=None):
-    """Latest remark/count for the editable cell, plus every note from this agency day, including finished tasks."""
+def _remark_query(*where):
+    """Remarks (newest first) as (body, author name, time, task id, remark id, candidate id, application id) rows. The author's name rides
+    along in the same statement (no separate read of the whole user table)."""
+    return (select(Remark.body, User.name, Remark.created_at, Remark.task_id, Remark.id, Task.candidate_id, Task.application_id)
+            .select_from(Remark).join(Task, Task.id == Remark.task_id)
+            .outerjoin(User, User.id == Remark.author_id).where(*where).order_by(Remark.created_at.desc(), Remark.id))
+
+
+def _written_today(now: datetime, tz=None):
+    """SQL condition: the remark was written on the agency day of `now`."""
     start, end = day_bounds(agency_today(now, tz), tz)
-    recent = and_(Remark.created_at >= start, Remark.created_at < end)
-    query = (select(summary_key, Task.candidate_id, Task.application_id, Remark.id, Remark.body, User.name, Remark.created_at)
-             .select_from(Remark).join(Task, Task.id == Remark.task_id).outerjoin(User, User.id == Remark.author_id)
-             .where(Task.candidate_id.in_(candidate_ids), or_(summary_key.in_(summary_ids), recent))
-             .order_by(Remark.created_at.desc(), Remark.id))
-    latest = {}
-    daily = defaultdict(list)
-    for key, candidate_id, app_id, note_id, body, name, at in db.execute(query):
-        author = name or "Unknown"
-        if key in summary_ids:
-            summary = latest.setdefault(key, {"body": body, "at": at, "by": author, "count": 0})
-            summary["count"] += 1
+    return and_(Remark.created_at >= start, Remark.created_at < end)
+
+
+def _remark_summary(remark_rows, *, by_application: bool = False) -> dict[str, dict]:
+    """{task id (or application id): newest remark, its author's name and how many there are} from `_remark_query` rows, newest first."""
+    result: dict[str, dict] = {}
+    for body, name, at, task_id, _note_id, _candidate_id, application_id in remark_rows:
+        key = application_id if by_application else task_id
+        if key is None:
+            continue
+        entry = result.setdefault(key, {"body": body, "at": at, "by": name or "Unknown", "count": 0})
+        entry["count"] += 1
+    return result
+
+
+def _daily_notes(remark_rows, *, now: datetime, tz=None) -> dict[str, list]:
+    """{candidate id: [(application id, note)]}: every note written on this agency day (finished tasks included), newest first."""
+    start, end = day_bounds(agency_today(now, tz), tz)
+    daily: dict[str, list] = defaultdict(list)
+    for body, name, at, _task_id, note_id, candidate_id, application_id in remark_rows:
         if start <= at < end:
-            daily[candidate_id].append((app_id, {"id": note_id, "body": body, "at": at, "by": author}))
-    return latest, daily
+            daily[candidate_id].append((application_id, {"id": note_id, "body": body, "at": at, "by": name or "Unknown"}))
+    return daily
 
 
 def _row_notes(daily, candidate_id, app_id):
@@ -315,7 +331,9 @@ def placement_fields(order, company, client, designation, cand) -> dict:
 
 @lru_cache(maxsize=8)
 def _autocommit(engine):
-    return engine.execution_options(isolation_level="AUTOCOMMIT")
+    # A GET's session is bound to an engine that already carries options (`read_engine`); SQLAlchemy cannot layer an isolation level on
+    # such an option engine, which made every caller fall back to running its reads one after another. Start from the plain engine.
+    return getattr(engine, "_proxied", engine).execution_options(isolation_level="AUTOCOMMIT")
 
 
 def read_together(db, *reads):
@@ -443,32 +461,35 @@ def payment_fields(app, facts: dict[str, dict]) -> dict:
             "serviceChargeTotal": fact["total"] if fact else None}
 
 
-def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: bool = False, fetched: list | None = None) -> list[dict]:
-    """The screen's rows for these recruiters (ids, or a select of ids), in list order: to work first, then done today.
+OPEN_WORK_KINDS = [TaskKind.stage, TaskKind.remedical, TaskKind.initial_call]
 
-    `parallel=True` runs the two lookups that depend only on the rows (active placements, open tasks) side by side; use
-    it only when the caller has nothing uncommitted (they run on their own connections). `fetched` is the result of
-    `fetch_rows` when the caller already ran it."""
-    now = now or datetime.now(timezone.utc)
-    rows = fetch_rows(db, owner_ids, now=now, tz=tz) if fetched is None else fetched
-    if not rows:
-        return []
-    ids = [row[0].id for row in rows]
+
+def placement_reads(candidate_ids, *, now: datetime, tz=None) -> tuple:
+    """The four lookups behind the rows of today's list, for these candidates (their ids, or a select of ids): active placements,
+    open tasks, advance / review facts and the remarks written on those open tasks or on this agency day (the row's notes).
+    None depends on another."""
     # Active placements only: a listed candidate has no declined placement to show (they are parked, see `_parked`).
     app_query = (select(Application, Order, Company, Client, Designation)
                  .join(Order, Order.id == Application.order_id).join(Company, Company.id == Order.company_id)
                  .join(Client, Client.id == Company.client_id).join(Designation, Designation.id == Order.designation_id)
-                 .where(Application.candidate_id.in_(ids), Application.status == ApplicationStatus.active)
+                 .where(Application.candidate_id.in_(candidate_ids), Application.status == ApplicationStatus.active)
                  .order_by(Application.created_at.desc(), Application.id))
     # Remarks live on tasks: the open stage task of the placement, else the candidate's open initial-call task.
-    task_query = (select(Task.candidate_id, Task.application_id, Task.id, Task.kind).where(
-        Task.candidate_id.in_(ids), Task.kind.in_([TaskKind.stage, TaskKind.remedical, TaskKind.initial_call]),
-        Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.created_at, Task.id))
-    # Advance and Google review of the candidates' active placements: one more statement, run beside the other two.
-    fact_query = stage_facts_query(Application.id == ApplicationStage.application_id, Application.candidate_id.in_(ids),
+    open_tasks = (Task.candidate_id.in_(candidate_ids), Task.kind.in_(OPEN_WORK_KINDS), Task.completed_at.is_(None), Task.cancelled_at.is_(None))
+    task_query = select(Task.candidate_id, Task.application_id, Task.id, Task.kind).where(*open_tasks).order_by(Task.created_at, Task.id)
+    # Advance and Google review of the candidates' active placements.
+    fact_query = stage_facts_query(Application.id == ApplicationStage.application_id, Application.candidate_id.in_(candidate_ids),
                                    Application.status == ApplicationStatus.active)
-    lookups = (lambda s: s.execute(app_query).all(), lambda s: s.execute(task_query).all(), lambda s: s.execute(fact_query).all())
-    placed, task_rows, fact_rows = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
+    # The remarks of every open task of these candidates (each row then picks its own task's) plus every note written today, finished
+    # tasks included: no wait for the task ids.
+    remark_query = _remark_query(Task.candidate_id.in_(candidate_ids), or_(and_(*open_tasks[1:]), _written_today(now, tz)))
+    return (lambda s: s.execute(app_query).all(), lambda s: s.execute(task_query).all(), lambda s: s.execute(fact_query).all(),
+            lambda s: s.execute(remark_query).all())
+
+
+def assemble_rows(rows, placed, task_rows, fact_rows, remark_rows, *, now: datetime | None = None, tz=None) -> list[dict]:
+    """The screen's rows from `fetch_rows` rows and the results of `placement_reads`."""
+    now = now or datetime.now(timezone.utc)
     facts = stage_facts(fact_rows)
     apps: dict[str, list] = defaultdict(list)
     for placement in placed:
@@ -488,7 +509,8 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
         placement = next((p for p in mine if p[0].id in stage_tasks), mine[0] if mine else None)
         chosen[cand.id] = placement
         remark_tasks[cand.id] = (stage_tasks.get(placement[0].id) if placement else None) or call_tasks.get(cand.id)
-    remarks, daily_notes = _task_updates(db, ids, Task.id, {t for t in remark_tasks.values() if t}, now=now, tz=tz)
+    remarks = _remark_summary(remark_rows)
+    daily_notes = _daily_notes(remark_rows, now=now, tz=tz)
     out = []
     for cand, waiting, finished, agency, moved in rows:
         placement = chosen[cand.id]
@@ -510,6 +532,178 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
             "referral": {"source": cand.source.value, "label": SOURCE_LABELS.get(cand.source.value, "Other"),
                          "detail": cand.source_detail if cand.source == Source.referral else None},
             "remark": remark, "todayNotes": _row_notes(daily_notes, cand.id, app.id if app else None),
+            "outcome": current_outcome(),
+        })
+    return out
+
+
+def counts_from_rows(rows) -> dict[str, tuple[int, int]]:
+    """`owner_counts` from the fetched rows, exact while the rows are not cut off by MAX_ROWS."""
+    counts: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for cand, _waiting, finished, *_rest in rows:
+        counts[cand.owner_id][0 if finished is None else 1] += 1
+    return {owner: (todo, done) for owner, (todo, done) in counts.items()}
+
+
+def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: bool = False, fetched: list | None = None) -> list[dict]:
+    """The screen's rows for these recruiters (ids, or a select of ids), in list order: to work first, then done today.
+
+    `parallel=True` runs the lookups that depend only on the rows (active placements, open tasks, facts, remarks) side by side; use
+    it only when the caller has nothing uncommitted (they run on their own connections). `fetched` is the result of
+    `fetch_rows` when the caller already ran it."""
+    now = now or datetime.now(timezone.utc)
+    rows = fetch_rows(db, owner_ids, now=now, tz=tz) if fetched is None else fetched
+    if not rows:
+        return []
+    lookups = placement_reads([row[0].id for row in rows], now=now, tz=tz)
+    results = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
+    return assemble_rows(rows, *results, now=now, tz=tz)
+
+
+def wide_reads(owner_ids: list[str], *, now: datetime, tz=None) -> tuple:
+    """Everything today's list needs for these recruiters (a short list of ids) as ONE set of independent reads: the rows, then the four
+    lookups of `placement_reads` taken for all of the recruiters' workable candidates instead of only the listed ones. Nothing waits for
+    the rows, so the whole list is one round trip. Results: (rows, placed, task rows, fact rows, remark rows)."""
+    candidates = select(Candidate.id).where(Candidate.owner_id.in_(owner_ids), Candidate.status.in_(WORKABLE))
+    return (lambda s: fetch_rows(s, owner_ids, now=now, tz=tz), *placement_reads(candidates, now=now, tz=tz))
+
+
+# ------------------------------------------------------------------------------------------------ outcomes (the other views)
+
+# The Tasks page can also show the candidates whose placement ended: `view=declined|rejected|travelled|all` on `/api/daily-work`.
+# A candidate's outcome comes from ONE placement, the "subject": their latest deployed placement when they have one (Travelled, the
+# same definition as the Travelled report: the application is deployed), else their last placement when it is closed and nothing
+# is active. `unmapped` and `changed_job` closures are no outcome (the candidate was only moved off a job). Declined is the
+# candidate's own no (`DECLINE_CLOSURES`) unless a "yes" call recorded after the closure brought them back to today's list (the same
+# rule as `_parked`); Rejected is every other negative closure. A candidate on today's list who was rejected (back in the pool as
+# New) is on the Rejected view as well: `all` lists such a candidate once, as a current row.
+VIEWS = ("current", "declined", "rejected", "travelled", "all")
+NOT_OUTCOMES = (ClosureReason.unmapped, ClosureReason.changed_job)
+MAX_OUTCOME_ROWS = 500   # the newest closures of one non-current list; the counts are exact whatever the cap
+OUTCOME_LABELS = {"declined": "Declined", "rejected": "Rejected", "travelled": "Travelled"}
+
+
+def current_outcome() -> dict:
+    """The `outcome` of a row on today's list or on Follow-up (a fresh dict each time: rows are mutated by callers)."""
+    return {"kind": "current", "label": None, "reason": None, "stage": None, "at": None, "by": None}
+
+
+# One plain sentence per closure reason, so nobody has to guess why a candidate shows Declined / Rejected. `{stage}` is the stage it ended at.
+REASON_TEXT = {
+    "stage_declined": "Declined by the candidate at stage {stage}", "offer_declined": "Offer declined by the candidate",
+    "not_interested": "Candidate not interested", "not_travelling": "Not travelling",
+    "stage_rejected": "Rejected at stage {stage}", "prescreen_failed": "Failed prescreening",
+    "resume_not_received": "Resume not received", "interview_rejected": "Rejected at the interview",
+    "interview_not_possible": "Interview not possible", "medical_unfit": "Medical unfit", "pcc_not_cleared": "PCC not cleared",
+    "passport_not_available": "Passport not available", "advance_not_paid": "Advance not paid", "visa_rejected": "Visa rejected",
+    "visa_stamping_refused": "Visa stamping refused", "offer_not_received": "Offer letter not received",
+}
+
+
+def reason_text(reason, stage) -> str | None:
+    if reason is None:
+        return None
+    key = getattr(reason, "value", reason)
+    return REASON_TEXT.get(key, key.replace("_", " ").capitalize()).format(stage=stage if stage else "?")
+
+
+def outcome_of(app, by: str | None = None) -> dict:
+    """The `outcome` of a closed or deployed placement: kind, label, a plain sentence for the reason (None for Travelled), the stage it
+    ended at, when it closed and `by`, the name of whoever recorded it (the last audit entry of the placement; None when unknown)."""
+    if app.status == ApplicationStatus.deployed:
+        kind, reason = "travelled", None
+    else:
+        kind = "declined" if app.closure_reason in DECLINE_CLOSURES else "rejected"
+        reason = reason_text(app.closure_reason, app.current_stage)
+    # A closed placement is not edited again, so `updated_at` is the time it closed (the same reading as `_parked`).
+    return {"kind": kind, "label": OUTCOME_LABELS[kind], "reason": reason, "stage": app.current_stage, "at": app.updated_at, "by": by}
+
+
+def _subject_placement():
+    """Id of the placement an outcome is read from: the candidate's latest deployed one, else their last one."""
+    deployed = aliased(Application)
+    latest_deployed = (select(deployed.id).where(deployed.candidate_id == Candidate.id, deployed.status == ApplicationStatus.deployed)
+                       .order_by(deployed.created_at.desc(), deployed.id.desc()).limit(1).correlate(Candidate).scalar_subquery())
+    return func.coalesce(latest_deployed, _last_application())
+
+
+def _outcome_conditions() -> dict:
+    """SQL conditions per outcome kind, over `Candidate` joined to `Application` = the subject placement."""
+    active = aliased(Application)
+    nothing_active = ~exists().where(active.candidate_id == Candidate.id, active.status == ApplicationStatus.active).correlate(Candidate)
+    called_yes_since = and_(Candidate.call_recorded_at.is_not(None), Candidate.call_interested == "yes",
+                            Candidate.call_recorded_at > Application.updated_at)
+    return {
+        "declined": and_(Application.status == ApplicationStatus.closed, Application.closure_reason.in_(DECLINE_CLOSURES),
+                         ~func.coalesce(called_yes_since, false()), nothing_active),
+        "rejected": and_(Application.status == ApplicationStatus.closed, Application.closure_reason.is_not(None),
+                         Application.closure_reason.notin_(DECLINE_CLOSURES + NOT_OUTCOMES), nothing_active),
+        "travelled": Application.status == ApplicationStatus.deployed,
+    }
+
+
+def outcome_kinds(view: str) -> tuple[str, ...]:
+    """The outcome kinds a view lists besides today's rows."""
+    return ("declined", "rejected", "travelled") if view == "all" else (view,) if view in OUTCOME_LABELS else ()
+
+
+def view_counts(db, owner_ids) -> dict[str, int]:
+    """{declined, rejected, travelled}: candidates of these recruiters (ids, or a select of ids) per outcome. One grouped statement."""
+    found = _outcome_conditions()
+    declined, rejected, travelled = db.execute(
+        select(*(func.count().filter(found[kind]) for kind in ("declined", "rejected", "travelled")))
+        .select_from(Candidate).join(Application, Application.id == _subject_placement()).where(Candidate.owner_id.in_(owner_ids))).one()
+    return {"declined": int(declined), "rejected": int(rejected), "travelled": int(travelled)}
+
+
+def fetch_outcome_rows(db, owner_ids, kinds, *, limit: int | None = None) -> list:
+    """(candidate, placement, order, company, client, designation, agency) of the candidates with one of these outcomes, newest closure first.
+    One statement."""
+    found = _outcome_conditions()
+    return db.execute(
+        select(Candidate, Application, Order, Company, Client, Designation, agency_display_expression().label("agency"))
+        .select_from(Candidate).join(Application, Application.id == _subject_placement())
+        .join(Order, Order.id == Application.order_id).join(Company, Company.id == Order.company_id)
+        .join(Client, Client.id == Company.client_id).join(Designation, Designation.id == Order.designation_id)
+        .where(Candidate.owner_id.in_(owner_ids), or_(*(found[kind] for kind in kinds)))
+        .order_by(Application.updated_at.desc(), Application.id).limit(limit or MAX_OUTCOME_ROWS)).all()
+
+
+def outcome_reads(app_ids) -> tuple:
+    """The lookups behind outcome rows, for these placements: the newest remark written on any of their tasks, the advance / review facts and
+    who made the last change to each placement (the closure), all in the same round."""
+    remark_query = (select(Task.application_id, Remark.body, User.name, Remark.created_at).select_from(Remark)
+                    .join(Task, Task.id == Remark.task_id).outerjoin(User, User.id == Remark.author_id)
+                    .where(Task.application_id.in_(app_ids)).order_by(Remark.created_at.desc(), Remark.id))
+    closed_by = (select(AuditEntry.entity_id, User.name).select_from(AuditEntry).outerjoin(User, User.id == AuditEntry.actor_id)
+                 .where(AuditEntry.entity_type == "application", AuditEntry.entity_id.in_(app_ids))
+                 .distinct(AuditEntry.entity_id).order_by(AuditEntry.entity_id, AuditEntry.at.desc()))
+    return (lambda s: s.execute(remark_query).all(), lambda s: s.execute(stage_facts_query(ApplicationStage.application_id.in_(app_ids))).all(),
+            lambda s: dict(s.execute(closed_by).all()))
+
+
+def assemble_outcome_rows(rows, remark_rows, fact_rows, closed_by: dict | None = None) -> list[dict]:
+    """The screen's rows for candidates whose placement ended, from `fetch_outcome_rows` rows and `outcome_reads`. Same keys as a row of
+    today's list; `taskId` is null (nothing to work on), `status` is "closed", `stage` is the stage where the placement ended."""
+    latest: dict[str, dict] = {}
+    for application_id, body, name, at in remark_rows:
+        entry = latest.setdefault(application_id, {"body": body, "at": at, "by": name or "Unknown", "count": 0})
+        entry["count"] += 1
+    facts = stage_facts(fact_rows)
+    out = []
+    for cand, app, order, company, client, designation, agency in rows:
+        stage_no = app.current_stage
+        out.append({
+            "id": cand.id, "kind": "stage", "taskId": None, "applicationId": app.id, "candidateId": cand.id, "ownerId": cand.owner_id,
+            "commencementDate": app.commencement_date.isoformat() if app.commencement_date else None,
+            "stage": stage_no, "stageTitle": stage_by_no(stage_no).title if stage_no and 1 <= stage_no <= TOTAL_STAGES else None,
+            "waiting": False, "status": "closed", "completedAt": None,
+            **placement_fields(order, company, client, designation, cand),
+            "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "agency": agency or None,
+            "orderRef": order.ref, **payment_fields(app, facts),
+            "referral": {"source": cand.source.value, "label": SOURCE_LABELS.get(cand.source.value, "Other"),
+                         "detail": cand.source_detail if cand.source == Source.referral else None},
+            "remark": latest.get(app.id), "outcome": outcome_of(app, (closed_by or {}).get(app.id)),
         })
     return out
 
@@ -551,21 +745,23 @@ def fetch_follow_up(db, owner_ids) -> list:
         .where(*_follow_up_filter(owner_ids)).order_by(last.asc(), Application.id).limit(MAX_ROWS)).all()
 
 
-def load_follow_up(db, owner_ids, *, now: datetime | None = None, fetched: list | None = None, parallel: bool = False) -> list[dict]:
-    """The Follow-up screen's rows, oldest last update first. `fetched` is the result of `fetch_follow_up` when already read.
-    `parallel=True` runs the three lookups side by side (see `load_rows`)."""
-    rows = fetch_follow_up(db, owner_ids) if fetched is None else fetched
-    if not rows:
-        return []
-    app_ids = {app.id for app, *_ in rows}
-    candidate_ids = {cand.id for _, cand, *_ in rows}
-    now = now or datetime.now(timezone.utc)
+def follow_up_reads(app_ids, candidate_ids, *, now: datetime, tz=None) -> tuple:
+    """The three lookups behind the rows of Follow-up, for these placements and their candidates (ids, or selects of ids): the remarks
+    written on any of the placement's tasks (the newest shows, and every note written on this agency day, whatever the candidate's task),
+    the open stage task a new remark goes on, and the advance / review facts."""
+    remark_query = _remark_query(or_(Task.application_id.in_(app_ids), and_(Task.candidate_id.in_(candidate_ids), _written_today(now, tz))))
     task_query = (select(Task.application_id, Task.id).where(
         Task.application_id.in_(app_ids), Task.kind.in_([TaskKind.stage, TaskKind.remedical]),
         Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.created_at, Task.id))
-    lookups = (lambda s: _task_updates(s, candidate_ids, Task.application_id, app_ids, now=now), lambda s: s.execute(task_query).all(),
-               lambda s: s.execute(stage_facts_query(ApplicationStage.application_id.in_(app_ids))).all())
-    (latest, daily_notes), task_rows, fact_rows = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
+    return (lambda s: s.execute(remark_query).all(), lambda s: s.execute(task_query).all(),
+            lambda s: s.execute(stage_facts_query(ApplicationStage.application_id.in_(app_ids))).all())
+
+
+def assemble_follow_up(rows, remark_rows, task_rows, fact_rows, *, now: datetime | None = None, tz=None) -> list[dict]:
+    """The Follow-up screen's rows from `fetch_follow_up` rows and the results of `follow_up_reads`."""
+    now = now or datetime.now(timezone.utc)
+    latest = _remark_summary(remark_rows, by_application=True)
+    daily_notes = _daily_notes(remark_rows, now=now, tz=tz)
     open_task: dict[str, str] = {}
     for application_id, task_id in task_rows:
         open_task.setdefault(application_id, task_id)
@@ -580,8 +776,37 @@ def load_follow_up(db, owner_ids, *, now: datetime | None = None, fetched: list 
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "agency": agency or None, "orderRef": order.ref,
             **payment_fields(app, facts), "remark": latest.get(app.id), "todayNotes": _row_notes(daily_notes, cand.id, app.id),
+            "outcome": current_outcome(),
         })
     return out
+
+
+def follow_up_counts_from_rows(rows) -> dict[str, int]:
+    """`follow_up_counts` from the fetched rows (candidates counted once however many placements), exact while MAX_ROWS did not cut them off."""
+    seen: dict[str, set] = defaultdict(set)
+    for _app, cand, *_rest in rows:
+        seen[cand.owner_id].add(cand.id)
+    return {owner: len(ids) for owner, ids in seen.items()}
+
+
+def load_follow_up(db, owner_ids, *, now: datetime | None = None, tz=None, fetched: list | None = None, parallel: bool = False) -> list[dict]:
+    """The Follow-up screen's rows, oldest last update first. `fetched` is the result of `fetch_follow_up` when already read.
+    `parallel=True` runs the three lookups side by side (see `load_rows`)."""
+    rows = fetch_follow_up(db, owner_ids) if fetched is None else fetched
+    if not rows:
+        return []
+    now = now or datetime.now(timezone.utc)
+    lookups = follow_up_reads([app.id for app, *_ in rows], sorted({cand.id for _, cand, *_ in rows}), now=now, tz=tz)
+    results = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
+    return assemble_follow_up(rows, *results, now=now, tz=tz)
+
+
+def follow_up_wide_reads(owner_ids: list[str], *, now: datetime, tz=None) -> tuple:
+    """Everything Follow-up needs for these recruiters (a short list of ids) as one set of independent reads: the rows, then the three
+    lookups of `follow_up_reads` taken for every placement that qualifies (not only the listed ones). One round trip in all.
+    Results: (rows, remark rows, task rows, fact rows)."""
+    placed = select(Application.id, Application.candidate_id).join(Candidate, Candidate.id == Application.candidate_id).where(*_follow_up_filter(owner_ids)).subquery("placed")
+    return (lambda s: fetch_follow_up(s, owner_ids), *follow_up_reads(select(placed.c.id), select(placed.c.candidate_id), now=now, tz=tz))
 
 
 # ------------------------------------------------------------------------------------------------ worker

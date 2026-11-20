@@ -745,3 +745,16 @@ test('with several applications the Job list holds them: running ones first, the
   assert.ok(!/Job shown|af-toolbar/.test(screen))
   assert.ok(screen.includes('onSwitchApplication='))
 })
+
+test('the Client and Job pickers are locked only while an active placement is past prescreening (the server refuses a job change after stage 1)', () => {
+  assert.equal(model.pickersLocked(1, 'active'), false, 'stage 1: the job can still be changed')
+  assert.equal(model.pickersLocked(2, 'active'), true)
+  assert.equal(model.pickersLocked(6, 'active'), true, 'Medical, stage 6 of 12')
+  assert.equal(model.pickersLocked(12, 'active'), true)
+  assert.equal(model.pickersLocked(6, 'closed'), false, 'a finished placement has nothing to lock')
+  assert.equal(model.pickersLocked(6, 'unmapped'), false)
+  assert.equal(model.pickersLocked(undefined, 'active'), false, 'no stage yet')
+  assert.equal(model.pickersLocked(null, null), false, 'no placement at all')
+  assert.equal(model.pickersLocked(0, 'active'), false)
+  assert.equal(model.PICKERS_LOCKED_TEXT, 'The job is locked because this candidate is past prescreening. To change it, unmap the candidate first.')
+})

@@ -51,7 +51,11 @@ def merge_rows(daily: list[dict], follow: list[dict], today: str) -> list[dict]:
     """`taskRows` of the screen: one dict per candidate (the daily row, else the follow-up row) with `moved_at`, in the screen's order."""
     merged: dict[str, dict] = {}
     moved_today: dict[str, datetime] = {}
+    ended: list[dict] = []   # candidates whose placement ended (the page's Declined / Rejected / Travelled views): after the rest, in the page's order
     for item in daily:
+        if (item.get("outcome") or {}).get("kind", "current") != "current":
+            ended.append({**item, "called": False, "moved": False, "moved_at": None, "touched": 0})
+            continue
         merged[item["candidateId"]] = item
     for item in follow:
         if item["candidateId"] not in merged:
@@ -70,7 +74,7 @@ def merge_rows(daily: list[dict], follow: list[dict], today: str) -> list[dict]:
                      "touched": 1 if called or moved or remarked else 0})
     # list.sort is stable, like the screen's: the merge order breaks ties.
     rows.sort(key=lambda r: (r["touched"], -int(bool(r["waiting"])), -(r["stage"] or 0)))
-    return rows
+    return rows + ended
 
 
 def today_text(row: dict) -> str:
@@ -89,6 +93,15 @@ def stage_text(stage: int | None) -> str:
     if not stage or not 1 <= stage <= TOTAL_STAGES:
         return "Initial call"
     return f"Stage {stage} - {stage_by_no(stage).title}"
+
+
+def outcome_text(outcome: dict) -> str:
+    """'Declined at 5 \u00b7 Offer letter - Offer declined by the candidate - by Asha': what happened, where it ended, why and who recorded it."""
+    stage = outcome.get("stage")
+    where = f" at {stage} \u00b7 {stage_by_no(stage).title}" if stage and 1 <= stage <= TOTAL_STAGES else ""
+    reason = f" - {outcome['reason']}" if outcome.get("reason") else ""
+    by = f" - by {outcome['by']}" if outcome.get("by") else ""
+    return f"{outcome.get('label') or ''}{where}{reason}{by}".strip()
 
 
 def read_extras(db, rows: list[dict]) -> tuple[dict, dict, str]:
@@ -119,7 +132,8 @@ def table(db, daily: list[dict], follow: list[dict], today: str) -> list[list]:
             number, doc_text(row.get("commencementDate")), owners.get(row.get("ownerId")) or "", row.get("position") or "",
             row.get("client") or "", row.get("country") or "", row.get("candidate") or "", row.get("candidateCareId") or "",
             row.get("agency") or "", advance_cell(facts.get(row.get("applicationId")), currency) or "",
-            stage_text(row.get("stage")), today_text(row), remark.strip(), notes)])
+            outcome_text(row["outcome"]) if (row.get("outcome") or {}).get("kind", "current") != "current" else stage_text(row.get("stage")),
+            today_text(row), remark.strip(), notes)])
     return out
 
 

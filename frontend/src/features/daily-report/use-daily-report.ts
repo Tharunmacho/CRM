@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import { liveInterval } from '@/shared/state/live'
+import { isPresenceNoise } from '@/shared/state/live-events'
 import { dailyReportApi } from './daily-report-api'
-import { COALESCE_MS, createCoalescer, FOCUS_GAP_MS, LIVE_TOPICS, POLL_DOWN_MS, POLL_SAFETY_MS } from './daily-report-live'
+import { COALESCE_MS, PRESENCE_NOISE_GAP_MS, createCoalescer, FOCUS_GAP_MS, LIVE_TOPICS, POLL_DOWN_MS, POLL_SAFETY_MS } from './daily-report-live'
 import { apiQuery } from './daily-report-view'
 import type { DailyQuery, DailyReport } from './daily-report-types'
 
@@ -57,11 +58,13 @@ export function useDailyReport(query: DailyQuery, sessionId: string, enabled = t
     }
     void read()
     const coalescer = createCoalescer(() => read(true), { delayMs: COALESCE_MS })
-    const stop = liveInterval(() => void read(), POLL_DOWN_MS, LIVE_TOPICS, { safetyMs: POLL_SAFETY_MS, debounceMs: 50, onChange: () => coalescer.trigger() })
+    // Staff heartbeats announce `attendance` + `reports` all day (see isPresenceNoise): re-read for those at most every 20 s.
+    const afterNoise = createCoalescer(() => read(true), { delayMs: PRESENCE_NOISE_GAP_MS })
+    const stop = liveInterval(() => void read(), POLL_DOWN_MS, LIVE_TOPICS, { safetyMs: POLL_SAFETY_MS, debounceMs: 50, onChange: (change) => { if (isPresenceNoise(change)) afterNoise.trigger(); else coalescer.trigger() } })
     const back = () => { if (document.visibilityState === 'visible' && Date.now() - lastRead > FOCUS_GAP_MS) void read() }
     document.addEventListener('visibilitychange', back)
     window.addEventListener('focus', back)
-    return () => { active = false; coalescer.cancel(); request?.abort(); stop(); document.removeEventListener('visibilitychange', back); window.removeEventListener('focus', back) }
+    return () => { active = false; coalescer.cancel(); afterNoise.cancel(); request?.abort(); stop(); document.removeEventListener('visibilitychange', back); window.removeEventListener('focus', back) }
   }, [key, enabled, reload])
 
   const mine = snapshot && snapshot.key.startsWith(`${sessionId}|`) ? snapshot : null

@@ -1,19 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { Check } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { FORM_TABS, nextTab, paneIdFor, tabAccessibleName, type FormTab } from '../form-tabs'
 
-export interface TabBadge { count: number; kind: 'missing' | 'notes' | 'overdue' }
+export interface TabBadge { count: number; kind: 'missing' | 'notes' | 'overdue' | 'done' }
 
 /**
  * The sticky section navigator: one tab per section of the page. One click shows that section in the same page (the panels
  * stay mounted, so nothing typed is lost). It is a single tab stop; the arrow keys, Home and End move between tabs.
- * `alsoShown` are tabs whose section is on screen next to the chosen one (a wide screen shows Personal with Passport).
  * On a phone the bar scrolls inside itself (it snaps tab by tab) and a soft fade at an edge says there is more that way.
  */
-export function FormTabs({ tabs, active, alsoShown, badges, onSelect }: {
+export function FormTabs({ tabs, active, badges, onSelect }: {
   tabs: FormTab[]
   active: FormTab
-  alsoShown: FormTab[]
   badges: Partial<Record<FormTab, TabBadge>>
   onSelect: (tab: FormTab) => void
 }) {
@@ -65,7 +64,7 @@ export function FormTabs({ tabs, active, alsoShown, badges, onSelect }: {
                 id={`af-tab-${tab.id}`}
                 type="button"
                 role="tab"
-                className={cn('af-tab', alsoShown.includes(tab.id) && 'is-shown')}
+                className="af-tab"
                 aria-selected={selected}
                 aria-controls={paneIdFor(tab.id)}
                 aria-label={tabAccessibleName(tab.label, badge)}
@@ -73,7 +72,8 @@ export function FormTabs({ tabs, active, alsoShown, badges, onSelect }: {
                 onClick={() => onSelect(tab.id)}
               >
                 <span>{tab.label}</span>
-                {badge && (badge.count > 0 || badge.kind === 'overdue') && (
+                {badge?.kind === 'done' && <span className="af-tab-done" aria-hidden="true"><Check /></span>}
+                {badge && badge.kind !== 'done' && (badge.count > 0 || badge.kind === 'overdue') && (
                   <span className={cn('af-tab-count', badge.kind === 'notes' && 'is-plain', badge.kind === 'overdue' && 'is-over')} aria-hidden="true">{badge.kind === 'overdue' ? '!' : badge.count}</span>
                 )}
               </button>

@@ -475,7 +475,7 @@ body.af-open { overflow: hidden; }
   }
   .af-scroll { overflow: visible !important; background: #fff; }
   .af-bar, .af-side, .af-scroll, .af-drawer-shade, .af-drawer-head, .af-banner, .af-photo-btn, .af-rowtable-ctl, .af-rowtable-add, .af-chip, .af-prov, .af-track-go,
-  .af-split-hint, .af-note.is-error, .af-extract, .af-section-missing, .af-assign-wrap, .af-clockbar, .af-notes { display: none !important; }
+  .af-split-hint, .af-note.is-error, .af-extract, .af-section-missing, .af-assign-wrap, .af-clockbar, .af-actionbar, .af-notes { display: none !important; }
   .af-layout { display: block; max-width: none; padding: 0; margin: 0; }
   /* Whatever is on screen, only the paper form prints: it is in the drawer while that is open and in a print-only place otherwise. */
   .af-print-sheet { display: block; width: 210mm; }

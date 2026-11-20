@@ -7,6 +7,8 @@
 export const LIVE_TOPICS: readonly string[] = ['leads', 'candidates', 'applications', 'tasks', 'users', 'reports', 'daily_report']
 /** A burst of events becomes one read, this long after the first. */
 export const COALESCE_MS = 1_500
+/** Presence heartbeats announce `attendance` + `reports` all day; the report re-reads for those at most this often. */
+export const PRESENCE_NOISE_GAP_MS = 20_000
 /** While the live stream is down the report asks again this often; while it is up this is only a safety net. */
 export const POLL_DOWN_MS = 30_000
 export const POLL_SAFETY_MS = 60_000

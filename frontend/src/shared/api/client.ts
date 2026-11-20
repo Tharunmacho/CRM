@@ -70,7 +70,7 @@ interface RequestOptions {
   signal?: AbortSignal
   /** Cache a read-mostly GET. Never use it for data a person must see fresh (leave flags, workflow state). */
   cache?: ReadCacheOptions
-  /** Skip the cached copy (the response still refreshes it): a deliberate Refresh button. */
+  /** Skip the cached copy and the 2-second freshness window (the response still refreshes them): a deliberate Refresh button. */
   fresh?: boolean
 }
 
@@ -94,6 +94,44 @@ const reads = new Map<string, SharedRead>()
 /** Bumped whenever cached data may have become wrong; a read that began before the bump is not stored. */
 let epoch = 0
 
+/**
+ * The freshness window. A page load starts the same read from several places (the shell, the screen, a tab strip, a
+ * focus handler) a few hundred milliseconds apart; each one used to cost a full round trip. An identical GET (same
+ * URL, same cookie jar) that finished is therefore answered from memory for a moment. It is only that: every write,
+ * every live change, sign-in/out and a 401 empty it, a failed answer is never kept, and `fresh: true` skips it.
+ * Reads the workspace store makes (`/bootstrap`, `/auth/session`) are never kept: it decides itself when it is stale.
+ */
+const FRESH_WINDOW_MS = 1_800
+const FRESH_MAX_ENTRIES = 64
+let freshWindowMs = FRESH_WINDOW_MS
+const recent = new Map<string, { raw: RawResponse; at: number }>()
+
+/** Tests and tuning: how long an identical finished GET is answered from memory (0 turns the window off). */
+export function setFreshWindow(ms: number) {
+  freshWindowMs = Math.max(0, ms)
+  recent.clear()
+}
+
+/** How many answers the freshness window holds (tests). */
+export function freshWindowSize() {
+  return recent.size
+}
+
+function windowed(path: string) {
+  const segment = firstSegment(path)
+  return segment !== 'bootstrap' && segment !== 'auth'
+}
+
+function rememberRecent(key: string, answer: ReadAnswer) {
+  if (!answer.storable || !answer.raw.ok || freshWindowMs <= 0) return
+  const now = Date.now()
+  if (recent.size >= FRESH_MAX_ENTRIES) {
+    for (const [other, entry] of recent) if (now - entry.at >= freshWindowMs) recent.delete(other)
+    if (recent.size >= FRESH_MAX_ENTRIES) recent.clear()
+  }
+  recent.set(key, { raw: answer.raw, at: now })
+}
+
 interface CacheEntry { raw: RawResponse; at: number; tags: ReadonlySet<string>; revalidating: boolean }
 interface ErrorEntry { error: ApiError; at: number; ttlMs: number; tags: ReadonlySet<string> }
 const cached = new Map<string, CacheEntry>()
@@ -113,6 +151,7 @@ export function dropSharedReads() {
  */
 export function invalidateReads(tags?: readonly string[]) {
   reads.clear()
+  recent.clear() // copies in the freshness window carry no tags: any change empties them
   epoch += 1
   if (!tags || tags.includes('*')) {
     cached.clear()
@@ -276,6 +315,11 @@ async function request<T>(
 
   const key = `${BASE}/api${path}`
   const policy = options.cache
+  const useWindow = freshWindowMs > 0 && windowed(path)
+  if (useWindow && !options.fresh && !policy) {
+    const hit = recent.get(key)
+    if (hit && Date.now() - hit.at < freshWindowMs) return interpret<T>(hit.raw)
+  }
   if (policy && !options.fresh) {
     const hit = cached.get(key)
     const age = hit ? Date.now() - hit.at : Infinity
@@ -301,6 +345,7 @@ async function request<T>(
   try {
     const answer = await sharedRead(key, path, signal)
     if (policy) storeRead(key, path, answer, policy)
+    if (useWindow) rememberRecent(key, answer)
     return interpret<T>(answer.raw)
   } catch (error) {
     if (error instanceof ApiError && error.isUnauthorised) invalidateReads() // the session is gone: nothing cached is ours any more

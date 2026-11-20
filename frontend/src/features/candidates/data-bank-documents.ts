@@ -11,12 +11,14 @@ const LEGACY_KEYS: Record<string, string> = { education: 'education_certificate'
 export interface HeldSlot {
   key: string
   versions?: unknown[] | null
+  /** The compact workspace lists a slot that holds a file without its versions. */
+  fileUploaded?: boolean
 }
 
 export function documentsOnFile(documents: HeldSlot[] | null | undefined): string[] {
   const held = new Set<string>()
   for (const slot of documents ?? []) {
-    if ((slot.versions?.length ?? 0) > 0) held.add(LEGACY_KEYS[slot.key] ?? slot.key)
+    if ((slot.versions?.length ?? 0) > 0 || slot.fileUploaded === true) held.add(LEGACY_KEYS[slot.key] ?? slot.key)
   }
   const shared = DOCUMENT_SLOT_KEYS.filter((key) => held.has(key))
   const extra = [...held].filter((key) => !DOCUMENT_SLOT_KEYS.includes(key))

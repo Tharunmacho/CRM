@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -126,6 +127,16 @@ def _load(db: Session, application_id: str) -> Application:
 
 
 def _locked_application(db: Session, application_id: str):
+    # The usual case in ONE locking statement: candidate, order, application, locked in that order (`OF` fixes it, the order the
+    # mapping path takes too). It used to be an identity read and three locking reads, one round trip each. A missing row (a 404)
+    # takes the exact path below, so the refusal is the same as before.
+    found = db.execute(select(Candidate, Order, Application).select_from(Application)
+                       .join(Candidate, Candidate.id == Application.candidate_id).join(Order, Order.id == Application.order_id)
+                       .where(Application.id == application_id).with_for_update(of=[Candidate, Order, Application])
+                       .execution_options(populate_existing=True)).one_or_none()
+    if found is not None:
+        candidate, order, app = found
+        return app, candidate, order
     identity = db.execute(select(Application.candidate_id, Application.order_id).where(Application.id == application_id)).one_or_none()
     if identity is None:
         raise HTTPException(404, "Application not found")
@@ -163,17 +174,21 @@ def _open_tasks(db: Session, app: Application):
     ).with_for_update()))
 
 
-def _task(db: Session, app: Application, candidate: Candidate, at: datetime, *, remedical_date: str | None = None):
+def _task(db: Session, app: Application, candidate: Candidate, at: datetime, *, remedical_date: str | None = None, flush: bool = True):
+    """The next stage's task. `flush=False` leaves the INSERT to the caller's commit (one statement per table instead of an extra UPDATE
+    of the application): the task gets its id here so the caller can already name it."""
     _owner(db, candidate)
     definition = stage_by_no(app.current_stage)
     task = Task(
+        **({} if flush else {"id": str(uuid4())}),
         kind=TaskKind.remedical if remedical_date else TaskKind.stage,
         title=f"Follow up re-medical on {remedical_date}" if remedical_date else definition.task_title,
         candidate_id=candidate.id, application_id=app.id, stage=app.current_stage,
         owner_id=candidate.owner_id, created_at=at, sla_started_at=at, due_at=at + timedelta(hours=48),
     )
     db.add(task)
-    db.flush()
+    if flush:
+        db.flush()
     return task
 
 
@@ -508,7 +523,7 @@ def complete_stage(application_id: str, body: CompleteIn,
                                 else CandidateStatus.needs_review if candidate.needs_review else CandidateStatus.new)
         elif result.repeats:
             app.draft = {"applied": "yes", "appliedDate": data["retestDate"]}
-            next_task = _task(db, app, candidate, at, remedical_date=data["retestDate"])
+            next_task = _task(db, app, candidate, at, remedical_date=data["retestDate"], flush=False)
         elif app.current_stage == TOTAL_STAGES:
             app.status = ApplicationStatus.deployed
             candidate.status = CandidateStatus.deployed
@@ -527,7 +542,7 @@ def complete_stage(application_id: str, body: CompleteIn,
                 if passport:
                     app.draft = {"copy": {"id": passport.id, "name": passport.file_name,
                                          "url": f"/api/files/{passport.id}", "version": passport.version}}
-            next_task = _task(db, app, candidate, at)
+            next_task = _task(db, app, candidate, at, flush=False)
         app.draft_saved_at, app.draft_saved_by = (at, user.id) if app.draft else (None, None)
         app.lock_version += 1
         _audit(db, user, f"Recorded stage {definition.no}: {result.outcome}", app, candidate, at,

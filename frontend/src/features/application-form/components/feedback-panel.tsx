@@ -84,27 +84,25 @@ export function NoteComposer({ actions, defaultKind = 'update', onSent, autoFocu
 }
 
 /**
- * Above the form: the stage clock, and when the stage has run past its limit with no explanation, a calm banner that asks
- * for one. "Tell us why" opens the composer right there.
+ * Above the form: when the stage has run past its limit with no explanation, a calm banner that asks for one ("Tell us why" opens
+ * the composer right there). The clock itself is a labelled item of the context strip, not a chip floating above it.
  */
 export function StageClockBar({ feedback, actions, canWrite }: { feedback: FeedbackData; actions: FeedbackActions; canWrite: boolean }) {
   const [open, setOpen] = useState(false)
   const clock = feedback.stageClock
   if (!feedback.supported || !clock) return null
   const asking = clock.needsReason && canWrite
+  if (!asking) return null
   return (
     <div className="af-clockbar">
-      <StageClockChip clock={clock} />
-      {asking && (
-        <div className="af-ask" role="status">
-          <div className="af-ask-text">
-            <b>This stage has taken longer than the limit.</b>
-            <span>Tell us why.</span>
-          </div>
-          {!open && <Button size="sm" variant="primary" icon={<MessageSquareText />} onClick={() => setOpen(true)}>Tell us why</Button>}
-          {open && <div className="af-ask-form"><NoteComposer actions={actions} defaultKind="delay" autoFocus compact onSent={() => setOpen(false)} /></div>}
+      <div className="af-ask" role="status">
+        <div className="af-ask-text">
+          <b>This stage has taken longer than the limit.</b>
+          <span>Tell us why.</span>
         </div>
-      )}
+        {!open && <Button size="sm" variant="primary" icon={<MessageSquareText />} onClick={() => setOpen(true)}>Tell us why</Button>}
+        {open && <div className="af-ask-form"><NoteComposer actions={actions} defaultKind="delay" autoFocus compact onSent={() => setOpen(false)} /></div>}
+      </div>
     </div>
   )
 }

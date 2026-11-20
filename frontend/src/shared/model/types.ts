@@ -147,6 +147,10 @@ export interface Candidate {
   addedAt: string
   photoTone: number
   documents: DocumentSlot[]
+  /** Compact workspace only: files held per slot ({ passport: 2 }). Its `documents` then list just those slots, without `versions`. */
+  documentCounts?: Record<string, number>
+  /** True when `documents` is that summary: read the candidate (`useCandidateDocuments`) for the files themselves. */
+  documentsSummary?: boolean
   resumeText: string
   callOutcome?: {
     called: boolean

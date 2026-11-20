@@ -33,7 +33,7 @@ const ICONS: Record<string, LucideIcon> = {
 }
 
 /** Below this width the page is a phone layout (the same breakpoint as the stylesheet). */
-const PHONE_QUERY = '(max-width: 760px)'
+const PHONE_QUERY = '(max-width: 768px)'
 
 const STATE_ICONS: Record<DocumentRowIcon, LucideIcon | null> = { check: CheckCircle2, clock: Clock, dot: null }
 

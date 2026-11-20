@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { FileSpreadsheet, ListChecks, Loader2, RefreshCw, TriangleAlert, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
@@ -8,11 +8,14 @@ import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { applicationFormHref } from '@/features/application-form/form-model'
 import { saveApplicationForm } from '@/features/application-form/form-api'
-import { listTitle, recruiterWork, taskRows } from '@/features/daily-work/daily-work-model'
+import {
+  exportLabel, isClosed, listTitle, parseView, recruiterWork, taskRows, viewEmptyTitle, viewSummary, viewTabs, type DailyView, type DailyWorkResponse,
+} from '@/features/daily-work/daily-work-model'
 import { downloadDailyWork } from '@/features/daily-work/daily-work-export'
 import { agencyDay } from '@/shared/lib/task-time'
 import { useDailyWork, useFollowUp } from '@/features/daily-work/use-daily-work'
 import { TaskTable } from './task-table'
+import { ViewTabs, viewTabId } from './view-tabs'
 import { WorkBoard } from './daily-staff-board'
 import '@/styles/daily-work.css'
 import '@/styles/daily-work-board.css'
@@ -29,12 +32,24 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const navigate = useNavigate()
   const supervisor = store.can('all_reports')
   const staffFilter = supervisor ? params.get('staff') || 'all' : undefined
-  const daily = useDailyWork({ staff: staffFilter })
+  // The view (?view=): Current process (the default), Declined, Rejected, Travelled or All. One request per view; a view already read is shown at once.
+  const view = parseView(params.get('view'))
+  const daily = useDailyWork({ staff: staffFilter, view })
   const follow = useFollowUp({ staff: staffFilter })
-  // The cards and the strip always cover everyone, whichever recruiter the list below is filtered to.
+  // The cards and the strip always cover everyone's CURRENT process, whichever recruiter or view the list below is on.
   const filtered = supervisor && staffFilter !== 'all'
-  const everyoneDaily = useDailyWork({ staff: 'all', enabled: filtered })
+  const separateBoard = filtered || view !== 'current'
+  const everyoneDaily = useDailyWork({ staff: filtered ? 'all' : staffFilter, enabled: separateBoard })
   const everyoneFollow = useFollowUp({ staff: 'all', enabled: filtered })
+  // While the next view loads, the rows on screen stay (dimmed); the pair remembers which view they belong to.
+  const kept = useRef<{ view: DailyView; data: DailyWorkResponse } | null>(null)
+  if (daily.data) kept.current = { view, data: daily.data }
+  const shown = daily.data ? { view, data: daily.data } : kept.current
+  const waiting = !daily.data && daily.loading
+  const keptBoard = useRef<DailyWorkResponse | null>(null)
+  const boardNow = separateBoard ? everyoneDaily.data : daily.data
+  if (boardNow) keptBoard.current = boardNow
+  const currentSeen = useRef<number | null>(null)
   const [idleOnly, setIdleOnly] = useState(false)
   const [openApp, setOpenApp] = useState<{ id: string; stage?: number } | null>(null)
   const zone = store.agencyTimezone || 'Asia/Kolkata'
@@ -46,11 +61,18 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
     if (value && value !== 'all') next.set('staff', value); else next.delete('staff')
     return next
   })
-  const refreshAll = async () => { await Promise.all([daily.refresh(), follow.refresh(), ...(filtered ? [everyoneDaily.refresh(), everyoneFollow.refresh()] : [])]) }
+  const setView = (value: DailyView) => setParams((previous) => {
+    const next = new URLSearchParams(previous)
+    if (value !== 'current') next.set('view', value); else next.delete('view')
+    return next
+  })
+  const refreshAll = async () => { await Promise.all([daily.refresh(), follow.refresh(), ...(separateBoard ? [everyoneDaily.refresh()] : []), ...(filtered ? [everyoneFollow.refresh()] : [])]) }
 
-  const today = daily.data?.agencyDate ?? ''
-  const rows = useMemo(() => taskRows(daily.data?.items ?? [], follow.data?.items ?? [], today, zone), [daily.data, follow.data, today, zone])
-  const boardDaily = filtered ? everyoneDaily.data : daily.data
+  const today = shown?.data.agencyDate ?? ''
+  // Follow-up placements are part of the current process (Current process and All); the closed views list only what ended.
+  const withFollowUp = shown?.view === 'current' || shown?.view === 'all'
+  const rows = useMemo(() => taskRows(shown?.data.items ?? [], withFollowUp ? follow.data?.items ?? [] : [], today, zone), [shown?.data, withFollowUp, follow.data, today, zone])
+  const boardDaily = keptBoard.current
   const boardFollow = filtered ? everyoneFollow.data : follow.data
   const everyoneRows = useMemo(() => taskRows(boardDaily?.items ?? [], boardFollow?.items ?? [], today, zone), [boardDaily, boardFollow, today, zone])
   const work = useMemo(() => recruiterWork(everyoneRows), [everyoneRows])
@@ -59,20 +81,20 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const exportList = async (person: string) => {
     if (exporting) return
     setExporting(true); setExportError('')
-    try { await downloadDailyWork(supervisor ? staffFilter : store.me.id, agencyDay(new Date(), zone), person) }
+    try { await downloadDailyWork(supervisor ? staffFilter : store.me.id, agencyDay(new Date(), zone), person, view) }
     catch (failure) { setExportError(failure instanceof Error ? failure.message : 'The Excel file could not be created. Please try again.') }
     finally { setExporting(false) }
   }
 
-  if (daily.loading && !daily.data) return <div className="tk dw"><PageHeader title="Tasks" />
+  if (!shown && daily.loading) return <div className="tk dw"><PageHeader title="Tasks" />
     <section className="dw-panel dw-state" aria-busy="true"><p role="status">Loading your candidates…</p></section></div>
-  if (daily.error && !daily.data) return <div className="tk dw"><PageHeader title="Tasks" />
+  if (!shown && daily.error) return <div className="tk dw"><PageHeader title="Tasks" />
     <section className="dw-panel dw-state"><TriangleAlert size={22} aria-hidden="true" />
       <p role="alert" className="dw-state-title">{daily.error}</p><p>We could not load the list. Check your connection and try again.</p>
       <Button variant="primary" onClick={() => void refreshAll()}>Try again</Button></section></div>
-  if (!daily.data) return null
+  if (!shown) return null
 
-  const data = daily.data
+  const data = shown.data
   const mine = !supervisor
   const roster = (data.staff ?? []).map((s) => ({ userId: s.userId, name: s.name, active: s.active }))
   // A recruiter's own card: the same figures, for themselves only.
@@ -81,7 +103,10 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const person = supervisor && staffFilter && staffFilter !== 'all' ? roster.find((s) => s.userId === staffFilter)?.name ?? store.user(staffFilter)?.name ?? 'Recruiter' : ''
   const title = mine ? 'My candidates' : listTitle(person)
 
-  const summary = `${rows.length} ${rows.length === 1 ? 'candidate' : 'candidates'}${supervisor && !person ? ` · ${data.staffCount} ${data.staffCount === 1 ? 'recruiter' : 'recruiters'}` : ''}`
+  const summary = waiting ? 'Loading…' : viewSummary(shown.view, rows.length, supervisor && !person ? data.staffCount : undefined)
+  if (withFollowUp) currentSeen.current = rows.filter((row) => !isClosed(row)).length
+  const tabs = viewTabs(data.viewCounts, currentSeen.current)
+  const failed = !daily.data && !!daily.error
   const open = (row: { applicationId: string | null; candidateId: string; stage: number | null }) =>
     row.applicationId ? setOpenApp({ id: row.applicationId, stage: row.stage ?? undefined }) : navigate(applicationFormHref(row.candidateId))
 
@@ -93,7 +118,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
           <Button onClick={onOpenAll}><ListChecks size={15} aria-hidden="true" />All 48-hour tasks</Button>
           <Button onClick={() => void refreshAll()}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>
           <Button onClick={() => void exportList(mine ? store.me.name : person)} disabled={exporting} aria-busy={exporting}>
-            {exporting ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <FileSpreadsheet size={15} aria-hidden="true" />}{exporting ? 'Preparing…' : 'Export Excel'}
+            {exporting ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <FileSpreadsheet size={15} aria-hidden="true" />}{exporting ? 'Preparing…' : exportLabel(view)}
           </Button>
         </>} />
 
@@ -101,7 +126,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
         {(data.truncated || follow.data?.truncated) && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />
           Not every candidate is listed. {supervisor ? 'Pick a recruiter to see all of theirs.' : ''}</p>}
         {exportError && <p className="is-warn" role="alert"><TriangleAlert size={16} aria-hidden="true" />{exportError}</p>}
-        {daily.error && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />The list could not refresh just now ({daily.error}). Showing the last version.</p>}
+        {daily.error && !failed && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />The list could not refresh just now ({daily.error}). Showing the last version.</p>}
       </div>
 
       {supervisor
@@ -118,12 +143,19 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
           </Select>}
         </div>
 
-        {rows.length === 0 ? (
-          <EmptyState title={mine ? 'No candidates assigned' : person ? `${person} has no candidates` : 'No candidates assigned'}
-            description={mine ? 'Candidates assigned to you appear here.' : person ? 'Pick another recruiter, or show everyone.' : 'Candidates appear here once they are assigned to a recruiter.'}
+        <ViewTabs tabs={tabs} active={view} onChange={setView} />
+
+        {failed ? (
+          <div className="dw-state" role="group" aria-label="The list could not be loaded"><TriangleAlert size={22} aria-hidden="true" />
+            <p role="alert" className="dw-state-title">{daily.error}</p>
+            <Button variant="primary" onClick={() => void refreshAll()}>Try again</Button></div>
+        ) : rows.length === 0 && !waiting ? (
+          <EmptyState title={view !== 'current' ? viewEmptyTitle(view) : mine ? 'No candidates assigned' : person ? `${person} has no candidates` : 'No candidates assigned'}
+            description={view !== 'current' ? (person ? 'Pick another recruiter, or show everyone.' : 'They appear here as soon as a placement ends this way.')
+              : mine ? 'Candidates assigned to you appear here.' : person ? 'Pick another recruiter, or show everyone.' : 'Candidates appear here once they are assigned to a recruiter.'}
             action={person ? <Button onClick={() => setStaff('all')}>Show all recruiters</Button> : undefined} />
         ) : (
-          <TaskTable rows={rows} zone={zone} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
+          <TaskTable rows={rows} zone={zone} labelledBy={viewTabId(view)} busy={waiting} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
             canWork={(row) => !!row.taskId && (store.can('work_any_candidate') || row.ownerId === store.me.id)}
             onOpen={open} onProfile={(row) => navigate(`/candidates/${row.candidateId}`)}
             onSaveDoc={async (row, iso) => { if (!row.applicationId) return; await saveApplicationForm(row.candidateId, { applicationId: row.applicationId }, { application: { commencementDate: iso } }); await refreshAll() }}

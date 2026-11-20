@@ -265,7 +265,7 @@ test('the Tasks table header row is the primary blue of the Complete button, sco
   assert.match(rule('.dw:not(.dwr) .dw-main thead th.is-actions'), /background: var\(--primary\)/) // the sticky actions header stays opaque blue
   assert.match(rule('.dw:not(.dwr) .dw-table thead th + th'), /border-left-color: var\(--table-header-line\)/) // the lighter header divider (theme.css), no gap lines
   // the button it matches
-  assert.match(await read('../src/screens/tasks/task-table.tsx'), /variant=\{called \|\| moved \? 'secondary' : 'primary'\}/)
+  assert.match(await read('../src/screens/tasks/task-table.tsx'), /variant=\{called \|\| moved \|\| closed \? 'secondary' : 'primary'\}/)
   // the 48-hour list header is blue too
   const page = await read('../src/styles/tasks-page.css')
   assert.match(page, /:root:root \.tk \.tk-table thead th \{ background: var\(--primary\);[^}]*color: var\(--on-primary\)/)

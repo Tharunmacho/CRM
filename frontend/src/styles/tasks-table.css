@@ -1,4 +1,29 @@
-/* Candidate table on wide panels, labelled cards below 1080px. */
+/*
+ * Tasks list (the .tw-table inside the Tasks panel): COMPACT and FITTING. Tokens only, no new colours.
+ * Columns: S NO, DOC, CLIENT (name, and the country under it in a smaller muted line), JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY, REMARKS, NOTES (only on a panel
+ * wide enough, class has-notes set by the table), actions (widths: TASK_LIST_COLUMNS in the daily-work model). Without has-notes the NOTES cells are hidden and
+ * the notes are a second line under the remark (.tw-remark-notes).
+ * The measurable rules, all asserted by tests/tasks-doc-remarks.test.mjs and checked in the browser:
+ *   - NO sideways scrolling: the table is table-layout fixed at width 100% of its frame, its columns are percentages of the panel, so it always fills the
+ *     panel exactly. It is a table from 1080px of panel width (a 1440px window with the sidebar open gives 1111px; 1366px gives about 1037px); below
+ *     that every candidate is a labelled card (the stacked layout at the end of this file), never a scroller.
+ *   - compact density: 13px text, cells padded 8px 10px, rows at least 60px that grow to fit a second line (never more than two lines: the
+ *     full text is the tooltip); every cell is vertically centred. Names, client, job, agency and recruiter wrap before any ellipsis; the
+ *     TODAY chip and the stage chip show their whole text.
+ *   - lines: the table is framed (var(--table-frame-width) var(--table-line-strong), daily-work.css), the header's bottom edge is the same strong line, a
+ *     var(--table-line) line sits under EVERY row (the last too) and NOTHING between columns in the body; the header keeps a very faint
+ *     divider (var(--table-header-line)).
+ *   - header 44px, one line, uppercase 11.5px / 600, CENTRED over its column; the same padding (8px) on both sides of header and cells.
+ *   - alignment: EVERY column is centred, header and cells (names wrap and centre), S NO included (tabular numerals); the Remarks select and the
+ *     Actions buttons fill their cells; chips are centred with one height (28px) and one radius, a thin 3px progress under the stage chip
+ *     exactly as wide as the chip, DOC with tabular numerals. A candidate whose placement ended shows an outcome chip (Declined / Rejected / Travelled)
+ *     in STAGE with its stage, reason and date as plain lines under it.
+ *   - controls: the Remarks select (filling its cell), the Complete / Open / View button (72px wide) and the row menu are 36px tall; the DOC "Add date" button has a 32px hit area.
+ *   - the remark's status (Saving / Saved / error) is a small badge on the control's edge and the "custom remark" note is a tooltip, so a row
+ *     never grows and no space is reserved for them.
+ * Everything that sets the table's metrics lives inside the container query: below 1080px a candidate is a card (daily-work.css).
+ * The long selector prefix is deliberate: it out-ranks the shared .dw-table rules, which the Follow-up and Reports tables still use.
+ */
 /* The approved Tasks look: a THIN (1px) outer border with SQUARE corners, a faint line under each row, no column lines. */
 .dw { --table-frame-width: 1px; --table-frame-radius: 6px; --table-line: var(--border-main); --table-line-strong: var(--border-control); --table-column-line: color-mix(in srgb, var(--border-main) 55%, var(--bg-card)); }
 
@@ -6,30 +31,33 @@
   :root .dw .tw-table.dw-table.dw-main { --tw-pad-l: 8px; --tw-pad-r: 8px; width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
 
   /* ---- header: 44px, one line, one left edge with the cells ---- */
-  :root .dw .tw-table.dw-table.dw-main thead th { height: 44px; padding: 0 8px 0 var(--tw-pad-l); overflow: hidden; border-left: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1; text-align: left; text-transform: uppercase; text-wrap: nowrap; white-space: nowrap; overflow-wrap: normal; }
+  :root .dw .tw-table.dw-table.dw-main thead th { height: 44px; padding: 0 8px 0 var(--tw-pad-l); overflow: hidden; border-left: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1; text-align: center; text-transform: uppercase; text-wrap: nowrap; white-space: nowrap; overflow-wrap: normal; }
   :root .dw .tw-table.dw-table.dw-main thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
 
   /* ---- body: rows of at least 60px that grow with a second line, vertically centred, one padding, a visible var(--table-line) line under EVERY row (the last one too), no column lines ---- */
-  :root .dw .tw-table.dw-table.dw-main tbody td { height: 60px; padding: 8px var(--tw-pad-r) 8px var(--tw-pad-l); border: 0; border-bottom: var(--table-line-width) solid var(--table-line); text-align: left; vertical-align: middle; overflow-wrap: break-word; }
+  :root .dw .tw-table.dw-table.dw-main tbody td { height: 60px; padding: 8px var(--tw-pad-r) 8px var(--tw-pad-l); border: 0; border-bottom: var(--table-line-width) solid var(--table-line); text-align: center; vertical-align: middle; overflow-wrap: break-word; }
   /* A LIGHT line between the columns (the owner asked for it back): fainter than the row line. */
   :root .dw .tw-table.dw-table.dw-main tbody td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
   :root .dw .tw-table.dw-table.dw-main .dw-row:hover { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
   :root .dw .tw-table.dw-table.dw-main .dw-row:hover > td.is-actions { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
 
-  /* S NO: narrow, centred, tabular numerals (header and cells share the centre) */
+  /* S NO: narrow, tabular numerals (every column is centred, header and cells share the centre) */
   :root .dw .tw-table.dw-table.dw-main :is(th, td):first-child { padding-inline: 8px; text-align: center; }
   :root .dw .tw-table.dw-table.dw-main td.is-num { font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-muted); }
 
   /* text columns: wrap onto a second line, and only after two lines an ellipsis (the full text is always the tooltip) */
   .dw .tw-table .dw-cell-strong { font-weight: 500; line-height: 1.35; }
   .dw .tw-table .dw-clamp { -webkit-line-clamp: 3; }
-  .dw .tw-table .record-name { font-size: 13px; font-weight: 600; line-height: 1.35; overflow-wrap: break-word; }
-  .dw .tw-table .tk-owner-name { display: block; overflow: hidden; font-weight: 500; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
-  .dw .tw-table .dw-none { text-align: left; }
+  .dw .tw-table .record-name { font-size: 13px; font-weight: 600; line-height: 1.35; text-align: center; overflow-wrap: break-word; }
+  .dw .tw-table .record-identity { justify-content: center; }
+  .dw .tw-table .record-identity > div { align-items: center; text-align: center; }
+  .dw .tw-table .tk-owner { justify-content: center; }
+  .dw .tw-table .tk-owner-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 500; line-height: 1.35; text-align: center; white-space: normal; overflow-wrap: break-word; text-overflow: clip; }
+  .dw .tw-table .dw-none { text-align: center; }
 
   /* DOC: the date as calm tabular text (it may wrap to "19 Nov / 2026"); the empty state is a quiet primary text-button with a calendar icon, 32px tall, no underline */
   .dw .tw-table .dw-doc { font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.35; white-space: normal; color: var(--text-main); }
-  .dw .tw-table .dw-doc-add { gap: 4px; height: 32px; min-height: 32px; margin-left: -6px; padding: 0 6px; border-radius: 8px; font-size: 12px; font-weight: 600; line-height: 1; color: var(--primary); text-decoration: none; transition: background-color .12s; }
+  .dw .tw-table .dw-doc-add { gap: 4px; height: 32px; min-height: 32px; margin: 0 auto; padding: 0 6px; border-radius: 8px; font-size: 12px; font-weight: 600; line-height: 1; color: var(--primary); text-decoration: none; transition: background-color .12s; }
   /* DOC typed in the cell: dd/mm/yyyy, 32px tall, fills its cell, a quiet box that turns blue on focus and red when the date is not real. */
   .dw .tw-table .dw-doc-input { box-sizing: border-box; width: 100%; min-width: 0; height: 32px; padding: 0 2px; border: 1px solid var(--border-control); border-radius: 6px; background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 11px; letter-spacing: 0; text-align: center; font-weight: 500; font-variant-numeric: tabular-nums; }
   .dw .tw-table .dw-doc-input::placeholder { color: var(--text-muted); font-weight: 400; }
@@ -40,20 +68,22 @@
   .dw .tw-table .dw-doc-add:hover { background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); text-decoration: none; }
   .dw .tw-table .dw-doc-add:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
-  /* CLIENT and AGENCY: the name only (two lines at most), nothing under it */
-  .dw .tw-table td[data-label='CLIENT'] .dw-clamp { font-weight: 600; }
+  /* CLIENT: the name (bold) and, when a country is known, its name under it in a smaller muted line; both centred and wrapping at spaces, no flag */
+  .dw .tw-table td[data-label='CLIENT'] .dw-clamp { font-weight: 600; text-align: center; }
+  .dw .tw-table .dw-client { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; max-width: 100%; }
+  .dw .tw-table .dw-client-country { display: block; max-width: 100%; font-size: 11.5px; font-weight: 400; line-height: 1.3; text-align: center; overflow-wrap: break-word; color: var(--text-muted); }
 
   /* STAGE: a chip as wide as the cell (the same in every row; a long stage name wraps inside it) and a thin 3px progress exactly as wide under it */
   .dw .tw-table .dw-stage { align-items: stretch; gap: 5px; width: 100%; max-width: none; margin: 0; }
-  .dw .tw-table .dw-stage-chip { box-sizing: border-box; justify-content: flex-start; width: 100%; min-height: 28px; padding: 6px 8px; border-radius: 14px; font-size: 11.5px; line-height: 16px; text-align: left; }
-  .dw .tw-table .dw-stage-text { display: block; min-width: 0; overflow: visible; line-height: 16px; white-space: normal; overflow-wrap: break-word; }
+  .dw .tw-table .dw-stage-chip { box-sizing: border-box; justify-content: center; width: 100%; min-height: 28px; padding: 6px 8px; border-radius: 14px; font-size: 11.5px; line-height: 16px; text-align: center; }
+  .dw .tw-table .dw-stage-text { display: block; min-width: 0; overflow: visible; line-height: 16px; text-align: center; white-space: normal; overflow-wrap: break-word; }
   .dw .tw-table .dw-stage-bar { gap: 2px; }
   .dw .tw-table .dw-stage-bar i { height: 3px; }
 
-  /* Activity chips wrap inside their own cell when a movement has a longer label. */
+  /* TODAY: chips stacked and centred, at least 28px tall, each on ONE line with its whole text (the column is planned for it); only a column narrower than the text wraps it inside the cell, never clips it */
   :root .dw .tw-table.dw-table.dw-main td[data-label='TODAY'] { padding-right: 6px; }
-  .dw .tw-table td[data-label='TODAY'] .tw-today { flex-direction: column; flex-wrap: nowrap; align-items: flex-start; gap: 4px; }
-  .dw .tw-table .tw-chip { display: block; box-sizing: border-box; width: fit-content; max-width: 100%; min-height: 28px; padding: 5px 6px; border-radius: 14px; font-size: 12px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; }
+  .dw .tw-table td[data-label='TODAY'] .tw-today { flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 4px; }
+  .dw .tw-table .tw-chip { display: block; box-sizing: border-box; width: max-content; max-width: 100%; min-height: 28px; padding: 5px 8px; overflow: visible; border-radius: 14px; font-size: 12px; line-height: 16px; text-align: center; white-space: normal; overflow-wrap: anywhere; }
 
   /* the shared skin gives every select a 40px minimum with a very specific selector (:root:root ... input.ui-input:not(...), skin.css), so this
    * one needs !important to be 36px like the other controls of the row */
@@ -67,7 +97,7 @@
   /* REMARKS: a 36px select filling its cell; the status never adds a line */
   :root .dw .tw-table.dw-table.dw-main td[data-label='REMARKS'] { padding-right: 8px; }
   .dw .tw-table .dw-remark { position: relative; gap: 0; width: 100%; }
-  .dw .tw-table .dw-remark-last { font-size: 12.5px; line-height: 1.35; }
+  .dw .tw-table .dw-remark-last { font-size: 12.5px; line-height: 1.35; text-align: center; }
   /* "Others": the inline box is the select's twin (36px, same width) with a small check button inside its right edge */
   .dw .tw-table .dw-remark-add { position: relative; }
   .dw .tw-table .dw-remark-add input { padding-right: 38px; font-size: 12px; }
@@ -83,18 +113,25 @@
   .dw .tw-table .dw-remark-status:is(.is-lead, .is-none) { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; border: 0; clip: rect(0 0 0 0); white-space: nowrap; }
   [data-theme='dark'] .dw .tw-table .dw-remark-status.is-busy { color: var(--primary); }
 
-  /* ACTIONS: the 72px button and the 36px menu, right-aligned with the cell's right padding */
-  :root .dw .tw-table.dw-table.dw-main :is(th, td).is-actions { padding: 0 8px 0 0; text-align: right; }
-  .dw .tw-table .dw-actions { gap: 4px; }
+  /* ACTIONS: the 72px button, the 4px gap and the 36px menu (112px) centred in their 116px cell */
+  :root .dw .tw-table.dw-table.dw-main :is(th, td).is-actions { padding: 0 2px; text-align: center; }
+  .dw .tw-table .dw-actions { justify-content: center; gap: 4px; }
   .dw .tw-table .dw-actions .dw-act { box-sizing: border-box; width: 72px; min-width: 72px; height: 36px; min-height: 36px; border-radius: 8px; font-size: 13px; }
   .dw .tw-table .dw-more-btn { width: 36px; height: 36px; border-radius: 8px; }
   .dw .tw-table .dw-more-btn:focus-visible, .dw .tw-table .dw-actions .dw-act:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 }
 
-.tw-notes { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; list-style: none; text-align: left; }
+.tw-notes { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; list-style: none; text-align: center; }
+.tw-remark-notes { display: none; }
 .tw-notes li { white-space: pre-wrap; overflow-wrap: anywhere; }
 .tw-notes li + li { border-top: 1px solid var(--table-line); padding-top: 6px; }
 .tw-notes small { display: block; color: var(--text-muted); font-size: .9em; font-variant-numeric: tabular-nums; }
+
+/* Table mode (1080px and wider): NOTES is a column only with has-notes; otherwise its cells are hidden and the notes show under the remark. */
+@container dw (min-width: 1080px) {
+  .dw .tw-table:not(.has-notes) td[data-label='NOTES'] { display: none; }
+  .dw .tw-table:not(.has-notes) .tw-remark-notes { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 4px; color: var(--text-muted); font-size: 11.5px; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
+}
 
 /* ---- cards (the panel is under 1080px wide: phones, tablets and a 1280px window with the sidebar open): 14px text, 16px inputs (no iOS zoom), 44px targets ---- */
 @container dw (max-width: 1079px) {
@@ -117,6 +154,24 @@
   .dw .tw-table .dw-remark-status.is-ok { border-color: var(--success-edge); background: var(--success-fill); color: var(--success-ink); }
   .dw .tw-table .dw-remark-status.is-error { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
   .dw .tw-table .dw-remark-status:is(.is-lead, .is-none) { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; border: 0; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+
+/* ---- the outcome of a placement that ended (STAGE column, and the same on the phone cards): a chip with the label and where it ended, then the
+ * reason and the date as plain muted lines. Declined is red, Rejected amber, Travelled green. Everything wraps; nothing is cut. ---- */
+.dw .dw-outcome { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; max-width: none; min-width: 0; margin-inline: auto; text-align: center; }
+.dw .dw-outcome-chip { box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 1px; width: 100%; padding: 5px 8px; border: 1px solid var(--border-main); border-radius: 12px; font-size: 11.5px; line-height: 1.25; overflow-wrap: break-word; }
+.dw .dw-outcome-chip > b { font-size: 12px; font-weight: 700; }
+.dw .dw-outcome-at { font-weight: 500; }
+.dw .dw-outcome-chip.is-declined { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+.dw .dw-outcome-chip.is-rejected { border-color: var(--warning-edge); background: var(--warning-fill); color: var(--warning-ink); }
+.dw .dw-outcome-chip.is-travelled { border-color: var(--success-edge); background: var(--success-fill); color: var(--success-ink); }
+.dw .dw-outcome-why { max-width: 100%; font-size: 11.5px; font-weight: 500; line-height: 1.3; overflow-wrap: break-word; color: var(--text-main); }
+.dw .dw-outcome-meta { max-width: 100%; font-size: 11px; line-height: 1.3; overflow-wrap: break-word; color: var(--text-muted); }
+@container dw (max-width: 1079px) {
+  .dw .dw-outcome { align-items: flex-start; max-width: 260px; margin-inline: 0; text-align: left; }
+  .dw .dw-outcome-chip { align-items: flex-start; width: auto; max-width: 100%; }
+  .dw .dw-outcome-why { font-size: 13px; }
+  .dw .dw-outcome-meta { font-size: 12.5px; }
 }
 
 /* ---- every size: the same chip look in the table and on the phone cards, and the focus rings ---- */

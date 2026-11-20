@@ -305,10 +305,10 @@ export const EDUCATION_COLUMNS_FILL: FillColumn[] = [
 ]
 
 export const EXPERIENCE_COLUMNS_FILL: FillColumn[] = [
-  { key: 'company', label: 'Name of company', placeholder: 'For example XYZ Ltd', span: 3 },
-  { key: 'designation', label: 'Designation', placeholder: 'For example Welder', span: 3 },
-  { key: 'country', label: 'Country', placeholder: 'For example India', span: 3 },
-  { key: 'period', label: 'Period of employment', placeholder: 'Jan 2018 to Mar 2020', span: 3 },
+  { key: 'company', label: 'Name of company', placeholder: 'For example XYZ Ltd', span: 6 },
+  { key: 'designation', label: 'Designation', placeholder: 'For example Welder', span: 6 },
+  { key: 'country', label: 'Country', placeholder: 'For example India', span: 4 },
+  { key: 'period', label: 'Period of employment', placeholder: 'Jan 2018 to Mar 2020', span: 8 },
 ]
 
 /** Tablet: two across, and anything half the row or wider takes the whole row. */

@@ -60,6 +60,7 @@ import { FileDrop, type StoredFile } from '@/shared/ui/file-drop'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { PersonAvatar } from './person-avatar'
 import { DocumentList } from '@/features/candidates/components/profile-documents'
+import { useCandidateDocuments } from '@/features/candidates/use-candidate-documents'
 import { SlaMeter, StageRail } from './stage-rail'
 import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
 import { shortRef } from '@/features/candidates/components/data-bank-columns'
@@ -337,7 +338,8 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
   const client = store.company(order.companyId)!
   const designation = store.designation(order.designationId)!
   const owner = store.user(cand.ownerId)
-  const photo = newestFileVersions(cand.documents.find(document => document.key === 'photo')?.versions ?? [])[0]
+  const { documents: candidateDocuments } = useCandidateDocuments(cand)
+  const photo = newestFileVersions(candidateDocuments.find(document => document.key === 'photo')?.versions ?? [])[0]
   // The order and the stage are already in the title line and the progress strip, so they are not repeated here.
   const facts: [string, React.ReactNode, React.ReactNode, boolean?][] = [
     ['Phone', <Phone key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.phone, true],
@@ -398,6 +400,7 @@ function CandidateRecord({ app }: { app: Application }) {
   const order = store.order(app.orderId)!
   const client = store.company(order.companyId)!
   const designation = store.designation(order.designationId)!
+  const { documents: candidateDocuments, loading: documentsLoading } = useCandidateDocuments(cand)
 
   return (
     <div className="sm-record">
@@ -461,7 +464,9 @@ function CandidateRecord({ app }: { app: Application }) {
 
       <Segment icon={<FileText className="h-4 w-4" />} title="Documents" subtitle="Nothing is overwritten. A new file is saved as a new version.">
         <div className="sm-fact is-wide">
-          <DocumentList documents={cand.documents} uploaderName={(id) => store.user(id)?.name || 'Former team member'} />
+          {documentsLoading
+            ? <p role="status" className="text-sm text-ink-500">Loading documents…</p>
+            : <DocumentList documents={candidateDocuments} uploaderName={(id) => store.user(id)?.name || 'Former team member'} />}
         </div>
       </Segment>
     </div>
@@ -619,9 +624,10 @@ function CurrentStage({
   // Edits are held locally until Save. Nothing is written as you type, so the form has
   // a dirty state and leaving with unsaved work is a deliberate act, not an accident.
   const candidate = store.candidate(app.candidateId)
-  const profilePassport = newestFileVersions(candidate?.documents.find((document) => document.key === 'passport')?.versions ?? [])[0]
-  const profileAirTicket = newestFileVersions(candidate?.documents.find((document) => document.key === 'air_ticket')?.versions ?? [])[0]
-  const profilePcc = newestFileVersions(candidate?.documents.find((document) => document.key === 'pcc')?.versions ?? [])[0]
+  const { documents: candidateDocuments } = useCandidateDocuments(candidate)
+  const profilePassport = newestFileVersions(candidateDocuments.find((document) => document.key === 'passport')?.versions ?? [])[0]
+  const profileAirTicket = newestFileVersions(candidateDocuments.find((document) => document.key === 'air_ticket')?.versions ?? [])[0]
+  const profilePcc = newestFileVersions(candidateDocuments.find((document) => document.key === 'pcc')?.versions ?? [])[0]
   const profilePassportId = profilePassport?.id
   const profileAirTicketId = profileAirTicket?.id
   const profilePccId = profilePcc?.id

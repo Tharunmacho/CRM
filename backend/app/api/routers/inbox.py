@@ -197,8 +197,19 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
     def read_bundles(session):
         return source_summaries(session, "email", on_page)
 
-    account_rows, counts, (page, total), attachments, jobs, bundles = parallel_reads(
-        db, read_accounts, read_counts, read_page, read_attachments, read_jobs, read_bundles)
+    def read_all():
+        return parallel_reads(db, read_accounts, read_counts, read_page, read_attachments, read_jobs, read_bundles)
+
+    # The message list is the same for every signed-in person (nothing here is per user: the admin-only parts are built below, from
+    # settings), and the desk asks for it from every open tab and on every dashboard visit. It is kept for a few seconds and dropped
+    # the moment mail, an intake job, a document or a candidate changes (see services/response_cache.py). A single-message read is the
+    # job poll that follows an upload: it always asks the database.
+    if message_id:
+        read = read_all()
+    else:
+        read = cached(("inbox-list", scope_of(db), scope, tuple(selected) if selected is not None else None, unread, has_attachments, q.strip(), offset, limit),
+                      INBOX_LIST_TOPICS, INBOX_LIST_SECONDS, read_all)
+    account_rows, counts, (page, total), attachments, jobs, bundles = read
     if total is None:
         total = sum(count for account_id, (count, _) in counts.items() if selected is None or account_id in selected)
     messages = [row[0] for row in page]
@@ -249,6 +260,8 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
 # through the change feed; the time limit only covers what the feed ignores, such as worker heartbeats.
 POLL_SECONDS = 5
 SUMMARY_SECONDS = 10
+INBOX_LIST_SECONDS = 10
+INBOX_LIST_TOPICS = ("mail", "documents", "candidates")  # messages, intake jobs, filed documents, and the candidates the dashboard card counts
 MAIL_TOPICS = ("mail", "documents")
 PULSE_TOPICS = ("candidates", "mail", "documents", "whatsapp")  # the intake revision also counts completed WhatsApp receipts
 ATTENTION_TOPICS = ("mail", "whatsapp", "documents")

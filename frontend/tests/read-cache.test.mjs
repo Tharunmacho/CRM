@@ -11,7 +11,7 @@ async function loadSource(path) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 }
 
-const { api, invalidateReads, readCacheSize } = await loadSource('../src/shared/api/client.ts')
+const { api, invalidateReads, readCacheSize, setFreshWindow } = await loadSource('../src/shared/api/client.ts')
 
 const realFetch = globalThis.fetch
 /** A fetch that answers at once from a script; records every call. */
@@ -49,12 +49,15 @@ test('concurrent reads of one URL share a single request', async () => {
   assert.equal(calls.length, 1)
 })
 
-test('a read without a cache policy is never stored', async () => {
-  const calls = scripted({ body: { n: 1 } })
-  await api.get('/notifications')
-  await api.get('/notifications')
-  assert.equal(calls.length, 2)
-  assert.equal(readCacheSize().cached, 0)
+test('a read without a cache policy is never stored (the short freshness window is tested in api-fresh-window)', async () => {
+  setFreshWindow(0)
+  try {
+    const calls = scripted({ body: { n: 1 } })
+    await api.get('/notifications')
+    await api.get('/notifications')
+    assert.equal(calls.length, 2)
+    assert.equal(readCacheSize().cached, 0)
+  } finally { setFreshWindow(1_800) }
 })
 
 test('a stale copy is returned at once and re-read in the background, telling the caller when it changed', async () => {

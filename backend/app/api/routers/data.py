@@ -16,8 +16,10 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
-from sqlalchemy import delete, exists, func, or_, select, update
+from sqlalchemy import delete, exists, func, or_, select, text, update
+from uuid import uuid4
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -71,6 +73,7 @@ from app.api.schemas import (
     TaskOut,
     TodoOut,
     UserOut,
+    camel,
 )
 from app.core.roles import is_admin_level
 
@@ -187,6 +190,37 @@ def _candidate_json(c: dict, files: dict[tuple[str, str], list[dict]], manual_re
     return out
 
 
+def _candidate_summary_json(c: dict) -> dict[str, Any]:
+    """One candidate for the slim desk: the candidate's own fields and, instead of the seven document slots with
+    every file in them, `documentCounts` ({"passport": 2}: files held per slot, absent when none). The browser rebuilds
+    the slot list from it and reads a candidate's files itself when a screen needs them (GET /api/candidates/{id})."""
+    outcome = None
+    if c["call_interested"]:
+        outcome = {"called": bool(c["call_called"]), "interested": c["call_interested"],
+                   "remarks": c["call_remarks"], "recordedAt": c["call_recorded_at"]}
+    out = CandidateOut.model_validate({**c, "added_at": c["created_at"], "documents": [], "call_outcome": outcome}).model_dump(by_alias=True, mode="json")
+    del out["documents"]
+    out["documentCounts"] = c.get("document_counts") or {}
+    return out
+
+
+def _row_defaults(schema: type[BaseModel], **overrides: Any) -> dict[str, Any]:
+    """The wire value of every optional field of `schema` when the writer leaves it out, by wire name (JSON-ready)."""
+    found = {camel(name): field.get_default(call_default_factory=True)
+             for name, field in schema.model_fields.items() if not field.is_required()}
+    return jsonable_encoder({**found, **overrides})
+
+
+def _is_default(value: Any, default: Any) -> bool:
+    return value is None if default is None else (type(value) is type(default) and value == default)
+
+
+def _trim(rows: list[dict[str, Any]], defaults: dict[str, Any], keep: tuple[str, ...] = ()) -> list[dict[str, Any]]:
+    """Rows without the keys that hold their default (null, empty list, 0, false...). `defaults` goes out once beside them
+    and the browser puts the keys back, so what the screens read is identical; nulls were a third of a task row."""
+    return [{key: value for key, value in row.items() if key in keep or key not in defaults or not _is_default(value, defaults[key])} for row in rows]
+
+
 # Everything the desk snapshot reads. Mail is here only for the unread badge (`inboxUnread`); a finished intake changes the
 # snapshot through its `ingestionRevision`, which is a write to the job tables (topic "documents").
 DESK_TOPICS = ("users", "clients", "companies", "designations", "orders", "candidates", "documents", "applications",
@@ -194,7 +228,7 @@ DESK_TOPICS = ("users", "clients", "companies", "designations", "orders", "candi
 DESK_TTL_SECONDS = 60
 
 
-def desk_response(request: Request, db: Session, user: User, compact: bool, headers: dict[str, str] | None = None) -> Response:
+def desk_response(request: Request, db: Session, user: User, compact: bool, headers: dict[str, str] | None = None, slim: bool = False) -> Response:
     """The desk snapshot as a finished HTTP response.
 
     The snapshot is the slowest thing the app loads (every candidate, ~2 KB each). It is built once per signed-in
@@ -203,9 +237,9 @@ def desk_response(request: Request, db: Session, user: User, compact: bool, head
     sign-in check has already run for this request.
     """
     def build() -> Encoded:
-        return Encoded.of(_bootstrap(db, user, compact), json_ready=True)
+        return Encoded.of(_bootstrap(db, user, compact, slim), json_ready=True, revision=slim)
 
-    encoded = cached(("desk", scope_of(db), user.id, compact), DESK_TOPICS, DESK_TTL_SECONDS, build)
+    encoded = cached(("desk", scope_of(db), user.id, compact, slim), DESK_TOPICS, DESK_TTL_SECONDS, build)
     return encoded.response(request, headers)
 
 
@@ -229,16 +263,21 @@ def warm_desk(people: int = 3) -> int:
             user = db.get(User, user_id)
             if user is None or not user.active:
                 continue
-            cached(("desk", scope_of(db), user.id, True), DESK_TOPICS, DESK_TTL_SECONDS,
-                   lambda user=user: Encoded.of(_bootstrap(db, user, True), json_ready=True))
+            cached(("desk", scope_of(db), user.id, True, True), DESK_TOPICS, DESK_TTL_SECONDS,
+                   lambda user=user: Encoded.of(_bootstrap(db, user, True, True), json_ready=True, revision=True))
             built += 1
     return built
 
 
 @router.get("/bootstrap")
-def bootstrap(request: Request, db: Session = Depends(get_db), user: User = Depends(current_user), compact: bool = False) -> Response:
-    """A fresh desk snapshot with one data query after the session check."""
-    return desk_response(request, db, user, compact)
+def bootstrap(request: Request, db: Session = Depends(get_db), user: User = Depends(current_user), compact: bool = False, slim: bool = False) -> Response:
+    """A fresh desk snapshot with one data query after the session check.
+
+    `compact=true` leaves out resume text. `slim=true` (implies compact) is the lean form the current front end asks for:
+    rows without their default-valued keys, per-slot file counts instead of every candidate's files, and a `revision`
+    that doubles as the ETag (If-None-Match gets an empty 304 while nothing changed). Callers that send only
+    `compact=true`, such as a tab still running an earlier version of the app, keep the exact earlier shape."""
+    return desk_response(request, db, user, compact or slim, None, slim)
 
 
 def _unread_badge(session: Session) -> dict:
@@ -248,15 +287,15 @@ def _unread_badge(session: Session) -> dict:
         return {"total": 0, "accounts": {}}
 
 
-def _bootstrap(db: Session, user: User, compact: bool = False) -> dict[str, Any]:
+def _bootstrap(db: Session, user: User, compact: bool = False, slim: bool = False) -> dict[str, Any]:
     # The sidebar's unread mail badge rides in the same round trip (a second statement beside the snapshot), so the page
     # does not need a separate /api/inbox/pulse request right after it loads.
-    snapshot, unread = parallel_reads(db, lambda session: read_snapshot(session, user.id, compact=compact), _unread_badge)
+    snapshot, unread = parallel_reads(db, lambda session: read_snapshot(session, user.id, compact=compact, slim=slim), _unread_badge)
     from app.services.document_status import statuses_by_candidate
     manual_records = statuses_by_candidate(snapshot.get("manual_documents"))
 
     files: dict[tuple[str, str], list[dict]] = {}
-    for f in snapshot["files"]:
+    for f in snapshot.get("files", ()):
         files.setdefault((f["entity_id"], f["slot"]), []).append(f)
 
     agreements = {f["entity_id"]: f for f in snapshot["agreements"]}
@@ -277,7 +316,7 @@ def _bootstrap(db: Session, user: User, compact: bool = False) -> dict[str, Any]
         item.stages = [StageRecordOut.model_validate(s) for s in stages.get(a["id"], [])]
         apps_out.append(item)
 
-    return {
+    body = {
         "me": UserOut.model_validate(user).model_dump(by_alias=True, mode="json"),
         "ingestionRevision": snapshot["ingestionRevision"],
         "inboxUnread": unread,
@@ -288,13 +327,44 @@ def _bootstrap(db: Session, user: User, compact: bool = False) -> dict[str, Any]
         "companies": [company_out(c) for c in snapshot["companies"]],
         "designations": [DesignationOut.model_validate(d).model_dump(by_alias=True, mode="json") for d in snapshot["designations"]],
         "orders": [OrderOut.model_validate(o).model_dump(by_alias=True, mode="json") for o in snapshot["orders"]],
-        "candidates": [_candidate_json(c, files, manual_records.get(c["id"])) for c in snapshot["candidates"]],
+        "candidates": ([_candidate_summary_json(c) for c in snapshot["candidates"]] if slim
+                       else [_candidate_json(c, files, manual_records.get(c["id"])) for c in snapshot["candidates"]]),
         "applications": [a.model_dump(by_alias=True, mode="json") for a in apps_out],
         "tasks": [TaskOut.model_validate(t).model_dump(by_alias=True, mode="json") for t in snapshot["tasks"]],
         "remarks": [RemarkOut.model_validate(r).model_dump(by_alias=True, mode="json") for r in snapshot["remarks"]],
         "todos": [TodoOut.model_validate(t).model_dump(by_alias=True, mode="json") for t in snapshot["todos"]],
         "notifications": [NotificationOut.model_validate(n).model_dump(by_alias=True, mode="json") for n in snapshot["notifications"]],
     }
+    if slim:
+        _shrink(body)
+    return body
+
+
+# What the slim desk leaves out of each row because it holds its default; `rowDefaults` in the same payload says what.
+# `resumeText` is always "" in the compact desk, `documentCounts` is the compact form of `documents`.
+_COMPACT_ROWS: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
+    "candidates": (CandidateOut, {"resumeText": "", "documentCounts": {}}),
+    "applications": (ApplicationOut, {}),
+    "tasks": (TaskOut, {}),
+    "orders": (OrderOut, {}),
+    "companies": (CompanyOut, {}),
+    "clients": (ClientOut, {}),
+}
+
+
+def _shrink(body: dict[str, Any]) -> None:
+    """Slim desk only: trim default-valued keys from the big row collections and say, once, how to put them back
+    (`rowDefaults`, and `documentLabels` for the slots in `documentCounts`)."""
+    defaults: dict[str, dict[str, Any]] = {"stages": _row_defaults(StageRecordOut)}  # the stage records inside each application
+    for application in body["applications"]:
+        application["stages"] = _trim(application["stages"], defaults["stages"])
+    for name, (schema, overrides) in _COMPACT_ROWS.items():
+        found = _row_defaults(schema, **overrides)
+        found.pop("documents", None)
+        defaults[name] = found
+        body[name] = _trim(body[name], found)
+    body["rowDefaults"] = defaults
+    body["documentLabels"] = dict(DOCUMENT_SLOTS)
 
 
 # ---------------------------------------------------------------- master data
@@ -996,18 +1066,27 @@ class RemarkIn(BaseModel):
 
 @router.post("/tasks/{task_id}/remarks", status_code=status.HTTP_201_CREATED)
 def add_remark(task_id: str, body: RemarkIn, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    task = db.scalar(select(Task).where(Task.id == task_id).with_for_update())
-    if task is None:
+    # ONE statement: lock the task, check who may write on it and that it is still open, add the remark and its audit entry, and hand the
+    # remark back. (It used to be a locking read and two inserts, one round trip each, before the commit.)
+    row = db.execute(text(
+        "WITH t AS (SELECT id, owner_id, title, completed_at, cancelled_at FROM workflow_tasks WHERE id = :task FOR UPDATE), "
+        "ok AS (SELECT id, title FROM t WHERE completed_at IS NULL AND cancelled_at IS NULL AND (CAST(:anyone AS boolean) OR owner_id = :me)), "
+        "r AS (INSERT INTO workflow_task_remarks (id, task_id, body, author_id) SELECT :remark_id, id, :body, :me FROM ok "
+        "RETURNING id, task_id, body, author_id, created_at), "
+        "a AS (INSERT INTO system_audit_log (id, actor_id, action, target, entity_type, entity_id) "
+        "SELECT :audit_id, :me, 'Added task remark', title, 'task', id FROM ok) "
+        "SELECT t.owner_id, t.completed_at, t.cancelled_at, r.id, r.task_id, r.body, r.author_id, r.created_at FROM t LEFT JOIN r ON true"),
+        {"task": task_id, "anyone": user.role != Role.staff, "me": user.id, "remark_id": str(uuid4()), "audit_id": str(uuid4()),
+         "body": body.body.strip()}).one_or_none()
+    if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
-    if user.role == Role.staff and task.owner_id != user.id:
-        raise HTTPException(403, "Only the assigned recruiter or a supervisor can update this task")
-    if task.completed_at or task.cancelled_at:
+    if row.id is None:
+        if user.role == Role.staff and row.owner_id != user.id:
+            raise HTTPException(403, "Only the assigned recruiter or a supervisor can update this task")
         raise HTTPException(409, "This task is closed, so its notes can no longer be changed")
-    row = Remark(task_id=task_id, body=body.body.strip(), author_id=user.id)
-    db.add(row)
-    db.add(AuditEntry(actor_id=user.id, action="Added task remark", entity_type="task", entity_id=task.id, target=task.title))
     db.commit()
-    return RemarkOut.model_validate(row).model_dump(by_alias=True, mode="json")
+    return RemarkOut(id=row.id, task_id=row.task_id, body=row.body, author_id=row.author_id,
+                     created_at=row.created_at).model_dump(by_alias=True, mode="json")
 
 
 # --------------------------------------------------------------- call outcome

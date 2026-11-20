@@ -23,7 +23,7 @@ export interface DailyItem {
   /** A stage of the placement is waiting for the recruiter (these rows are listed first). */
   waiting: boolean
   /** open: still to work; done: a stage was finished or the initial call answered today. */
-  status: 'open' | 'done'
+  status: 'open' | 'done' | 'closed'
   completedAt: string | null
   calledAt?: string | null
   stageMovedAt?: string | null
@@ -58,7 +58,29 @@ export interface DailyItem {
   remark: { body: string; at: string; by: string; count: number } | null
   /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form (an older server sends nothing). */
   commencementDate?: string | null
+  /** How the placement ended (Declined, Rejected, Travelled); an older server sends nothing, which reads as a current row. */
+  outcome?: DailyOutcome | null
+  /** The stage's name where a closed placement ended, when the server sends it (else the screen looks it up from `stage`). */
+  stageTitle?: string | null
 }
+
+export type OutcomeKind = 'current' | 'declined' | 'rejected' | 'travelled'
+
+/** `GET /api/daily-work` item `outcome`: kind, the label of a closed one (null for current), the reason, the stage where it ended and when. */
+export interface DailyOutcome {
+  kind: OutcomeKind
+  label: 'Declined' | 'Rejected' | 'Travelled' | null
+  reason: string | null
+  stage: number | null
+  at: string | null
+  /** The name of the person who recorded it, when the server sends it. */
+  by?: string | null
+}
+
+/** The views of the Tasks list: `?view=` on the page and on `GET /api/daily-work` (current is today's list and the default). */
+export type DailyView = 'current' | 'declined' | 'rejected' | 'travelled' | 'all'
+
+export type ViewCounts = Record<OutcomeKind, number>
 
 export interface DailySummary {
   /** To work plus done today. */
@@ -84,6 +106,10 @@ export interface DailyWorkResponse {
   /** More candidates exist than the rows sent (the counts stay exact). */
   truncated: boolean
   staff?: DailyStaffSummary[]
+  /** The view the rows are for (an older server sends nothing: current). */
+  view?: DailyView
+  /** How many candidates each view holds for the same scope (an older server sends nothing). */
+  viewCounts?: Partial<ViewCounts>
 }
 
 /** One candidate in Follow-up: an active placement at stage 2 to 12, one row per placement. */
@@ -279,10 +305,123 @@ export function referralLabel(referral: DailyItem['referral']): string {
   return referral.label
 }
 
-/** The row's button: Complete (a placement to finish a stage on), Open (the application form), View once done today. */
-export function rowAction(item: Pick<DailyItem, 'status' | 'applicationId'>): 'Complete' | 'Open' | 'View' {
-  return item.status === 'done' ? 'View' : item.applicationId ? 'Complete' : 'Open'
+/** The row's button: Complete (a placement to finish a stage on), Open (the application form), View once done today or when the placement ended. */
+export function rowAction(item: Pick<DailyItem, 'status' | 'applicationId'> & { outcome?: DailyItem['outcome'] }): 'Complete' | 'Open' | 'View' {
+  return item.status === 'done' || isClosed(item) ? 'View' : item.applicationId ? 'Complete' : 'Open'
 }
+
+// ------------------------------------------------------------------------------------------------ status views (Declined, Rejected, Travelled)
+
+const OUTCOME_LABEL: Record<Exclude<OutcomeKind, 'current'>, 'Declined' | 'Rejected' | 'Travelled'> = { declined: 'Declined', rejected: 'Rejected', travelled: 'Travelled' }
+
+/** The five views of the Tasks list, in the order of the filter bar; `empty` is the empty-state title and `noun` the word the summary uses. */
+export const DAILY_VIEWS: readonly { key: DailyView; label: string; empty: string; noun: string }[] = [
+  { key: 'current', label: 'Current process', empty: 'No candidates assigned', noun: 'candidate' },
+  { key: 'declined', label: 'Declined', empty: 'No declined candidates', noun: 'declined candidate' },
+  { key: 'rejected', label: 'Rejected', empty: 'No rejected candidates', noun: 'rejected candidate' },
+  { key: 'travelled', label: 'Travelled', empty: 'No travelled candidates', noun: 'travelled candidate' },
+  { key: 'all', label: 'All', empty: 'No candidates', noun: 'candidate' },
+]
+
+/** True for a `?view=` value that belongs to this list (the 48-hour list has its own views: open, due, overdue, ...). */
+export const isDailyView = (value: string | null | undefined): value is DailyView => DAILY_VIEWS.some((view) => view.key === value)
+
+/** The view in the URL; anything missing or unknown is the current process (today's list). */
+export const parseView = (value: string | null | undefined): DailyView => (isDailyView(value) ? value : 'current')
+
+/** The `view` query value to send: nothing for the current process, so its request is the one every other screen already shares. */
+export const viewParam = (view: DailyView): string | null => (view === 'current' ? null : view)
+
+/**
+ * The server path of a list: `/daily-work?staff=all&view=declined`. `staff` and `view` are left out when they are the default, and
+ * `view` only goes to `/daily-work` (Follow-up has no views).
+ */
+export function listRequest(path: string, staff?: string, view: DailyView = 'current'): string {
+  const parts: string[] = []
+  if (staff) parts.push(`staff=${encodeURIComponent(staff)}`)
+  const named = path === '/daily-work' ? viewParam(view) : null
+  if (named) parts.push(`view=${named}`)
+  return parts.length ? `${path}?${parts.join('&')}` : path
+}
+
+/** How a row ended. A row without an `outcome` (an older server, a follow-up row) or with one this screen does not know is a current row. */
+export function outcomeOf(item: { outcome?: Partial<DailyOutcome> | null }): DailyOutcome {
+  const raw = item.outcome
+  const kind = raw?.kind
+  if (kind !== 'declined' && kind !== 'rejected' && kind !== 'travelled') return { kind: 'current', label: null, reason: null, stage: null, at: null }
+  const stage = typeof raw?.stage === 'number' && Number.isFinite(raw.stage) && raw.stage > 0 ? Math.floor(raw.stage) : null
+  return { kind, label: OUTCOME_LABEL[kind], reason: raw?.reason?.trim() || null, stage, at: raw?.at ?? null, by: raw?.by?.trim() || null }
+}
+
+/** A row whose placement ended (Declined, Rejected or Travelled): nothing is worked on it any more. */
+export const isClosed = (item: { outcome?: Partial<DailyOutcome> | null }): boolean => outcomeOf(item).kind !== 'current'
+
+/** "at 5 · Offer letter": where the placement ended (the stage number and its name); '' when no stage is known. `titleOf` looks the name up. */
+export function outcomeStageText(outcome: Pick<DailyOutcome, 'stage'>, titleOf: (stage: number) => string | undefined = () => undefined): string {
+  if (!outcome.stage) return ''
+  const title = titleOf(outcome.stage)
+  return title ? `at ${outcome.stage} · ${title}` : `at ${outcome.stage}`
+}
+
+/** The one sentence under the filter bar that says what a view means (nothing for the current process). */
+export const VIEW_CAPTION: Record<DailyView, string> = {
+  current: '',
+  declined: 'Declined: the candidate said no (they turned the offer or the job down).',
+  rejected: 'Rejected: someone else stopped the application: the client, the medical, the visa or another step.',
+  travelled: 'Travelled: the candidate was deployed and has flown.',
+  all: 'All: the current process plus the candidates who were declined, rejected or have travelled.',
+}
+
+/** The visible lines under a closed row's chip: WHERE ("at 5 · Offer letter"), WHY (the reason), WHEN ("19 Nov 2026") and, when the server sends it, WHO ("by Asha"). */
+export function outcomeDetail(outcome: DailyOutcome, titleOf?: (stage: number) => string | undefined, timeZone?: string): { where: string; why: string; when: string; by: string; line: string } {
+  const where = outcomeStageText(outcome, titleOf)
+  const why = outcome.reason ?? ''
+  const when = docLabel(dayOf(outcome.at, timeZone))
+  const by = outcome.by ? `by ${outcome.by}` : ''
+  return { where, why, when, by, line: [why, when, by].filter(Boolean).join(' · ') }
+}
+
+export interface ViewTab { key: DailyView; label: string; count: number | null }
+
+/**
+ * The filter bar's tabs with their counts. The server counts the current process as today's list; the screen's own current rows also hold the
+ * follow-up placements, so `currentShown` (the count the screen last showed, when it knows it) wins for Current process and All. A count the
+ * server did not send is null (the tab then shows just its name).
+ */
+export function viewTabs(counts: Partial<ViewCounts> | null | undefined, currentShown?: number | null): ViewTab[] {
+  const num = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null)
+  const current = num(currentShown) ?? num(counts?.current)
+  const closed = [num(counts?.declined), num(counts?.rejected), num(counts?.travelled)]
+  const all = current === null || closed.some((value) => value === null) ? null : current + (closed as number[]).reduce((sum, value) => sum + value, 0)
+  const count = (key: DailyView): number | null => key === 'current' ? current : key === 'all' ? all : num(counts?.[key])
+  return DAILY_VIEWS.map((view) => ({ key: view.key, label: view.label, count: count(view.key) }))
+}
+
+/** "Current process (12)": a tab's text; just the name while the count is not known. */
+export const viewTabText = (tab: Pick<ViewTab, 'label' | 'count'>): string => (tab.count === null ? tab.label : `${tab.label} (${tab.count})`)
+
+/** Where the arrow keys take the focus in the filter bar: Left and Right wrap around, Home and End jump; null for any other key. */
+export function nextViewIndex(key: string, index: number, length: number): number | null {
+  if (length <= 0) return null
+  if (key === 'ArrowRight' || key === 'ArrowDown') return (index + 1) % length
+  if (key === 'ArrowLeft' || key === 'ArrowUp') return (index - 1 + length) % length
+  if (key === 'Home') return 0
+  if (key === 'End') return length - 1
+  return null
+}
+
+/** The panel summary under the title: "12 candidates · 3 recruiters" for the current process, "4 declined candidates" for Declined. */
+export function viewSummary(view: DailyView, count: number, recruiters?: number): string {
+  const noun = DAILY_VIEWS.find((item) => item.key === view)?.noun ?? 'candidate'
+  const base = `${count} ${noun}${count === 1 ? '' : 's'}${view === 'all' ? ' · all statuses' : ''}`
+  return typeof recruiters === 'number' ? `${base} · ${recruiters} ${recruiters === 1 ? 'recruiter' : 'recruiters'}` : base
+}
+
+/** The empty-state title of a view ("No declined candidates"). */
+export const viewEmptyTitle = (view: DailyView): string => DAILY_VIEWS.find((item) => item.key === view)?.empty ?? 'No candidates'
+
+/** The Export button's words for a view: "Export Excel" for the current process, "Export Excel · Declined" for the others. */
+export const exportLabel = (view: DailyView): string => (view === 'current' ? 'Export Excel' : `Export Excel · ${DAILY_VIEWS.find((item) => item.key === view)?.label ?? ''}`)
 
 // ------------------------------------------------------------------------------------------------ table cells
 
@@ -342,6 +481,17 @@ export function clientCell(item: Pick<DailyItem, 'client' | 'kind'>): { text: st
   return { text: '', hint: item.kind === 'call' ? 'Not matched to an order yet' : 'No client recorded' }
 }
 
+/**
+ * The small line under the client name: the order's country (or, for a candidate not matched to an order yet, their preferred country),
+ * as plain text with no flag. '' when no country is known, so nothing is drawn. A country read from the candidate's current city is not
+ * shown: that is where they live, not where the job is.
+ */
+export function clientCountry(item: Pick<DailyItem, 'country' | 'countrySource' | 'locationHint'>): { text: string; hint: string } {
+  const cell = countryCell(item)
+  if (cell.source !== 'order' && cell.source !== 'preference') return { text: '', hint: '' }
+  return { text: cell.names.map((name) => name.replace(/\s+/g, ' ')).join(', '), hint: cell.hint }
+}
+
 const SHORT_COUNTRIES: Record<string, string> = {
   'united arab emirates': 'UAE', 'saudi arabia': 'KSA', 'kingdom of saudi arabia': 'KSA', 'united kingdom': 'UK', 'united states': 'USA',
   'united states of america': 'USA', 'republic of korea': 'S. Korea', 'south korea': 'S. Korea',
@@ -360,26 +510,51 @@ export interface TodayWork { called: boolean; moved: boolean; remarked: boolean;
 
 export interface TaskRow extends DailyItem { today: TodayWork }
 
-export interface TaskColumn { key: string; title: string; width: number; left?: boolean; supervisor?: boolean; quiet?: boolean }
+export interface TaskColumn { key: string; title: string; width: number; left?: boolean; supervisor?: boolean; quiet?: boolean; /** Only a column of a wide panel (see TASK_LIST_COLUMNS). */ wide?: boolean }
 
-/** Relative widths for the fixed-layout candidate table. Narrow panels use labelled cards. */
+/**
+ * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), CLIENT (the name, and under it the country in
+ * a smaller muted line), JOB, CANDIDATE, Recruiter (supervisors only), AGENCY, STAGE, TODAY, REMARKS, NOTES (the day's notes, wide panels only) and
+ * the untitled actions cell. Every header is one short word so it never wraps. Widths are the column plan in px: they add up to 1108px for a
+ * supervisor (1017px without the Recruiter column), the most a 1440px window gives the table (its panel is about 1111px). The table never scrolls
+ * sideways: its columns are those widths as percentages of the panel (columnLayout), so it fills the panel at any width from 1080px (below that the
+ * Tasks list is a stack of cards). Every column is centred (header and cells), the actions included (the 72px Open / Complete / View button, the 4px
+ * gap and the 36px row menu fill their 116px cell).
+ *
+ * Every width is its longest word plus the cell's 17px (8px padding on both sides and the 1px column line), measured in Poppins at the table's
+ * sizes: CLIENT "International" (86px at 13px / 600), CANDIDATE "EMAYAVARAMBAN" (121px), JOB "SUPERVISOR" (78px), AGENCY "LAVOROTECH" (86px), Recruiter
+ * "Srivathsala" (74px), STAGE "Prescreening" (77px in its 16px chip), TODAY the whole "Moved 10:45" chip (75px + 18px), and the headers S NO (29px),
+ * CANDIDATE (70px) and RECRUITER (65px). DOC and REMARKS are the two with give: the empty "dd/mm/yyyy" hint may lose its last pixels and the remark
+ * dropdown clips a long remark to two lines (its full text is the tooltip).
+ *
+ * NOTES has no room at 1108px: it is a column only when the panel is at least `taskPlanWidth(supervisor, true)` px wide (1280px for a supervisor, 1189px
+ * for a recruiter: a 1920px window); on a narrower table the day's notes are the second line under the remark (the full text is its tooltip), and in
+ * the cards they are a row of their own.
+ */
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
-  { key: 'no', title: 'S NO', width: 48 },
-  { key: 'doc', title: 'DOC', width: 94, left: true },
-  { key: 'client', title: 'CLIENT', width: 102, left: true },
-  { key: 'position', title: 'JOB', width: 100, left: true },
-  { key: 'candidate', title: 'CANDIDATE', width: 140, left: true },
-  { key: 'staff', title: 'Recruiter', width: 118, supervisor: true, left: true },
-  { key: 'agency', title: 'AGENCY', width: 80, left: true },
-  { key: 'stage', title: 'STAGE', width: 120, left: true },
-  { key: 'today', title: 'TODAY', width: 100, left: true },
-  { key: 'remarks', title: 'REMARKS', width: 134, left: true },
-  { key: 'notes', title: 'NOTES', width: 140, left: true },
-  { key: 'actions', title: 'Actions', width: 150, quiet: true },
+  { key: 'no', title: 'S NO', width: 46 },
+  { key: 'doc', title: 'DOC', width: 90 },
+  { key: 'client', title: 'CLIENT', width: 103 },
+  { key: 'position', title: 'JOB', width: 96 },
+  { key: 'candidate', title: 'CANDIDATE', width: 138 },
+  { key: 'staff', title: 'Recruiter', width: 91, supervisor: true },
+  { key: 'agency', title: 'AGENCY', width: 103 },
+  { key: 'stage', title: 'STAGE', width: 110 },
+  { key: 'today', title: 'TODAY', width: 108 },
+  { key: 'remarks', title: 'REMARKS', width: 107 },
+  { key: 'notes', title: 'NOTES', width: 172, wide: true },
+  { key: 'actions', title: 'Actions', width: 116, quiet: true },
 ]
 
 /** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own). */
-export const taskColumnsFor = (supervisor: boolean): TaskColumn[] => TASK_LIST_COLUMNS.filter((column) => supervisor || !column.supervisor)
+export const taskColumnsFor = (supervisor: boolean, wide = true): TaskColumn[] =>
+  TASK_LIST_COLUMNS.filter((column) => (supervisor || !column.supervisor) && (wide || !column.wide))
+
+/** The plan's width in px for one person's columns: the panel width from which they all keep their measured room (`wide`: with NOTES). */
+export const taskPlanWidth = (supervisor: boolean, wide: boolean): number => taskColumnsFor(supervisor, wide).reduce((total, column) => total + column.width, 0)
+
+/** Whether a panel this wide (px) has room for the NOTES column; a narrower one shows the day's notes under the remark. */
+export const showsNotesColumn = (supervisor: boolean, panelWidth: number): boolean => panelWidth >= taskPlanWidth(supervisor, true)
 
 export interface TodayChip { key: 'called' | 'moved'; text: string }
 
@@ -408,15 +583,16 @@ export function docLabel(iso: string | null | undefined): string {
   return `${day} ${SHORT_MONTHS[month - 1]} ${year}`
 }
 
-/** The server path of the Excel export for the same list the screen shows: everyone (supervisors) or one recruiter. */
-export function exportPath(staff?: string): string {
-  return `/daily-work/export?format=xlsx&staff=${encodeURIComponent(staff || 'all')}`
+/** The server path of the Excel export for the same list the screen shows: everyone (supervisors) or one recruiter, in the chosen view (nothing added for the current process). */
+export function exportPath(staff?: string, view: DailyView = 'current'): string {
+  const named = viewParam(view)
+  return `/daily-work/export?format=xlsx&staff=${encodeURIComponent(staff || 'all')}${named ? `&view=${named}` : ''}`
 }
 
-/** "tasks-2026-11-19.xlsx", or "tasks-asha-devi-2026-11-19.xlsx" for one recruiter's list. */
-export function exportFileName(day: string, person?: string): string {
+/** "tasks-2026-11-19.xlsx", "tasks-asha-devi-2026-11-19.xlsx" for one recruiter's list, "tasks-declined-2026-11-19.xlsx" for another view. */
+export function exportFileName(day: string, person?: string, view: DailyView = 'current'): string {
   const slug = (person ?? '').normalize('NFKD').replace(/\p{M}+/gu, '').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').toLowerCase().slice(0, 40)
-  return `tasks${slug ? `-${slug}` : ''}-${day}.xlsx`
+  return `tasks${slug ? `-${slug}` : ''}${viewParam(view) ? `-${view}` : ''}-${day}.xlsx`
 }
 
 /** The calendar day ("2026-11-18") of a moment on the agency clock; '' when the moment is not a date. */
@@ -458,18 +634,41 @@ export function taskRows(daily: DailyItem[], followUp: FollowUpItem[], today: st
     // A placement in Follow-up whose stage was finished today (stage 2 to 12) is "stage moved" today, like a finished prescreening.
     recordMove(item.candidateId, item.stageMovedAt)
   }
-  const rows = [...merged.values()].map((item): TaskRow => ({
-    ...item,
-    today: {
-      called: item.calledAt === undefined ? item.status === 'done' && item.kind === 'call' : !!item.calledAt && dayOf(item.calledAt, timeZone) === today,
-      calledAt: item.calledAt || undefined,
-      moved: movedToday.has(item.candidateId) || (item.stageMovedAt === undefined && item.status === 'done' && item.kind === 'stage'),
-      movedAt: movedToday.get(item.candidateId),
-      remarked: !!item.todayNotes?.length || (!!item.remark && dayOf(item.remark.at, timeZone) === today),
-    },
-  }))
+  const rows = [...merged.values()].map((item): TaskRow => isClosed(item)
+    // A placement that ended has nothing done on it today, whatever else the server says.
+    ? { ...item, today: { called: false, moved: false, remarked: false } }
+    : {
+      ...item,
+      today: {
+        called: item.calledAt === undefined ? item.status === 'done' && item.kind === 'call' : !!item.calledAt && dayOf(item.calledAt, timeZone) === today,
+        calledAt: item.calledAt || undefined,
+        moved: movedToday.has(item.candidateId) || (item.stageMovedAt === undefined && item.status === 'done' && item.kind === 'stage'),
+        movedAt: movedToday.get(item.candidateId),
+        remarked: !!item.todayNotes?.length || (!!item.remark && dayOf(item.remark.at, timeZone) === today),
+      },
+    })
   const touched = (row: TaskRow) => (row.today.called || row.today.moved || row.today.remarked ? 1 : 0)
-  return rows.sort((a, b) => touched(a) - touched(b) || Number(b.waiting) - Number(a.waiting) || (b.stage ?? 0) - (a.stage ?? 0))
+  rows.sort((a, b) => touched(a) - touched(b) || Number(b.waiting) - Number(a.waiting) || (b.stage ?? 0) - (a.stage ?? 0))
+  return sortByDoc(rows)
+}
+
+/** The day of a DOC as a number (UTC midnight) so dates compare; null for no date or one that is not a real day (2026-02-30). */
+export function docTime(iso: string | null | undefined): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '')
+  if (!match) return null
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  const real = new Date(Date.UTC(year, month - 1, day))
+  return real.getUTCFullYear() === year && real.getUTCMonth() === month - 1 && real.getUTCDate() === day ? real.getTime() : null
+}
+
+/**
+ * The Tasks order: by DOC (date of commencement), the OLDEST first and the newest last; a candidate with no date (or an impossible one) goes to the END,
+ * after every dated one. Rows with the same day, and the ones with none, keep the order they came in (a stable sort, whatever the engine).
+ */
+export function sortByDoc<T extends { commencementDate?: string | null }>(rows: readonly T[]): T[] {
+  return rows.map((row, index) => ({ row, index, time: docTime(row.commencementDate) }))
+    .sort((a, b) => (a.time === null ? 1 : 0) - (b.time === null ? 1 : 0) || (a.time ?? 0) - (b.time ?? 0) || a.index - b.index)
+    .map((entry) => entry.row)
 }
 
 /**
@@ -484,6 +683,7 @@ export interface RecruiterWork { assigned: number; called: number; moved: number
 export function recruiterWork(rows: TaskRow[]): Map<string, RecruiterWork> {
   const work = new Map<string, RecruiterWork>()
   for (const row of rows) {
+    if (isClosed(row)) continue   // a placement that ended is nobody's work today: it is on no recruiter's card
     const entry = work.get(row.ownerId) ?? { ...NO_WORK }
     entry.assigned += 1
     // A stage is never finished without speaking to the candidate, so a stage moved today counts as a call even when no remark was typed.

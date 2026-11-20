@@ -93,7 +93,7 @@ def note_for(outcome: str, last_error: str | None, *, candidate_needs_review: bo
     return text or "Waiting to be read"
 
 
-def _page_query(filters: list):
+def _page_query(filters: list, *, with_total: bool = True):
     names = (
         select(func.jsonb_agg(aggregate_order_by(
             func.jsonb_build_object("name", MailAttachment.file_name, "sizeKb", func.coalesce(MailAttachment.size_kb, 0)),
@@ -125,7 +125,7 @@ def _page_query(filters: list):
             MailAccount.address.label("account_address"),
             Candidate.ref, Candidate.care_id, Candidate.name.label("candidate_name"), Candidate.needs_review.label("candidate_review"),
             created.label("created"), names.label("attachment_names"), attachment_count.label("attachment_count"),
-            filed.label("filed"), func.count().over().label("total"),
+            filed.label("filed"), *((func.count().over().label("total"),) if with_total else ()),
         )
         .select_from(EmailIngestionJob)
         .join(MailMessage, MailMessage.id == EmailIngestionJob.message_id)
@@ -151,11 +151,16 @@ def _filters(account: str, status: str, q: str) -> list:
 def ingested_page(db: Session, *, account: str = "all", status: str = "all", q: str = "", page: int = 0, page_size: int = 25) -> dict:
     """One page of "what happened to each email", newest first. One statement (a second only for a page past the end)."""
     filters = _filters(account, status, q)
-    rows = db.execute(
-        _page_query(filters)
-        .order_by(MailMessage.received_at.desc(), EmailIngestionJob.id.desc())
-        .offset(page * page_size).limit(page_size)
-    ).all()
+    order = (MailMessage.received_at.desc(), EmailIngestionJob.id.desc())
+    # The page's ids are chosen first from NARROW rows (the job id and the window count), then only those rows are read in full with
+    # their attachment names, counts and filed documents: a window count over the full joined rows spilled to disk on every page.
+    narrow = (select(EmailIngestionJob.id.label("id"), func.count().over().label("total")).select_from(EmailIngestionJob)
+              .join(MailMessage, MailMessage.id == EmailIngestionJob.message_id)
+              .join(MailAccount, MailAccount.id == MailMessage.account_id)
+              .outerjoin(Candidate, Candidate.id == EmailIngestionJob.candidate_id)
+              .where(*filters).order_by(*order).offset(page * page_size).limit(page_size).subquery("chosen"))
+    rows = db.execute(_page_query([], with_total=False).join(narrow, narrow.c.id == EmailIngestionJob.id)
+                      .add_columns(narrow.c.total).order_by(*order)).all()
     if rows:
         total = rows[0].total
     elif page == 0:

@@ -26,6 +26,8 @@ export interface LiveChange {
   at: number | null
   /** The stream was interrupted or the server fell behind: treat everything as possibly changed. */
   resync: boolean
+  /** Every topic the server announced, including ones this subscriber did not ask for (`topics` is cut down to its own). */
+  announced?: string[]
 }
 
 export type LiveHandler = (change: LiveChange) => void
@@ -70,6 +72,18 @@ export function isOtherRecord(change: LiveChange, topic: string, id: string): bo
   return Array.isArray(ids) && ids.length > 0 && !ids.includes(id)
 }
 
+/**
+ * True when a change is only what presence heartbeats leave behind: the server announces `attendance` (and the
+ * `reports` that follow it) every time any staff member's tab reports in, about twice a minute each. Such an event
+ * is rarely news to a screen that is not about attendance, so screens may delay their refetch for it. Anything else
+ * announced alongside it (or a resync) makes it ordinary news.
+ */
+export function isPresenceNoise(change: LiveChange): boolean {
+  if (change.resync) return false
+  const topics = change.announced ?? change.topics
+  return topics.length > 0 && topics.includes('attendance') && topics.every((topic) => topic === 'attendance' || topic === 'reports')
+}
+
 export const DEFAULT_DEBOUNCE_MS = 350
 const BACKOFF_START_MS = 1_000
 const BACKOFF_MAX_MS = 60_000
@@ -100,7 +114,7 @@ function toChange(raw: Record<string, unknown>): LiveChange {
       if (Array.isArray(found)) ids[topic] = found.filter((id): id is string => typeof id === 'string')
     }
   }
-  return { topics, ids, at: typeof raw.at === 'number' ? raw.at : null, resync: raw.resync === true || topics.includes('*') }
+  return { topics, ids, at: typeof raw.at === 'number' ? raw.at : null, resync: raw.resync === true || topics.includes('*'), announced: topics }
 }
 
 function merge(first: LiveChange | null, second: LiveChange): LiveChange {
@@ -112,6 +126,7 @@ function merge(first: LiveChange | null, second: LiveChange): LiveChange {
     ids: first.resync || second.resync ? {} : ids,
     at: Math.max(first.at ?? 0, second.at ?? 0) || null,
     resync: first.resync || second.resync,
+    announced: [...new Set([...(first.announced ?? first.topics), ...(second.announced ?? second.topics)])],
   }
 }
 

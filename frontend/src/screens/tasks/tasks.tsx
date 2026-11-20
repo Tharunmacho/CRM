@@ -21,7 +21,7 @@ import { useDeadlineClock, useWorkspaceRead } from '@/features/staff/use-workspa
 import { ClockCell, RemarkPanel, clockOf } from './task-parts'
 import { DailyWork } from './daily-work'
 import { useBucketCounts, useOpenBucket } from './tasks-tabs'
-import { bucketTabs } from '@/features/daily-work/daily-work-model'
+import { bucketTabs, isDailyView } from '@/features/daily-work/daily-work-model'
 import { Flag, OwnerTag, StageTrack } from './task-identity'
 import '@/styles/tasks-page.css'
 import { isAdminLevel } from '@/shared/model/role-labels'
@@ -53,7 +53,7 @@ function Stamp({ value, empty }: { value?: string | Date; empty?: boolean }) {
 const LIST_PARAMS = ['task', 'stage', 'date', 'from', 'to']
 function wantsDailyWork(params: URLSearchParams) {
   const view = params.get('view')
-  return (!view || view === 'daily') && !LIST_PARAMS.some((name) => params.get(name))
+  return (!view || view === 'daily' || isDailyView(view)) && !LIST_PARAMS.some((name) => params.get(name))
 }
 function wantsFollowUp(params: URLSearchParams) {
   return params.get('view') === 'follow-up' && !LIST_PARAMS.some((name) => params.get(name))

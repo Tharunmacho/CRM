@@ -198,20 +198,20 @@ KNOWN_REPEATS = {"lead batch report xlsx"}
 # (label, method, path, kwargs, roles -> statement budget). A budget is the measured count plus a little headroom.
 def cases(ids):
     return [
-        ("leads list 25", "GET", "/api/leads?page_size=25", {}, 3),
-        ("leads list 100 + search", "GET", "/api/leads?page_size=100&q=lead%20person", {}, 3),
-        ("leads list filtered + extra cols", "GET", "/api/leads?status=new&campaign=Campaign%202&extra=*&page_size=10&page=1", {}, 3),
-        ("leads summary", "GET", "/api/leads/summary", {}, 3),
-        ("leads facets", "GET", "/api/leads/facets", {}, 3),
-        ("leads columns", "GET", "/api/leads/columns", {}, 3),
+        ("leads list 25", "GET", "/api/leads?page_size=25", {}, 2),
+        ("leads list 100 + search", "GET", "/api/leads?page_size=100&q=lead%20person", {}, 2),
+        ("leads list filtered + extra cols", "GET", "/api/leads?status=new&campaign=Campaign%202&extra=*&page_size=10&page=1", {}, 2),
+        ("leads summary", "GET", "/api/leads/summary", {}, 2),
+        ("leads facets", "GET", "/api/leads/facets", {}, 2),
+        ("leads columns", "GET", "/api/leads/columns", {}, 2),
         ("lead detail", "GET", f"/api/leads/{ids.lead}", {}, 5),
         ("lead batches", "GET", "/api/leads/batches", {}, 3),
-        ("candidates list 20", "GET", "/api/candidates", {}, 3),
-        ("candidates list search", "GET", "/api/candidates?q=cook%20kitchen&page_size=50", {}, 3),
-        ("candidates list skills", "GET", "/api/candidates?skills=Cooking&skills=Skill%203", {}, 3),
-        ("candidate position-groups", "GET", "/api/candidates/position-groups", {}, 3),
-        ("candidate skill-facets", "GET", "/api/candidates/skill-facets", {}, 4),
-        ("candidate pool-counts", "GET", "/api/candidates/pool-counts", {}, 3),
+        ("candidates list 20", "GET", "/api/candidates", {}, 2),
+        ("candidates list search", "GET", "/api/candidates?q=cook%20kitchen&page_size=50", {}, 2),
+        ("candidates list skills", "GET", "/api/candidates?skills=Cooking&skills=Skill%203", {}, 2),
+        ("candidate position-groups", "GET", "/api/candidates/position-groups", {}, 2),
+        ("candidate skill-facets", "GET", "/api/candidates/skill-facets", {}, 3),
+        ("candidate pool-counts", "GET", "/api/candidates/pool-counts", {}, 2),
         ("candidate matching", "GET", f"/api/candidates/matching?order_id={ids.order}", {}, 4),
         ("candidate detail", "GET", f"/api/candidates/{ids.candidate}", {}, 3),
         ("candidate assignment-history", "GET", f"/api/candidates/{ids.candidate}/assignment-history", {}, 4),
@@ -221,8 +221,8 @@ def cases(ids):
         ("candidate inspection.xlsx", "GET", f"/api/candidates/{ids.candidate}/inspection.xlsx", {}, 23),
         ("application reopenings", "GET", f"/api/applications/{ids.application}/reopenings", {}, 5),
         ("application draft", "GET", f"/api/applications/{ids.application}/draft", {}, 5),
-        ("travelled list", "GET", "/api/travelled", {}, 4),
-        ("travelled export csv", "GET", "/api/travelled/export?format=csv", {}, 4),
+        ("travelled list", "GET", "/api/travelled", {}, 3),
+        ("travelled export csv", "GET", "/api/travelled/export?format=csv", {}, 3),
         ("client tracker", "GET", "/api/reports/client-tracker", {}, 6),
         ("client tracker xlsx", "GET", "/api/reports/client-tracker?format=xlsx&country=UAE", {}, 6),
         ("files list (candidate)", "GET", f"/api/files?entity_type=candidate&entity_id={ids.candidate}", {}, 4),
@@ -407,3 +407,16 @@ def test_the_form_pickers_are_kept_and_the_form_is_the_same(world, kept):
     assert len(cold) - len(warm) == 2, (len(cold), len(warm))  # the agencies and the recruiters are not read again
     _, slow = measure(world, "form (kept pickers, slow link)", "admin", "GET", f"/api/candidates/{world.ids.candidate}/application-form", latency_ms=ROUND_LATENCY_MS)
     assert slow.rounds() <= 2, slow.rounds()  # the sign-in lookup, then every read of the form side by side
+
+
+def test_a_page_of_leads_and_candidates_counts_over_narrow_rows(world):
+    """The window count must run over the ids only (then the page's rows are read in full): over the full joined rows PostgreSQL
+    spilled every lead's / candidate's wide row to disk on each page. Still one data statement."""
+    for path, table in (("/api/leads?page_size=10", "crm_leads"), ("/api/candidates?page_size=10", "crm_candidates")):
+        response, statements = measure(world, path, "admin", "GET", path)
+        assert response.status_code == 200 and len(statements) == 2
+        sql = statements[-1]
+        assert sql.count("OVER ()") == 1 and " AS chosen" in sql, sql[:300]
+        # the subquery that carries the window count selects the id and nothing else
+        assert f"(SELECT {table}.id AS id, count(*) OVER () AS total FROM {table}" in sql, sql[:400]
+        assert response.json()["total"] > 10

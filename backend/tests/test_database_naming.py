@@ -331,6 +331,12 @@ def _catalog_snapshot(connection):
     return tables, normalized_constraints, indexes
 
 
+# Indexes the models declare that later migrations created: revision 0006 cannot have them.
+TASKS_REPORTS_INDEXES = {"ix_crm_application_stages_completed_at", "ix_workflow_tasks_completed_at",
+                         "ix_system_audit_log_entity_at", "ix_staff_attendance_checked_in_at",   # migration 0051
+                         "ix_email_messages_inbox_counts", "ix_email_messages_visible_feed"}   # migration 0050
+
+
 def _assert_renamed_schema(engine):
     assert set(inspect(engine).get_table_names(schema="public")) == {
         *TABLE_NAMES.values(), "alembic_version"
@@ -346,6 +352,7 @@ def _assert_renamed_schema(engine):
             }
             revision_columns = {column["name"] for column in inspect(connection).get_columns(table.name, schema="public")}
             expected_indexes = {index.name for index in table.indexes if all(column.name in revision_columns for column in index.columns)}
+            expected_indexes -= TASKS_REPORTS_INDEXES
             assert expected_indexes <= actual_indexes
         for table, column in [
             ("auth_users", "email"), ("auth_users", "role"), ("auth_users", "password_hash"),

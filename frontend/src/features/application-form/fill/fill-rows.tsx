@@ -1,9 +1,9 @@
 import { useId, type CSSProperties } from 'react'
-import { ArrowDown, ArrowUp, Plus, Trash2, type LucideIcon } from 'lucide-react'
+import { ArrowDown, ArrowUp, Plus, Sparkles, Trash2, type LucideIcon } from 'lucide-react'
 import { IconButton, Input } from '@/shared/ui/primitives'
 import { isBlank, isBlankRow } from '../form-model'
-import { SourceBadge } from './fill-controls'
-import { columnSpanMd, type FillColumn, type SourceChip } from './fill-fields'
+import { FieldError } from './fill-controls'
+import { SOURCE_CHIP_TEXT, columnSpanMd, type FillColumn, type SourceChip } from './fill-fields'
 
 interface Copy { noun: string; add: string; empty: string }
 
@@ -24,7 +24,7 @@ function RowCell({ column, value, error, canWork, onChange }: { column: FillColu
       <div className="aff-lab"><label htmlFor={id}>{column.label}</label></div>
       <Input id={id} value={value} placeholder={column.placeholder} inputMode={column.inputMode} maxLength={column.maxLength} autoComplete="off" aria-invalid={error ? true : undefined}
         onChange={(event) => onChange(column.inputMode ? event.target.value.replace(/\D/g, '') : event.target.value)} />
-      {error && <p className="aff-note is-error" role="alert">{error}</p>}
+      {error && <FieldError>{error}</FieldError>}
     </div>
   )
 }
@@ -56,7 +56,7 @@ export function FillRows<T extends { rowId: string }>({ kind, dataField, rows, c
   const shown = canWork ? rows : rows.filter((row) => !isBlankRow(row))
   return (
     <div className="aff-rows" data-field={dataField} data-kind={kind} data-editable={canWork ? 'true' : 'false'}>
-      {chip && <div className="aff-rows-bar"><SourceBadge kind={chip} /></div>}
+      {chip && <div className="aff-rows-bar"><p className="aff-note"><Sparkles aria-hidden="true" /> {SOURCE_CHIP_TEXT[chip]}. Check it before you save.</p></div>}
       {shown.length === 0 ? (
         <div className="aff-rows-empty">
           <Icon aria-hidden="true" />

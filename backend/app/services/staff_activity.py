@@ -34,8 +34,20 @@ def lock_staff(db, user_id, *, clock=False):
 
 def lock_staff_login(db, user, session_id, *, at=None, clock=False):
     """Mutations, logout and revocation share User → Login → presence locks."""
-    lock_staff(db, user.id, clock=clock)
     now = at or utcnow()
+    if session_id:
+        # Both rows in ONE locking statement, user first (`OF` fixes the order, the same User → Login order as everywhere). The common case
+        # (an active staff member with a live session) is then one round trip instead of two; anything else takes the exact path below
+        # so the refusal is the same as before.
+        found = db.execute(select(User, LoginSession).join(LoginSession, LoginSession.user_id == User.id)
+                           .where(User.id == user.id, LoginSession.id == session_id).with_for_update(of=[User, LoginSession])
+                           .execution_options(populate_existing=True)).one_or_none()
+        if found is not None:
+            person, login = found
+            allowed = (Role.staff, Role.manager) if clock else (Role.staff,)
+            if person.active and person.role in allowed and login.expires_at > now:
+                return now
+    lock_staff(db, user.id, clock=clock)
     login = db.scalar(select(LoginSession).where(
         LoginSession.id == session_id, LoginSession.user_id == user.id,
     ).with_for_update().execution_options(populate_existing=True)) if session_id else None

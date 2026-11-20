@@ -152,7 +152,7 @@ def batch_delete_permanently(batch_id: str, body: PermanentBatchDeletion, backgr
 # name changes, see services/response_cache.py): the screen asks for the list, the cards, the filter choices and the question columns
 # together on every visit, tab and live update. A viewer who only sees their own leads has their own entry.
 LEAD_TOPICS = ("leads", "candidates", "users")
-LEAD_SECONDS = 10
+LEAD_SECONDS = 30  # a lead, batch, candidate or recruiter-name commit drops every kept answer at once; the time limit only covers other processes
 CACHED_PAGE_ROWS = 100  # a bigger page is not kept: it is rare and heavy
 
 

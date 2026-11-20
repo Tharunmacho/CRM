@@ -331,12 +331,18 @@ def pool_counts(db, staff: str | None = None) -> dict[str, int]:
 def search_candidates(db, filters, page, page_size):
     query = search_statement(filters)
     # Resume text is never returned in a list, so it is not read (it can be many KB per row).
-    # The total rides along with the page (`count(*) OVER ()` is evaluated before LIMIT), so a page is ONE statement on ONE
-    # connection instead of a count and a page side by side.
-    listing = query.add_columns(func.count().over().label("total")).options(defer(Candidate.resume_text), defer(Candidate.resume_tsv))
+    # The total rides along with the page, so a page is ONE statement on ONE connection instead of a count and a page side by side.
+    # The page's ids are chosen first from NARROW rows (the id and `count(*) OVER ()`), then only those rows are read in full: a window
+    # count over the full joined rows made PostgreSQL carry every candidate's wide row through a sort that spilled to disk on every
+    # page (20,000 candidates: ~600 ms, now a fraction of that). The full read repeats the SAME joins and ordering, without the
+    # filters (the ids already are the filtered page), so the rows come back in the order the page was chosen in.
+    narrow = query.with_only_columns(Candidate.id.label("id"), func.count().over().label("total"))
+    defers = (defer(Candidate.resume_text), defer(Candidate.resume_tsv))
 
     def fetch(at):
-        return lambda session: session.execute(listing.offset(at * page_size).limit(page_size)).all()
+        chosen = narrow.offset(at * page_size).limit(page_size).subquery("chosen")
+        full = search_statement(Search(sort=filters.sort, direction=filters.direction)).join(chosen, chosen.c.id == Candidate.id)
+        return lambda session: session.execute(full.add_columns(chosen.c.total).options(*defers)).all()
 
     found = fetch(page)(db)
     if found:

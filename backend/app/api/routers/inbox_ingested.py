@@ -47,6 +47,12 @@ from app.core.deps import current_user
 from app.db.models import User
 from app.db.session import get_db
 from app.services.inbox_ingested import ingested_page, ingested_summary
+from app.services.response_cache import cached, scope_of
+
+# Both answers are the same for every signed-in person (the module docstring: no mailbox or role scoping). They are kept for a few
+# seconds and dropped the moment mail, an intake job, a filed document or a candidate changes (see services/response_cache.py).
+INGESTED_TOPICS = ("mail", "documents", "candidates")
+INGESTED_SECONDS = 10
 
 router = APIRouter(tags=["inbox"])
 
@@ -58,9 +64,10 @@ def ingested(db: Session = Depends(get_db), user: User = Depends(current_user),
              q: Annotated[str, Query(max_length=200)] = "",
              page: Annotated[int, Query(ge=0, le=100_000)] = 0,
              page_size: Annotated[int, Query(ge=10, le=50)] = 25):
-    return ingested_page(db, account=account, status=status, q=q, page=page, page_size=page_size)
+    return cached(("inbox-ingested", scope_of(db), account, status, q, page, page_size), INGESTED_TOPICS, INGESTED_SECONDS,
+                  lambda: ingested_page(db, account=account, status=status, q=q, page=page, page_size=page_size))
 
 
 @router.get("/ingested/summary")
 def ingested_counts(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return ingested_summary(db)
+    return cached(("inbox-ingested-summary", scope_of(db)), INGESTED_TOPICS, INGESTED_SECONDS, lambda: ingested_summary(db))

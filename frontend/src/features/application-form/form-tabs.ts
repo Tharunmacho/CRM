@@ -85,16 +85,15 @@ export const isDetailTab = (tab: FormTab): boolean => DETAIL_TABS.includes(tab)
 export const paneIdFor = (tab: FormTab): string => (isDetailTab(tab) ? 'af-pane-details' : `af-pane-${tab}`)
 
 /**
- * Which of the four detail cards are on screen. On a narrow screen only the chosen one; on a wide screen the chosen one and its
- * partner (Personal with Passport side by side, Education with Experience one under the other), so one click is never needed
- * for the next thing a recruiter checks.
+ * Which of the four detail cards is on screen: one card per tab, on every screen width. Personal, Passport, Education and Experience
+ * are each their own tab, so the tab bar has exactly one active state and a card is never squeezed beside another.
  */
-export function visibleCards(tab: FormTab, wide: boolean): DetailCard[] {
+export function visibleCards(tab: FormTab): DetailCard[] {
   switch (tab) {
-    case 'personal': return wide ? [1, 2] : [1]
-    case 'passport': return wide ? [1, 2] : [2]
-    case 'education': return wide ? [3, 4] : [3]
-    case 'experience': return wide ? [3, 4] : [4]
+    case 'personal': return [1]
+    case 'passport': return [2]
+    case 'education': return [3]
+    case 'experience': return [4]
     default: return []
   }
 }
@@ -111,7 +110,8 @@ export function nextTab(tabs: FormTab[], current: FormTab, key: string): FormTab
 }
 
 /** The label of a tab with its small count, for the screen reader ("Documents, 3 missing"). */
-export function tabAccessibleName(label: string, badge: { count: number; kind: 'missing' | 'notes' | 'overdue' } | null): string {
+export function tabAccessibleName(label: string, badge: { count: number; kind: 'missing' | 'notes' | 'overdue' | 'done' } | null): string {
+  if (badge?.kind === 'done') return `${label}, complete`
   if (!badge || (badge.count <= 0 && badge.kind !== 'overdue')) return label
   if (badge.kind === 'overdue') return `${label}, a note is overdue`
   return badge.kind === 'notes' ? `${label}, ${badge.count} ${badge.count === 1 ? 'note' : 'notes'}` : `${label}, ${badge.count} missing`

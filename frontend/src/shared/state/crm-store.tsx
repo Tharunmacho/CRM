@@ -10,6 +10,8 @@ import {
 } from 'react'
 import { ApiError, api, takeEarlyRead, type InboxUnreadCount } from '@/shared/api/client'
 import { createLatestRequest } from '@/shared/api/latest-request'
+import { readDesk } from '@/shared/api/desk-read'
+import { expandDesk, type DeskWire } from './desk-wire'
 import { createIngestionRefresh } from '@/shared/api/ingestion-refresh'
 import { agencyDay } from '@/shared/lib/task-time'
 import { EMPTY_SETTINGS } from '@/shared/lib/agency'
@@ -256,6 +258,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const currentData = useRef(data)
   currentData.current = data
   const lastLoadedAt = useRef(hydrated?.savedAt ?? 0)
+  /**
+   * The snapshot last received from the server and the revision it came with. A re-read sends the revision back
+   * (If-None-Match); "unchanged" (304) then applies this same snapshot again instead of downloading it. Memory only.
+   */
+  const deskRef = useRef<{ revision: string; payload: Bootstrap } | null>(null)
   const index = useMemo(() => indexWorkspace(data), [data.candidates, data.clients, data.companies,
     data.designations, data.orders, data.users, data.applications, data.tasks, data.remarks])
 
@@ -269,8 +276,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         async (signal) => {
           // One round trip for an authenticated startup; anonymous visits still
           // receive only { me: null } and never load CRM collections.
+          const accept = (wire: Bootstrap & DeskWire): Bootstrap => {
+            const { desk, revision } = expandDesk(wire)
+            deskRef.current = revision ? { revision, payload: desk } : null
+            return desk
+          }
           if (checkSession) {
-            const sessionPath = '/auth/session?workspace=true&compact=true'
+            const sessionPath = '/auth/session?workspace=true&compact=true&slim=true'
             // index.html has usually started this request already, before this code loaded.
             const session = (await takeEarlyRead<Bootstrap | { me: null }>('session', sessionPath))
               ?? (await api.get<Bootstrap | { me: null }>(sessionPath, { signal }))
@@ -278,13 +290,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             if (!session?.me?.id || !('candidates' in session)) {
               throw new ApiError(502, 'The server returned an invalid session response.')
             }
-            return session
+            return accept(session)
           }
-          const payload = await api.get<Bootstrap>('/bootstrap?compact=true', { signal })
-          if (!payload?.me?.id) {
+          const answer = await readDesk<Bootstrap & DeskWire>('/bootstrap?compact=true&slim=true', { signal, revision: deskRef.current?.revision })
+          if (answer.same) {
+            if (deskRef.current) return deskRef.current.payload
             throw new ApiError(502, 'The server returned an invalid workspace response.')
           }
-          return payload
+          if (!answer.payload?.me?.id) {
+            throw new ApiError(502, 'The server returned an invalid workspace response.')
+          }
+          return accept(answer.payload)
         },
         (payload) => {
           lastLoadedAt.current = payload ? Date.now() : 0
@@ -298,6 +314,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             setData((current) => reconcile(current, dropDeleted({ ...EMPTY, ...rest })))
             persistSoon('bootstrap', payload.me.id, () => payload)
           } else {
+            deskRef.current = null
             setData(EMPTY)
             forgetSnapshots()
           }
@@ -307,6 +324,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         (error) => {
           lastLoadedAt.current = 0
           if (error instanceof ApiError && error.isUnauthorised) {
+            deskRef.current = null
             setMe(null)
             setData(EMPTY)
             setLoadError(null)

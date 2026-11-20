@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createFirstValueFilter } from '@/shared/lib/first-value'
 import { fetchIngested, fetchIngestedSummary, ingestedUnavailable, type IngestedPage, type IngestedParams, type IngestedSummary } from './ingested-api'
 
 const SUMMARY_POLL_MS = 30_000
@@ -57,6 +58,9 @@ export function useIngestedList(params: IngestedParams, enabled: boolean, identi
   const [error, setError] = useState('')
   const [reload, setReload] = useState(0)
   const { account, status, q, page, pageSize } = params
+  // The summary answers while the first page is still on its way; that first stamp is not news and must not repeat the page read.
+  const stamps = useRef(createFirstValueFilter()).current
+  const settledStamp = stamps(stamp, identityId)
   useEffect(() => { setData(null) }, [identityId])
   useEffect(() => {
     if (!enabled) { setLoading(false); return undefined }
@@ -67,7 +71,7 @@ export function useIngestedList(params: IngestedParams, enabled: boolean, identi
       .catch((cause) => { if (!controller.signal.aborted) setError(errorText(cause)) })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [enabled, identityId, account, status, q, page, pageSize, revision, stamp, reload])
+  }, [enabled, identityId, account, status, q, page, pageSize, revision, settledStamp, reload])
   const refresh = useCallback(() => setReload((value) => value + 1), [])
   return { data, loading, error, refresh }
 }

@@ -1,22 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { api } from '@/shared/api/client'
+import { createFeed, type Feed, type FeedState } from '@/shared/lib/feed'
 import { liveInterval } from '@/shared/state/live'
-import type { DailyWorkResponse, FollowUpResponse } from './daily-work-model'
+import { useStore } from '@/shared/state/crm-store'
+import { listRequest, type DailyView, type DailyWorkResponse, type FollowUpResponse } from './daily-work-model'
 
 interface Options {
   /** Supervisors only: one recruiter id, or "all". Recruiters always get their own list. */
   staff?: string
+  /** The status view of `/daily-work` (Declined, Rejected, Travelled, All); the current process is the default and sends nothing. */
+  view?: DailyView
   /** Skip the request (for example for a role that has no list). */
   enabled?: boolean
-  /** How long live changes are held back so a burst of task updates causes one request. */
+  /** Kept so callers still compile; all watchers of one list share one live subscription with a single window. */
   debounceMs?: number
 }
 
 /**
  * The Daily work list. Loads on mount and whenever the server announces a task, candidate or application change, plus a
  * safety poll. There are no deadlines, so there is nothing to re-read at a given moment.
+ *
+ * One list is read once however many components show it (the sidebar badge, the tab strip and the screen all watch
+ * the same feed): one request per page load, one live subscription, and one refetch per change. The answer is kept
+ * when the screen closes, so coming back shows it at once and re-reads it quietly.
  */
 const CACHE = { ttlMs: 3_000, tags: ['tasks', 'users', 'candidates', 'applications'] } as const
+const TOPICS = ['tasks', 'users', 'candidates', 'applications'] as const
+/** A burst of changes becomes one read, this long after the first. */
+const LIVE_WINDOW_MS = 1_500
 
 /** Today's candidates (`/daily-work`). */
 export const useDailyWork = (options: Options = {}) => useRecruiterList<DailyWorkResponse>('/daily-work', options)
@@ -24,40 +35,39 @@ export const useDailyWork = (options: Options = {}) => useRecruiterList<DailyWor
 /** Follow-up (`/follow-up`): the same scoping, live topics and caching. A stage finished or an application closed moves a candidate between the two lists. */
 export const useFollowUp = (options: Options = {}) => useRecruiterList<FollowUpResponse>('/follow-up', options)
 
-function useRecruiterList<T>(path: string, { staff, enabled = true, debounceMs = 1500 }: Options) {
-  const [data, setData] = useState<T | null>(null)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(enabled)
-  const generation = useRef(0)
-  const staffKey = staff ?? ''
+const made = new Map<string, Feed<unknown>>()
 
-  const load = useCallback(async (signal?: AbortSignal, fresh = false) => {
-    const mine = ++generation.current
-    try {
-      const query = staffKey ? `?staff=${encodeURIComponent(staffKey)}` : ''
-      const result = await api.get<T>(`${path}${query}`, { signal, cache: CACHE, fresh })
-      if (signal?.aborted || mine !== generation.current) return
-      setData(result)
-      setError('')
-    } catch (e) {
-      if (signal?.aborted || mine !== generation.current) return
-      setError(e instanceof Error ? e.message : 'Your candidates could not be loaded.')
-    } finally {
-      if (!signal?.aborted && mine === generation.current) setLoading(false)
-    }
-  }, [staffKey, path])
+/** One feed per signed-in person and request, so a list is never shown to anyone but the person it was read for. */
+function feedFor<T>(sessionId: string, request: string): Feed<T> {
+  const key = `${sessionId}|${request}`
+  let feed = made.get(key)
+  if (!feed) {
+    feed = createFeed<unknown>({
+      failure: 'Your candidates could not be loaded.',
+      load: (signal, fresh) => api.get<unknown>(request, { signal, cache: CACHE, fresh }),
+      attach: (reload) => liveInterval(
+        () => reload(),
+        60_000,
+        TOPICS,
+        { debounceMs: LIVE_WINDOW_MS, onChange: () => { void reload({ afterChange: true }) } },
+      ),
+    })
+    made.set(key, feed)
+  }
+  return feed as Feed<T>
+}
 
-  useEffect(() => {
-    if (!enabled) { setLoading(false); return }
-    const controller = new AbortController()
-    setLoading(true)
-    void load(controller.signal)
-    const stop = liveInterval(() => { if (document.visibilityState === 'visible') void load(controller.signal) }, 60_000, ['tasks', 'users', 'candidates', 'applications'], { debounceMs })
-    return () => { controller.abort(); stop() }
-  }, [enabled, load, debounceMs])
+const IDLE: FeedState<never> = { data: null, error: '', loading: false }
+const noSubscribe = () => () => {}
+const idle = () => IDLE
 
-  const refresh = useCallback(() => load(undefined, true), [load])
-  return { data, error, loading, refresh }
+function useRecruiterList<T>(path: string, { staff, view, enabled = true }: Options) {
+  const sessionId = useStore().me?.id ?? ''
+  const request = listRequest(path, staff, view)
+  const feed = enabled ? feedFor<T>(sessionId, request) : null
+  const state = useSyncExternalStore(feed ? feed.subscribe : noSubscribe, feed ? feed.getState : (idle as () => FeedState<T>), feed ? feed.getState : (idle as () => FeedState<T>))
+  const refresh = useCallback(() => (feed ? feed.reload({ fresh: true }) : Promise.resolve()), [feed])
+  return { data: state.data, error: state.error, loading: enabled && state.loading, refresh }
 }
 
 /** A clock that ticks every `intervalMs` while the tab is visible (the Lead sheet's banner counts down with it). */

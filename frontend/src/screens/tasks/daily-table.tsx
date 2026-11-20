@@ -9,7 +9,7 @@ import { DocInput } from './doc-input'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 import { primaryId } from '@/features/candidates/candidate-ids'
 import {
-  advanceLabel, agencyLabel, clientCell, clockTime, countryCell, docLabel, positionCell, rowAction,
+  advanceLabel, agencyLabel, clientCell, clientCountry, clockTime, countryCell, docLabel, outcomeDetail, outcomeOf, positionCell, rowAction,
   type DailyItem,
 } from '@/features/daily-work/daily-work-model'
 import {
@@ -52,7 +52,7 @@ export function columnLayout(columns: ReadonlyArray<{ width: number }>) {
 }
 
 /** Wraps a wide table: a soft shadow shows on whichever side still has columns scrolled out of view. */
-export function ScrollEdges({ children, label = 'Daily candidates, scroll sideways for more columns' }: { children: ReactNode; label?: string }) {
+export function ScrollEdges({ children, label = 'Daily candidates, scroll sideways for more columns', labelledBy, busy }: { children: ReactNode; label?: string; /** The id of the filter-bar tab this table answers: the table is then that tab's panel. */ labelledBy?: string; /** The next view is still loading: the rows on screen are the previous ones. */ busy?: boolean }) {
   const box = useRef<HTMLDivElement>(null)
   const [edges, setEdges] = useState({ left: false, right: false })
   useEffect(() => {
@@ -70,8 +70,9 @@ export function ScrollEdges({ children, label = 'Daily candidates, scroll sidewa
     return () => { el.removeEventListener('scroll', measure); watcher?.disconnect() }
   }, [])
   return (
-    <div className={cn('dw-scroll', edges.left && 'has-left', edges.right && 'has-right')}>
-      <div ref={box} className="tk-table-wrap" tabIndex={0} role="region" aria-label={label}>{children}</div>
+    <div className={cn('dw-scroll', edges.left && 'has-left', edges.right && 'has-right', busy && 'is-busy')}>
+      <div ref={box} className="tk-table-wrap" tabIndex={0} aria-busy={busy || undefined}
+        {...(labelledBy ? { role: 'tabpanel', 'aria-labelledby': labelledBy } : { role: 'region', 'aria-label': label })}>{children}</div>
     </div>
   )
 }
@@ -163,13 +164,18 @@ export function CandidateIds({ item }: { item: Pick<DailyItem, 'candidateCareId'
 }
 
 /**
- * CLIENT: the client's name only (up to two lines, the full name and the contact in the tooltip). Nothing sits under it: no country, no flag.
- * Without one it is a single muted dash that says why. What is missing is added from the row menu.
+ * CLIENT: the client's name (up to three lines, the full name and the contact in the tooltip) and, with `country`, the country's name under it in a
+ * smaller muted line (plain text, no flag, wrapping at spaces; nothing when no country is known). Without a client it is a single muted dash that
+ * says why. What is missing is added from the row menu.
  */
-export function ClientCell({ item }: { item: Pick<DailyItem, 'client' | 'kind' | 'clientContact'> }) {
+export function ClientCell({ item, country = false }: { item: Pick<DailyItem, 'client' | 'kind' | 'clientContact'> & Partial<Pick<DailyItem, 'country' | 'countrySource' | 'locationHint'>>; country?: boolean }) {
   const cell = clientCell(item)
-  if (!cell.text) return <span className="dw-none" title={cell.hint}>—</span>
-  return <span className="dw-cell-strong dw-clamp" title={item.clientContact ? `${cell.text}. Contact: ${item.clientContact}` : cell.text}>{cell.text}</span>
+  const line = country ? clientCountry({ country: item.country ?? null, countrySource: item.countrySource ?? null, locationHint: item.locationHint ?? null }) : { text: '', hint: '' }
+  const name = cell.text
+    ? <span className="dw-cell-strong dw-clamp" title={item.clientContact ? `${cell.text}. Contact: ${item.clientContact}` : cell.text}>{cell.text}</span>
+    : <span className="dw-none" title={cell.hint}>—</span>
+  if (!line.text) return name
+  return <span className="dw-client">{name}<span className="dw-client-country" title={line.hint}>{line.text}</span></span>
 }
 
 /** The recorded agency, or a muted dash when no agency is known. */
@@ -205,8 +211,33 @@ export function PositionCellView({ item }: { item: Pick<DailyItem, 'position' | 
   return <span className="dw-cell-strong dw-clamp" title={`${cell.text}. ${cell.hint}`}>{cell.text}</span>
 }
 
-/** STAGE: one pill with the stage name (the same width in every row) and a slim progress bar under it. */
-export function StageCell({ item }: { item: Pick<DailyItem, 'stage'> }) {
+/**
+ * STAGE of a placement that ended: the outcome chip (Declined, Rejected or Travelled) with where it ended ("at 5 · Offer letter") inside it, and under it,
+ * in plain muted lines nobody has to hover for: WHY (the reason), WHEN ("19 Nov 2026") and, when the server names them, "by <person>". It replaces the
+ * progress dashes. Everything wraps; nothing is cut.
+ */
+export function OutcomeStage({ item, zone }: { item: Pick<DailyItem, 'stage' | 'stageTitle'> & { outcome?: DailyItem['outcome'] }; zone?: string }) {
+  const outcome = outcomeOf(item)
+  const stage = outcome.stage ?? item.stage ?? null
+  const titleOf = (no: number) => (no === item.stage && item.stageTitle) || STAGES[no - 1]?.title
+  const detail = outcomeDetail({ ...outcome, stage }, titleOf, zone)
+  const meta = [detail.when, detail.by].filter(Boolean).join(' · ')
+  const tip = [outcome.label, detail.where, detail.why, meta].filter(Boolean).join(' · ')
+  return (
+    <div className={cn('dw-stage dw-outcome', `is-${outcome.kind}`)} title={tip}>
+      <span className={cn('dw-outcome-chip', `is-${outcome.kind}`)}>
+        <b>{outcome.label}</b>
+        {detail.where && <span className="dw-outcome-at">{detail.where}</span>}
+      </span>
+      {detail.why && <span className="dw-outcome-why">{detail.why}</span>}
+      {meta && <span className="dw-outcome-meta">{meta}</span>}
+    </div>
+  )
+}
+
+/** STAGE: one pill with the stage name (the same width in every row) and a slim progress bar under it; a placement that ended shows its outcome instead. */
+export function StageCell({ item, zone }: { item: Pick<DailyItem, 'stage'> & { outcome?: DailyItem['outcome']; stageTitle?: string | null }; zone?: string }) {
+  if (outcomeOf(item).kind !== 'current') return <OutcomeStage item={item} zone={zone} />
   const no = item.stage
   const stage = no ? STAGES[Math.max(0, Math.min(TOTAL_STAGES, no) - 1)] : null
   return (

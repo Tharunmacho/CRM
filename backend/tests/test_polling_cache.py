@@ -15,7 +15,7 @@ from sqlalchemy import update
 from app.core.security import SESSION_COOKIE
 from app.core.config import Settings
 from app.db.models import (
-    Candidate, EmailIngestionJob, FormOption, MailAttachment, Role, Session as SessionRow, Source, User,
+    Candidate, EmailIngestionJob, FormOption, MailAttachment, MailMessage, Role, Session as SessionRow, Source, User,
 )
 from app.services import response_cache as cache
 from test_bootstrap_performance import assert_select_budget, recorded_statements
@@ -288,3 +288,72 @@ def test_data_bank_list_is_one_statement_with_its_total_and_is_kept_briefly(inta
         db.add(Candidate(id="c-new", ref="CND-N", name="New", phone="9000099999", source=Source.walk_in))
         db.commit()
     assert api.get("/api/candidates?page=0&page_size=10").json()["total"] == 26
+
+
+# ---------------------------------------------------------------- the message list and the ingested views (dashboard card, Inbox screen)
+
+def test_inbox_list_is_one_shared_answer_kept_briefly_and_follows_mail_changes(intake, api, monkeypatch):
+    failed_email(intake, 21, "completed")
+    monkeypatch.setenv("CRM_RESPONSE_CACHE", "0")
+    cold, statements = statements_for(intake, api, "/api/inbox?limit=1")
+    assert cold.status_code == 200
+    assert_select_budget(statements, 7)  # sign-in check + the six reads of the list, side by side
+
+    monkeypatch.setenv("CRM_RESPONSE_CACHE", "force")
+    cache.clear()
+    api.as_user("poll-staff")
+    first = api.get("/api/inbox?limit=1&scope=stored")
+    assert first.status_code == 200 and first.json()["availableAccounts"] == [] and first.json()["providers"] == []
+    api.as_user("admin")
+    kept, statements = statements_for(intake, api, "/api/inbox?limit=1&scope=stored")
+    assert_select_budget(statements, 1)  # only the sign-in check: the answer built for the recruiter serves the admin ...
+    assert kept.json()["messages"] == first.json()["messages"] and kept.json()["total"] == first.json()["total"]
+    # ... and the admin-only parts are built per request from settings, so the recruiter's copy never carried them over.
+    api.as_user("poll-staff")
+    assert api.get("/api/inbox?limit=1&scope=stored").json()["availableAccounts"] == []
+    api.as_user("admin")
+
+    # a single-message read is the job poll after an upload: it always asks the database
+    message_id = first.json()["messages"][0]["id"]
+    for _ in range(2):
+        _, statements = statements_for(intake, api, f"/api/inbox?message_id={message_id}&limit=1")
+        assert len(statements) > 1
+
+    before = api.get("/api/inbox?limit=50&scope=stored").json()["total"]
+    failed_email(intake, 22, "completed")  # a new message and job: the kept list is dropped at once
+    assert api.get("/api/inbox?limit=50&scope=stored").json()["total"] == before + 1
+    with intake.sessions() as db:
+        message = db.get(MailMessage, message_id)
+        was_unread = message.unread
+        message.unread = not was_unread
+        db.commit()
+    changed = api.get("/api/inbox?limit=50&scope=stored").json()["messages"]
+    assert next(item for item in changed if item["id"] == message_id)["unread"] is (not was_unread)
+
+
+def test_ingested_views_are_shared_kept_briefly_and_follow_intake_changes(intake, api, monkeypatch):
+    failed_email(intake, 31, "failed")
+    monkeypatch.setenv("CRM_RESPONSE_CACHE", "0")
+    _, statements = statements_for(intake, api, "/api/inbox/ingested")
+    assert_select_budget(statements, 2)
+    _, statements = statements_for(intake, api, "/api/inbox/ingested/summary")
+    assert_select_budget(statements, 4)
+
+    monkeypatch.setenv("CRM_RESPONSE_CACHE", "force")
+    cache.clear()
+    api.as_user("poll-staff")
+    listing = api.get("/api/inbox/ingested").json()
+    summary = api.get("/api/inbox/ingested/summary").json()
+    assert listing["total"] == 1 and summary["failed"] == 1
+    api.as_user("admin")
+    for path, expected in (("/api/inbox/ingested", listing), ("/api/inbox/ingested/summary", summary)):
+        kept, statements = statements_for(intake, api, path)
+        assert_select_budget(statements, 1)
+        assert kept.json() == expected
+    assert api.get("/api/inbox/ingested?status=review").json()["total"] == 0  # another filter is its own answer
+
+    failed_email(intake, 32, "needs_review")
+    assert api.get("/api/inbox/ingested").json()["total"] == 2
+    after = api.get("/api/inbox/ingested/summary").json()
+    assert after["failed"] == 1 and after["review"] == 1
+    assert api.get("/api/inbox/ingested?status=review").json()["total"] == 1

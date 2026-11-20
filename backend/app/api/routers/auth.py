@@ -63,6 +63,7 @@ def session_state(
     user_hint: str | None = Cookie(default=None, alias=USER_HINT_COOKIE),
     workspace: bool = False,
     compact: bool = False,
+    slim: bool = False,
 ) -> dict[str, Any]:
     """Return the current account, or an anonymous state without an auth error."""
     response.headers["Cache-Control"] = "no-store"
@@ -88,7 +89,7 @@ def session_state(
         # headers into one, so the ones set above are passed along explicitly.
         headers = {"Cache-Control": "no-store"}
         sent = [value.decode("latin-1") for name, value in response.raw_headers if name == b"set-cookie"]
-        reply = desk_response(request, db, user, compact, headers)
+        reply = desk_response(request, db, user, compact or slim, headers, slim)
         for cookie in sent:
             reply.headers.append("set-cookie", cookie)
         return reply

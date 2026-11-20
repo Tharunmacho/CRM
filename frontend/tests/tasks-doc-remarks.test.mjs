@@ -36,20 +36,48 @@ test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (superviso
   for (const c of daily.taskColumnsFor(true)) assert.doesNotMatch(c.title, /\//, 'one short word per header, never "CLIENT / COUNTRY"')
 })
 
-test('the smallest desktop table reserves space for the recruiter, notes and both actions', () => {
+test('the column plan fits the 1111px panel of a 1440px window and gives every column its measured longest word', () => {
+  const sum = (list) => list.reduce((total, c) => total + c.width, 0)
+  const without = (supervisor) => daily.taskColumnsFor(supervisor, false)
+  assert.ok(sum(without(true)) <= 1108, `${sum(without(true))}px`)
+  assert.ok(sum(without(false)) <= 1030, 'the plan without the Recruiter column (no Recruiter column) is narrower still')
+  const width = (key) => daily.taskColumnsFor(true).find((c) => c.key === key).width
+  // The longest words were measured in Poppins at the table's sizes (the font file's advance widths, the same numbers as canvas measureText):
+  // a column is its word plus 17px (8px padding on both sides and the 1px column line).
+  assert.ok(width('client') >= 103, '"International" is 86px at 13px / 600 and the country line is smaller')
+  assert.ok(width('candidate') >= 138, '"EMAYAVARAMBAN" is 121px at 13px / 600')
+  assert.ok(width('position') >= 96, '"SUPERVISOR" is 78px at 13px / 500')
+  assert.ok(width('agency') >= 103, '"LAVOROTECH" is 86px at 13px / 500')
+  assert.ok(width('staff') >= 91, '"Srivathsala" is 74px at 13px / 500 (the RECRUITER header is 65px)')
+  assert.ok(width('no') >= 46, 'the "S NO" header is 29px at 11.5px / 600 with its letter spacing')
+  assert.ok(width('actions') >= 116, 'the 72px Open / Complete button, the 4px gap and the 36px menu (112px) are not clipped')
+  assert.ok(width('remarks') >= 107, 'the dropdown keeps room for the start of a remark (its full text is the tooltip)')
+  assert.ok(width('doc') >= 90, 'the typed dd/mm/yyyy date (62px at 11px) fits at 8px padding')
+  assert.ok(width('stage') >= 110, 'the stage chip keeps room for "Prescreening" (77px + 16px chip padding) and the outcome chip for "Travelled"')
+  assert.ok(width('today') >= 108, 'the TODAY chip keeps room for "Moved 10:45" on one line (75px + 18px chip padding)')
+  for (const c of daily.taskColumnsFor(true)) assert.equal('left' in c, false, `${c.key}: every column is centred, none is "left"`)
+})
+
+test('NOTES is a column only when the panel is wide enough for the whole plan; narrower tables keep the 1108px plan', () => {
+  const notes = daily.TASK_LIST_COLUMNS.find((c) => c.key === 'notes')
+  assert.equal(notes.wide, true)
+  assert.ok(notes.width >= 160, 'a note wraps in its own cell')
+  assert.deepEqual(daily.taskColumnsFor(true, false).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'today', 'remarks', 'actions'])
+  assert.deepEqual(daily.taskColumnsFor(false, false).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'agency', 'stage', 'today', 'remarks', 'actions'])
   for (const supervisor of [true, false]) {
-    const columns = daily.taskColumnsFor(supervisor)
-    const total = columns.reduce((sum, column) => sum + column.width, 0)
-    const pixels = (key) => 1080 * columns.find((column) => column.key === key).width / total
-    if (supervisor) assert.ok(pixels('staff') >= 94, 'Srivathsala fits on one line')
-    assert.ok(pixels('actions') >= 120, 'both buttons and their padding fit')
-    assert.ok(pixels('notes') >= 110, 'notes wrap within their own cell')
+    const plan = daily.taskPlanWidth(supervisor, true)
+    assert.equal(daily.showsNotesColumn(supervisor, plan), true)
+    assert.equal(daily.showsNotesColumn(supervisor, plan - 1), false)
+    assert.equal(daily.showsNotesColumn(supervisor, 1111), false, 'a 1440px window has no room for NOTES: they show under the remark')
+    assert.equal(daily.showsNotesColumn(supervisor, 1590), true, 'a 1920px window has')
+    // with NOTES every column keeps at least its plan width at the threshold
+    assert.equal(plan, daily.taskPlanWidth(supervisor, false) + notes.width)
   }
 })
 
 test('the Tasks table renders the model columns and no longer has a "Remark added" chip', async () => {
   const table = await code('../src/screens/tasks/task-table.tsx')
-  assert.match(table, /taskColumnsFor\(supervisor\)/)
+  assert.match(table, /taskColumnsFor\(supervisor, wide\)/)
   assert.doesNotMatch(table, /Remark added|is-remark/)
   assert.match(table, /Nothing yet/)
   assert.match(table, /todayChips\(/)
@@ -117,12 +145,13 @@ test('the Excel export asks for the same list the screen shows and names the fil
 
 test('the Export Excel button sits next to Refresh and reuses the shared blob download (the client tracker uses the same one)', async () => {
   const screen = await code('../src/screens/tasks/daily-work.tsx')
-  assert.ok(screen.indexOf('Refresh') < screen.indexOf('Export Excel'), 'next to Refresh')
+  assert.ok(screen.indexOf('Refresh') < screen.indexOf('exportLabel(view)'), 'next to Refresh')
+  assert.equal(daily.exportLabel('current'), 'Export Excel')
   assert.match(screen, /Preparing…/)
   assert.match(screen, /role="alert"/)
   assert.match(screen, /supervisor \? staffFilter : store\.me\.id/, 'supervisors: the current recruiter filter; recruiters: their own list')
   const exporter = await code('../src/features/daily-work/daily-work-export.ts')
-  assert.match(exporter, /downloadApiFile\(exportPath\(staff\)/)
+  assert.match(exporter, /downloadApiFile\(exportPath\(staff, view\)/)
   const tracker = await code('../src/features/reports/client-tracker-api.ts')
   assert.match(tracker, /downloadApiFile\(trackerPath\(filters, format\)/)
   assert.doesNotMatch(tracker + exporter, /createObjectURL/, 'one download helper, not a copy')
@@ -375,15 +404,30 @@ test('the Overview strip shows the field next to Stage, with the same date picke
 
 /* ------------------------------------------------------------------ CLIENT, AGENCY and the professional pass */
 
-test('the CLIENT cell is the client name only: no country, no flag, nothing under it', async () => {
+test('the CLIENT cell is the client name with the country name under it in a smaller muted line: plain text, no flag, nothing when there is no country', async () => {
   const table = await code('../src/screens/tasks/daily-table.tsx')
   const cell = table.slice(table.indexOf('export function ClientCell'), table.indexOf('export function AgencyCell'))
   assert.match(cell, /dw-cell-strong dw-clamp/)
-  assert.doesNotMatch(cell, /country|Country|flag|<img/)
+  assert.match(cell, /clientCountry\(/)
+  assert.match(cell, /dw-client-country/)
+  assert.match(cell, /if \(!line\.text\) return name/, 'no country, nothing under the name')
+  assert.doesNotMatch(cell, /flag|<img/i)
   assert.doesNotMatch(table, /CountryChip|ClientCountryCell|flagSrc|dw-ctry/)
   const tasks = await code('../src/screens/tasks/task-table.tsx')
+  assert.match(tasks, /<ClientCell item=\{row\} country \/>/)
   assert.doesNotMatch(tasks, /CLIENT \/ COUNTRY|<img|flagSrc|\bFlag\b/)
   for (const css of ['daily-work.css', 'tasks-table.css']) assert.doesNotMatch(await read(`../src/styles/${css}`), /\.dw-ctry|\.dw-cc\b/)
+  const css = await read('../src/styles/tasks-table.css')
+  assert.match(css, /\.dw-client-country \{[^}]*font-size: 11\.5px[^}]*color: var\(--text-muted\)/)
+  assert.match(css, /\.dw-client \{[^}]*flex-direction: column[^}]*align-items: center/)
+  // the line is the order's (or the preferred) country by name; a city is not a country
+  assert.deepEqual(daily.clientCountry({ country: 'Saudi Arabia', countrySource: 'order', locationHint: null }), { text: 'Saudi Arabia', hint: "The order's country" })
+  assert.equal(daily.clientCountry({ country: '  United   Arab Emirates ', countrySource: 'order', locationHint: null }).text, 'United Arab Emirates')
+  assert.equal(daily.clientCountry({ country: 'UAE, Qatar', countrySource: 'preference', locationHint: null }).text, 'UAE, Qatar')
+  assert.equal(daily.clientCountry({ country: 'Kuwait', countrySource: null, locationHint: null }).text, 'Kuwait', 'an older server sends no source')
+  for (const none of [{ country: null, countrySource: null, locationHint: null }, { country: '  ', countrySource: 'order', locationHint: null }, { country: null, countrySource: null, locationHint: 'Chennai, India' }]) {
+    assert.deepEqual(daily.clientCountry(none), { text: '', hint: '' })
+  }
   // the recruiter cards carry no flags either
   assert.doesNotMatch(await code('../src/screens/tasks/daily-staff-board.tsx'), /flag|<img/i)
 })
@@ -420,6 +464,9 @@ test('the professional pass: one 60px row, a 44px one-line header, one padding f
   assert.match(rule(`${P} thead th`), /height: 44px/)
   assert.match(rule(`${P} thead th`), /font-size: 11\.5px; font-weight: 600; letter-spacing: \.04em/)
   assert.match(rule(`${P} thead th`), /white-space: nowrap/)
+  assert.match(rule(`${P} thead th`), /text-align: center/, 'the headings are centred over their columns')
+  assert.match(rule(`${P} tbody td`), /text-align: center/, 'and so are the cells')
+  assert.doesNotMatch(rule(`${P} thead th`), /text-align: left/)
   assert.match(rule(`${P} thead th`), /padding: 0 8px 0 var\(--tw-pad-l\)/)
   assert.match(rule(`${P} thead th`), /border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/, 'the header edge is the strong line')
   assert.match(rule(`${P} tbody td`), /padding: 8px var\(--tw-pad-r\) 8px var\(--tw-pad-l\)/, 'the same left edge as the header')
@@ -429,7 +476,7 @@ test('the professional pass: one 60px row, a 44px one-line header, one padding f
   assert.match(css, /\.dw-act \{[^}]*width: 72px[^}]*height: 36px/)
   assert.match(css, /\.dw-more-btn \{ width: 36px; height: 36px/)
   assert.match(css, /\.dw-doc-add \{[^}]*height: 32px[^}]*text-decoration: none/)
-  assert.match(css, /\.tw-chip \{[^}]*max-width: 100%[^}]*white-space: normal/, 'activity chips wrap within the Today column')
+  assert.match(css, /\.tw-chip \{[^}]*width: max-content; max-width: 100%; min-height: 28px[^}]*white-space: normal/, 'activity chips are one line (as wide as their text) and wrap inside the Today column rather than being clipped when it is narrower')
   assert.match(css, /\.dw-stage-chip \{[^}]*min-height: 28px/)
   // the status never adds a line: a badge on the control, quiet states only for screen readers
   assert.match(css, /\.dw-remark-status \{ position: absolute/)

@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Building2, Eye, Loader2, Printer, Save, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Building2, Eye, Loader2, Printer, Save, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { useStore } from '@/shared/state/crm-store'
 import { useLiveStatus } from '@/shared/state/live'
 import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
+import { UnmapCandidateDialog } from '@/features/jobs/components/job-dialogs'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { useApplicationForm, type AssignmentCompleter } from '@/features/application-form/use-application-form'
 import { completeAssignment } from '@/features/application-form/assignment-fallback'
 import { useReferenceAgencies } from '@/features/clients/agency-api'
-import { COMMENCEMENT_PATH, applicationFormHref, visibleWarnings } from '@/features/application-form/form-model'
-import { documentSlot } from '@/shared/model/document-slots'
+import { COMMENCEMENT_PATH, applicationFormHref, pickersLocked, visibleWarnings } from '@/features/application-form/form-model'
+import { documentLabel, documentSlot } from '@/shared/model/document-slots'
 import { documentRowStates, documentRowsProgress } from '@/features/application-form/document-rows'
 import { candidateSubtitle, candidateTitle, completeText, visibleMissing } from '@/features/application-form/paper-model'
 import { DEFAULT_TAB, availableTabs, hashForTab, isDetailTab, missingByTab, tabForMissing, tabForSection, tabFromHash, visibleCards, type FormTab } from '@/features/application-form/form-tabs'
-import { WIDE_DETAILS_QUERY, useMediaQuery } from '@/features/application-form/use-media-query'
 import { FormTabs, type TabBadge } from '@/features/application-form/components/form-tabs'
 import { ContextStrip } from '@/features/application-form/components/context-strip'
 import { RecruitmentStages, StageControl } from '@/features/application-form/components/recruitment-stages'
@@ -42,6 +42,8 @@ import '@/styles/candidate-records.css'
 import '@/styles/application-stages.css'
 import '@/styles/application-form-tabs.css'
 import { isAdminLevel } from '@/shared/model/role-labels'
+
+const missingLabel = (item: MissingItem): string => (item.kind === 'document' ? `${documentLabel(item.key.replace('documents.', ''))} not uploaded` : item.label)
 
 /** Stands in for the notes of a server that has none yet: the panel still opens its composer for people who can work the candidate. */
 const EMPTY_FEEDBACK: FeedbackData = { supported: false, items: [], canWrite: false, stageClock: null }
@@ -80,11 +82,13 @@ export default function ApplicationFormPage() {
   const [stageBusy, setStageBusy] = useState(false)
   const [busyKinds, setBusyKinds] = useState<DocumentKind[]>([])
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [unmapOpen, setUnmapOpen] = useState(false)
+  const [unmapSaving, setUnmapSaving] = useState(false)
+  const [unmapError, setUnmapError] = useState('')
   const fillRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   // One section at a time under the sticky tab bar; a link such as #documents opens that section.
   const [tab, setTab] = useState<FormTab>(() => tabFromHash(window.location.hash) ?? DEFAULT_TAB)
-  const wide = useMediaQuery(WIDE_DETAILS_QUERY)
   const previewButton = useRef<HTMLButtonElement>(null)
   const closePreview = useRef<HTMLButtonElement>(null)
 
@@ -254,11 +258,13 @@ export default function ApplicationFormPage() {
   const canSeeNotes = Boolean(feedback?.supported || canWork)
   const tabs = availableTabs({ invoice: canSeeInvoice, notes: canSeeNotes })
   const activeTab: FormTab = tabs.includes(tab) ? tab : DEFAULT_TAB
-  const shownCards = visibleCards(activeTab, wide)
-  const alsoShown = isDetailTab(activeTab) ? (['personal', 'passport', 'education', 'experience'] as FormTab[]).filter((item) => item !== activeTab && visibleCards(item, wide).join() === shownCards.join()) : []
+  const shownCards = visibleCards(activeTab)
   const badges = useMemo(() => {
     const out: Partial<Record<FormTab, TabBadge>> = {}
-    for (const [key, count] of Object.entries(missingByTab(missing))) out[key as FormTab] = { count: count ?? 0, kind: 'missing' }
+    const counts = missingByTab(missing)
+    // A section with nothing left to add shows a check; one with fields to add shows how many.
+    for (const key of ['personal', 'passport', 'education', 'experience', 'documents'] as FormTab[]) if (!counts[key]) out[key] = { count: 0, kind: 'done' }
+    for (const [key, count] of Object.entries(counts)) out[key as FormTab] = { count: count ?? 0, kind: 'missing' }
     const noteCount = feedback?.items.length ?? 0
     if (feedback?.stageClock?.needsReason) out.notes = { count: noteCount, kind: 'overdue' }
     else if (noteCount > 0) out.notes = { count: noteCount, kind: 'notes' }
@@ -269,34 +275,29 @@ export default function ApplicationFormPage() {
   const sheet = form && ctx ? <FormSheet ctx={ctx.paper} missing={missing} canOpenStage={canWork && Boolean(application)} onOpenStage={openTracking} /> : null
 
   const body = (
-    <div className="af" role="dialog" aria-label={`Application form for ${name}`}>
-      <div className="af-bar">
+    <div className={cn('af', dirty && 'has-actionbar')} role="dialog" aria-label={`Application form for ${name}`}>
+      <header className="af-bar">
         <button type="button" className="af-bar-back" onClick={close}><ArrowLeft aria-hidden="true" /><span>Back</span></button>
         <div className="af-bar-title">
           <span className="af-bar-nameline">
-            <span className={cn('af-bar-name', title.muted && 'is-muted')} title={name}>{name}</span>
+            <h1 className={cn('af-bar-name', title.muted && 'is-muted')}>{name}</h1>
             {idText && <span className="af-bar-id tnum" title="Data Bank ID">{idText}</span>}
           </span>
-          {subline && <small title={subline}>{subline}</small>}
+          {subline && <small className="af-bar-sub">{subline}</small>}
         </div>
-        {form && <span className="af-pct tnum" title="How much of the official form and its documents is filled in">{completeText(completeness.percent)}</span>}
-        <span className={cn('af-live', liveStatus === 'up' && 'is-up')} title={liveStatus === 'up' ? 'Changes by your colleagues appear here as they happen' : 'Live updates are reconnecting. This page still refreshes every few seconds'}>
-          <i aria-hidden="true" />{state.reading ? 'Reading documents…' : liveStatus === 'up' ? 'Live' : 'Reconnecting'}
-        </span>
+        <div className="af-bar-status" role="group" aria-label="Form status">
+          {form && <span className="af-pct tnum" title="How much of the official form and its documents is filled in">{completeText(completeness.percent)}</span>}
+          <span className={cn('af-live', liveStatus === 'up' ? 'is-up' : 'is-retry')} role="status" title={liveStatus === 'up' ? 'Live: changes by your colleagues appear here as they happen' : 'Live updates reconnecting; your edits are safe. This page still refreshes every few seconds'}>
+            <i aria-hidden="true" />{state.reading ? 'Reading documents…' : liveStatus === 'up' ? 'Live' : 'Reconnecting'}
+          </span>
+        </div>
         <div className="af-bar-actions">
-          {dirty && <span className="af-unsaved" role="status"><i aria-hidden="true" />Unsaved changes</span>}
-          {dirty && (
-            <>
-              <Button variant="ghost" disabled={saving} onClick={() => { if (!window.confirm('Discard your changes to this form?')) return; state.discard() }} icon={<X />}>Discard</Button>
-              <Button variant="primary" disabled={saving} onClick={() => void state.save()} icon={saving ? <Loader2 className="animate-spin" /> : <Save />}>{saving ? 'Saving…' : 'Save changes'}</Button>
-            </>
-          )}
           {SHOW_MERGE_UI && form && isAdminLevel(me.role) && <MergeIntoPicker sourceId={id} sourceLabel={primaryId(ids) || name} />}
           <Button ref={previewButton} onClick={() => setPreviewOpen(true)} icon={<Eye />} disabled={!form} aria-haspopup="dialog">Preview form</Button>
           {/* The paper form is always rendered, so this prints it from anywhere. */}
           <Button onClick={() => window.print()} icon={<Printer />} disabled={!form}>Print or save as PDF</Button>
         </div>
-      </div>
+      </header>
 
       <div className="af-scroll" ref={scrollRef}>
         {state.loading && !form && !state.error ? (
@@ -311,13 +312,13 @@ export default function ApplicationFormPage() {
               {state.reading && <p className="af-banner is-reading" role="status"><Loader2 className="animate-spin" aria-hidden="true" /><span>Reading documents… The details fill in by themselves as each file is read.</span></p>}
               {shownWarnings.length > 0 && <ul className="af-banner is-warn" role="status">{shownWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
               {feedback && <StageClockBar feedback={feedback} actions={feedbackActions} canWrite={feedback.canWrite} />}
-              <ContextStrip form={form} commencement={draft?.extras[COMMENCEMENT_PATH]} onOpen={() => selectTab('overview')} />
-              <FormTabs tabs={tabs} active={activeTab} alsoShown={alsoShown} badges={badges} onSelect={(next) => selectTab(next)} />
+              <ContextStrip form={form} clock={feedback?.supported ? feedback.stageClock : null} commencement={draft?.extras[COMMENCEMENT_PATH]} onOpen={() => selectTab('overview')} />
+              <FormTabs tabs={tabs} active={activeTab} badges={badges} onSelect={(next) => selectTab(next)} />
               {/* Every panel stays mounted (hidden when another section is chosen), so typing, uploads and readings carry on while a recruiter moves between sections. */}
               <div className="af-pane" id="af-pane-overview" role="tabpanel" aria-labelledby="af-tab-overview" hidden={!here('overview')}>
                 <div className="af-card af-assign-card" id="af-assignment">
                   <SectionHeader compact icon={<Building2 />} id="af-assignment-title" title="Client and recruitment details" />
-                  <AssignmentBar assignment={form.assignment} saving={state.assignmentSaving} errors={state.assignmentErrors} onChange={(field, change) => void changeAssignment(field, change)} applications={form.applications} activeApplicationId={form.application?.id ?? ''} canManageJobs={isAdminLevel(me.role)} onSwitchApplication={(applicationId) => { if (leaveStage()) navigate(applicationFormHref(id, null, applicationId), { replace: true }) }}
+                  <AssignmentBar assignment={form.assignment} saving={state.assignmentSaving} errors={state.assignmentErrors} onChange={(field, change) => void changeAssignment(field, change)} applications={form.applications} activeApplicationId={form.application?.id ?? ''} canManageJobs={isAdminLevel(me.role)} pickersLocked={pickersLocked(application?.currentStage, application?.status)} onUnmap={canWork && store.can('map_candidates') && application ? () => { if (!leaveStage()) return; setUnmapError(''); setUnmapOpen(true) } : undefined} onSwitchApplication={(applicationId) => { if (leaveStage()) navigate(applicationFormHref(id, null, applicationId), { replace: true }) }}
                     stageControl={<><StageControl form={form} canOpen={Boolean(application) && !stageBusy} onOpen={selectStage} /><CommencementField ctx={ctx.fill} canWork={canWork} /></>} />
                   <div className="af-stage-workbench">
                   <RecruitmentStages form={form} canOpen={Boolean(application) && !stageBusy} selectedStage={selectedStage} onOpen={selectStage} />
@@ -358,6 +359,25 @@ export default function ApplicationFormPage() {
         ) : null}
       </div>
 
+      {/* Unsaved edits: one sticky bar over the bottom edge (it overlays, so nothing above it moves). */}
+      {dirty && form && (
+        <div className="af-actionbar" role="region" aria-label="Unsaved changes">
+          <div className="af-actionbar-inner">
+            <span className="af-unsaved" role="status"><i aria-hidden="true" />Unsaved changes</span>
+            {missing.length > 0 ? (
+              <button type="button" className="af-actionbar-missing" onClick={() => fillIn(missing[0])}>
+                <AlertTriangle aria-hidden="true" />
+                <span><b>Still missing {missing.length}:</b> {missing.slice(0, 3).map(missingLabel).join(', ')}{missing.length > 3 ? ` and ${missing.length - 3} more` : ''}</span>
+              </button>
+            ) : <span className="af-actionbar-ok">Everything required is filled in.</span>}
+            <div className="af-actionbar-buttons">
+              <Button variant="secondary" disabled={saving} onClick={() => { if (!window.confirm('Discard your changes to this form?')) return; state.discard() }} icon={<X />}>Discard</Button>
+              <Button variant="primary" disabled={saving} onClick={() => void state.save()} icon={saving ? <Loader2 className="animate-spin" /> : <Save />}>{saving ? 'Saving…' : 'Save changes'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* The paper form lives in the drawer while it is open and in a print-only place otherwise, so there is only ever one. */}
       {sheet && !previewOpen && <div className="af-print-sheet">{sheet}</div>}
       {previewOpen && (
@@ -375,6 +395,25 @@ export default function ApplicationFormPage() {
             <div className="af-drawer-body">{sheet}</div>
           </aside>
         </>
+      )}
+      {unmapOpen && application && (
+        <UnmapCandidateDialog
+          name={name}
+          saving={unmapSaving}
+          error={unmapError}
+          onClose={() => setUnmapOpen(false)}
+          onConfirm={async () => {
+            if (unmapSaving) return
+            setUnmapSaving(true); setUnmapError('')
+            try {
+              await store.unmap(application.id)
+              setUnmapOpen(false)
+              void state.reload(true)
+              navigate(applicationFormHref(id, null, null), { replace: true })
+            } catch (cause) { setUnmapError(cause instanceof Error ? cause.message : 'We could not remove the candidate from the job. Please try again.') }
+            finally { setUnmapSaving(false) }
+          }}
+        />
       )}
       <Dialog
         open={leaving}

@@ -919,8 +919,12 @@ def save_form(db: Session, user: User, candidate_id: str, body: dict, *, applica
 
     `application.commencementDate` is the one placement-level field: it is saved on the placement `application_id` / `order_id`
     selects (as everywhere in the form), by the same people who may edit the rest of the form."""
-    from app.api.routers.candidates import lock_assignment_cursor
-    lock_assignment_cursor(db)
+    # The assignment cursor serialises candidate identity decisions (a phone, e-mail or passport number that may belong to someone else).
+    # Only a save that touches one of them needs it, and it is taken first, before the candidate row, as everywhere else. Any other save
+    # (the date of commencement, the follow-up date, the address ...) skips one round trip and does not queue behind other candidates.
+    if any(column in collect_changes(body) for column in ("phone", "email", "passport_no")):
+        from app.api.routers.candidates import lock_assignment_cursor
+        lock_assignment_cursor(db)
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id)
                           .options(undefer(Candidate.education), undefer(Candidate.work_history), undefer(Candidate.field_sources))
                           .with_for_update().execution_options(populate_existing=True))

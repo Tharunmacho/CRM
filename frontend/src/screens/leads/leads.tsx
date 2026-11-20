@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { CalendarPlus, ChevronsDownUp, ChevronsUpDown, Download, FileCheck2, ListChecks, PhoneOff, RefreshCw, Search, ThumbsUp, Users, Upload, BellRing } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
+import { createFirstValueFilter } from '@/shared/lib/first-value'
 import { useStore } from '@/shared/state/crm-store'
 import { EmptyState, PageHeader, Panel } from '@/shared/ui/display'
 import { Button, Select } from '@/shared/ui/primitives'
@@ -107,12 +108,15 @@ export default function LeadsPage() {
   // The custom question columns of the stored sheets (of the filtered campaign or upload when one is chosen); they follow new uploads.
   // They are re-read when the campaigns or uploaded forms change (a new sheet), not whenever a lead event hands over a new facets object.
   const columnsKey = columnsQuery(filters)
-  const sheetsSignature = useMemo(() => JSON.stringify([data.facets?.campaigns ?? null, data.facets?.forms ?? null]), [data.facets])
+  const sheetsSignature = useMemo(() => data.facets ? JSON.stringify([data.facets.campaigns ?? null, data.facets.forms ?? null]) : '', [data.facets])
+  // The columns are read at mount, before the filter choices arrive; the first set of choices is not a new sheet and must not repeat that read.
+  const sheetsSeen = useRef(createFirstValueFilter()).current
+  const newSheets = sheetsSeen(sheetsSignature, me.id)
   useEffect(() => {
     const controller = new AbortController()
     leadApi.columns(columnsKey, controller.signal).then((result) => { if (!controller.signal.aborted) setExtras(result.columns ?? []) }).catch(() => { /* the core columns stay */ })
     return () => controller.abort()
-  }, [columnsKey, sheetsSignature])
+  }, [columnsKey, newSheets])
 
   // The daily-work gate: the server's answer, replaced at once by a refusal the server just gave, until the next summary arrives.
   useEffect(() => { setForcedGate(null) }, [summary])

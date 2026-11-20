@@ -242,3 +242,40 @@ test('isOtherRecord only says "not mine" when the server named other records of 
   assert.equal(isOtherRecord(change({ resync: true }), 'candidates', 'c1'), false)
   assert.equal(isOtherRecord(change({ topics: ['candidates', 'documents'] }), 'candidates', 'c1'), false) // other topics too
 })
+
+test('isPresenceNoise: only attendance (and the reports that follow it) is a heartbeat footprint', async () => {
+  const { isPresenceNoise, createLiveEvents } = await load()
+  const change = (topics, over = {}) => ({ topics, ids: {}, at: null, resync: false, ...over })
+  assert.equal(isPresenceNoise(change(['attendance', 'reports'])), true)
+  assert.equal(isPresenceNoise(change(['attendance'])), true)
+  assert.equal(isPresenceNoise(change(['reports'])), false) // a reports-only change is not provably a heartbeat
+  assert.equal(isPresenceNoise(change(['attendance', 'tasks', 'reports'])), false)
+  assert.equal(isPresenceNoise(change(['attendance'], { resync: true })), false)
+  // A subscriber of `reports` only is handed topics cut to its own, but still learns what was announced.
+  assert.equal(isPresenceNoise(change(['reports'], { announced: ['attendance', 'reports'] })), true)
+  assert.equal(isPresenceNoise(change(['reports'], { announced: ['candidates', 'reports'] })), false)
+})
+
+test('a subscriber gets the full announcement beside its own topics, merged across a burst', async () => {
+  const { createLiveEvents } = await load()
+  const sources = []
+  const timers = []
+  const live = createLiveEvents({
+    url: '/events',
+    createSource: () => { const listeners = {}; const source = { readyState: 1, close() {}, onerror: null, addEventListener(type, fn) { listeners[type] = fn }, emit(type, data) { listeners[type]?.({ data: JSON.stringify(data) }) } }; sources.push(source); return source },
+    setTimeout: (fn) => { timers.push(fn); return timers.length },
+    clearTimeout: () => {},
+    isVisible: () => true,
+  })
+  const seen = []
+  live.subscribe(['reports'], (change) => seen.push(change), { debounceMs: 10 })
+  live.start()
+  sources[0].emit('hello', { heartbeatMs: 20000 })
+  sources[0].emit('change', { topics: ['attendance', 'reports'] })
+  sources[0].emit('change', { topics: ['tasks', 'reports'] })
+  timers.slice().forEach((fn) => fn())
+  assert.equal(seen.length, 1)
+  assert.deepEqual(seen[0].topics, ['reports'])
+  assert.deepEqual([...seen[0].announced].sort(), ['attendance', 'reports', 'tasks'])
+  live.stop()
+})

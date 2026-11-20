@@ -200,7 +200,7 @@ test('education and work history columns use the keys of the paper form', () => 
     assert.equal(used, 0)
   }
   assert.deepEqual(fill.EDUCATION_COLUMNS_FILL.map(fill.columnSpanMd), [6, 6, 12, 12])
-  assert.deepEqual(fill.EXPERIENCE_COLUMNS_FILL.map(fill.columnSpanMd), [6, 6, 6, 6])
+  assert.deepEqual(fill.EXPERIENCE_COLUMNS_FILL.map(fill.columnSpanMd), [12, 12, 6, 12])
 })
 
 test('the institution is shown as a name and an address and joined back into one text', () => {

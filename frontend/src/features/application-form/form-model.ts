@@ -1320,6 +1320,16 @@ const BLOCKED_JOB_STATUS: Record<string, string> = {
   closed: 'Closed', filled: 'Filled', on_hold: 'On hold', hold: 'On hold', cancelled: 'Cancelled', canceled: 'Cancelled', completed: 'Completed',
 }
 
+/**
+ * The Client and Job pickers are locked once an active placement is past prescreening (stage 2 and later): the server refuses to
+ * change the job of such a placement, so the form does not invite the attempt. The job can only be changed at stage 1; after that the
+ * candidate has to be unmapped first. No placement, or a finished one, leaves the pickers as they are.
+ */
+export const PICKERS_LOCKED_TEXT = 'The job is locked because this candidate is past prescreening. To change it, unmap the candidate first.'
+export function pickersLocked(stage: number | null | undefined, status: string | null | undefined): boolean {
+  return status === 'active' && Number(stage) > 1
+}
+
 /** Why a job cannot be chosen ("Filled", "On hold", ...), or an empty string when it can. */
 export function jobUnavailableReason(job: Pick<AssignmentClientOption['jobs'][number], 'status' | 'openings'>): string {
   const status = job.status.toLowerCase().replace(/[\s-]+/g, '_')
