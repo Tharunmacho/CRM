@@ -1,10 +1,10 @@
 # Recruitment stages one to five
 
-These stages establish suitability, forwarding, interview arrangements, interview decisions and offers. Requirements: **STAGE-01, STAGE-02, STAGE-03, STAGE-04, STAGE-05**. The original PRD is supplemented by the owner's manual-stage instruction of 2026-11-12: recruiters decide when to move, write feedback for every move, and documents never block a stage. The later stages are described in [stages six to eleven](15-stages-six-to-eleven.md).
+These stages establish suitability, forwarding, interview arrangements, interview decisions and offers. Requirements: **STAGE-01, STAGE-02, STAGE-03, STAGE-04, STAGE-05**. The original PRD is supplemented by the owner's manual-stage instruction of 2026-11-12: recruiters decide when to move, write feedback for every move, and documents never block a stage. The later stages are described in [stages six to twelve](15-stages-six-to-twelve.md).
 
 ## Access and candidate form
 
-All eleven stages are available from the stage control next to Recruiter in the candidate application's recruitment card. Selecting a stage opens its saved details and feedback; selection itself does not change the stage. The same stage modal is accessible from orders, profiles, mapped lists and tasks.
+All twelve stages are available from the stage control next to Recruiter in the candidate application's recruitment card. Selecting a stage opens its saved details and feedback; selection itself does not change the stage. The same stage modal is accessible from orders, profiles, mapped lists and tasks.
 
 Admin/Manager can work any application; Recruiters can work their assigned candidate's application. An application and active recruiter are required to move a stage. Only the current stage is editable. Completed stages and previous attempts remain readable with actor, time, feedback and optional recorded details. Future stages can be inspected but cannot be completed ahead of the current stage.
 
@@ -30,7 +30,7 @@ Optional details: Scheduled Yes/No, date, time, mode and venue/link. Yes records
 
 ## Stopping exit at every stage
 
-Every stage from 1 to 11 also has a **stopping exit**, so a candidate who is not going ahead can be ended at the stage they have reached instead of being pushed forward. The stage screen shows it as a row of buttons under the feedback box ("Not going ahead with this candidate?"). Choosing one, together with written feedback, closes the application exactly like the older negative exits: the candidate does not move to the next stage, the stage's task is closed and no further task is created (so they leave the recruiter's Follow-up), the order opening is not consumed and the candidate returns to the Data Bank and can be matched to another order. The outcome is stored on the stage record (`stop` in the stage data) and shown in the history, the application form tracking and the reports as the closure reason.
+Every stage from 1 to 12 also has a **stopping exit**, so a candidate who is not going ahead can be ended at the stage they have reached instead of being pushed forward. The stage screen shows it as a row of buttons under the feedback box ("Not going ahead with this candidate?"). Choosing one, together with written feedback, closes the application exactly like the older negative exits: the candidate does not move to the next stage, the stage's task is closed and no further task is created (so they leave the recruiter's Follow-up), the order opening is not consumed and the candidate returns to the Data Bank and can be matched to another order. The outcome is stored on the stage record (`stop` in the stage data) and shown in the history, the application form tracking and the reports as the closure reason.
 
 | Stage | Exit choices | Closure reason (label) |
 | --- | --- | --- |
@@ -40,19 +40,20 @@ Every stage from 1 to 11 also has a **stopping exit**, so a candidate who is not
 | 4 Interview result | Rejected, Declined | `interview_rejected` (Rejected at interview), `stage_declined` |
 | 5 Offer letter | Rejected, Declined | `stage_rejected`, `offer_declined` (Offer declined) |
 | 6 Medical | Rejected, Declined | `stage_rejected`, `stage_declined` |
-| 7 Passport | Rejected, Declined, Passport not available | `stage_rejected`, `stage_declined`, `passport_not_available` |
-| 8 Advance payment | Rejected, Declined, Not paid | `stage_rejected`, `stage_declined`, `advance_not_paid` |
-| 9 Visa arrival | Rejected, Declined, Visa rejected | `stage_rejected`, `stage_declined`, `visa_rejected` |
-| 10 Visa stamping | Rejected, Declined, Visa stamping refused | `stage_rejected`, `stage_declined`, `visa_stamping_refused` |
-| 11 Air ticket | Not travelling | `not_travelling` |
+| 7 PCC | Rejected, Declined, PCC not cleared | `stage_rejected`, `stage_declined`, `pcc_not_cleared` (PCC not cleared; migration `0048_pcc_stage`) |
+| 8 Passport | Rejected, Declined, Passport not available | `stage_rejected`, `stage_declined`, `passport_not_available` |
+| 9 Advance payment | Rejected, Declined, Not paid | `stage_rejected`, `stage_declined`, `advance_not_paid` |
+| 10 Visa arrival | Rejected, Declined, Visa rejected | `stage_rejected`, `stage_declined`, `visa_rejected` |
+| 11 Visa stamping | Rejected, Declined, Visa stamping refused | `stage_rejected`, `stage_declined`, `visa_stamping_refused` |
+| 12 Air ticket | Not travelling | `not_travelling` |
 
 Rules, enforced by the API (`STOP_EXITS` in `backend/app/domain/stages.py`, mirrored in `frontend/src/shared/workflow/stages.ts`; migration `0043_stage_stop_exits` adds the closure reasons):
 
 * Feedback is required (422, missing "Feedback"). A choice that does not belong to the stage is refused with 422.
 * An explicit exit wins over the stage's own answers, including an Unfit retest plan. The stage's own buttons (Failed, Not forwarded, Rejected, Declined, Not received, Unfit) keep working as before.
 * Who can do it is unchanged: the assigned recruiter on their own candidate, an admin or a manager on any. Only an admin reopens, with a reason; reopening reactivates the application at that stage.
-* Stage 11 only has Not travelling (the candidate cancelled or declined before departure). It never deploys, assigns no Traveller ID and needs no free opening; completing stage 11 with the ticket and travel date stays the only path to Deployed / Travelled.
-* Tests: `test_stage_stop_exits.py` (every stage 1 to 11) and `stage-rules.test.mjs`.
+* Stage 12 only has Not travelling (the candidate cancelled or declined before departure). It never deploys, assigns no Traveller ID and needs no free opening; completing stage 12 with the ticket and travel date stays the only path to Deployed / Travelled.
+* Tests: `test_stage_stop_exits.py` (every stage 1 to 12) and `stage-rules.test.mjs`.
 
 ## Decision stages 4, 5 and 6
 
@@ -67,6 +68,8 @@ Interview result, Offer letter and Medical are decisions. The stage screen asks 
 | | Not received | Not received | stops, `offer_not_received` (Offer not received) |
 | 6 Medical | Fit | Fit | goes to stage 7 |
 | | Unfit | Unfit | stops, `medical_unfit` (Medically unfit) |
+
+Stage 7 PCC is not a decision: it records Received, Pending or a manual move and goes on to stage 8 (see [stage 7](15-stages-six-to-twelve.md#stage-7-pcc-and-the-twelve-stage-migration)).
 
 Rules the API enforces, whatever the screen sends:
 

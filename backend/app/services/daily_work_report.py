@@ -29,13 +29,13 @@ The stage's `outcome` text (written by app.domain.stages) says what happened; on
   interviewsOnline  subset of interviews whose stage 3 mode is 'online'   InterviewSchedule.mode in ('in_person', 'online')
   offers          stage 5 'Agreed' or 'Declined'                          _stage5: both mean an offer letter was received;
                                                                           'Not received' and a client 'Rejected' are not counted
-  visas           stage 9 'Arrived' or 'Completed manually'               _stage9 / VisaArrival.arrived; 'Visa rejected' is not
+  visas           stage 10 'Arrived' or 'Completed manually'              _stage10 / VisaArrival.arrived; 'Visa rejected' is not
                                                                           counted
-  travelled       stage 11 'Booked' (the placement becomes Deployed)      complete_stage deploys the placement and gives the
-                                                                          Traveller ID only for a real stage 11 completion;
+  travelled       stage 12 'Booked' (the placement becomes Deployed)      complete_stage deploys the placement and gives the
+                                                                          Traveller ID only for a real stage 12 completion;
                                                                           'Not travelling' is a closure, not counted
 
-Travelled counts the day stage 11 was completed in the CRM, not the ticket's `travelDate`: `travelDate` is entered when the
+Travelled counts the day stage 12 was completed in the CRM, not the ticket's `travelDate`: `travelDate` is entered when the
 ticket is booked (it can lie in the future), the Travelled screen already treats completion as "deployed", and a folder import
 stamps `completed_at` with the stage's own date (bulk_candidate_import.stage_dates), so history stays on its real day.
 
@@ -111,8 +111,8 @@ STAGE_RULES: dict[str, tuple[int, tuple[str, ...] | None]] = {
     "shortlisted": (3, ("Scheduled", "Completed manually")),
     "interviews": (4, ("Selected", "Rejected")),
     "offers": (5, ("Agreed", "Declined")),
-    "visas": (9, ("Arrived", "Completed manually")),
-    "travelled": (11, ("Booked",)),
+    "visas": (10, ("Arrived", "Completed manually")),
+    "travelled": (12, ("Booked",)),
 }
 
 # Business order of the screen (leads first, as the client asked); the funnel runs in STAGE order instead.
@@ -155,7 +155,7 @@ LEAD_STATUS_LABELS = {
     "resume_received": "Resume received", "converted": "Converted", "not_interested": "Not interested",
     "invalid": "Not reachable", "wrong_number": "Wrong number",
 }
-# Pipeline right now: stage 0 is a candidate who is workable but not on an order yet; 1..11 are the stage definitions.
+# Pipeline right now: stage 0 is a candidate who is workable but not on an order yet; 1..12 are the stage definitions.
 STAGE_NOW_KEYS = {0: ("unmapped", "Not on an order yet"), **{s.no: (s.key, s.title) for s in STAGES}}
 _INTERESTED = {"interested", "resume_requested", "resume_received", "converted"}
 
@@ -414,7 +414,7 @@ def read_tasks(session, p: Period, staff_id: str | None, now: datetime) -> list:
 
 
 def stage_now_union(staff_id: str | None):
-    """(owner, stage, candidates) for every candidate CURRENTLY at a stage, as one UNION query. Stage 1-11: the current stage of each
+    """(owner, stage, candidates) for every candidate CURRENTLY at a stage, as one UNION query. Stage 1-12: the current stage of each
     ACTIVE application. Stage 0 ('Not on an order yet'): workable candidates (new / in process / needs review, the Daily work list's
     WORKABLE) with no active application that are not parked after their own decline (daily_work._parked). The owner is the
     candidate's recruiter (Daily work's definition: Candidate.owner_id), else the application's own recorded recruiter."""
@@ -926,7 +926,7 @@ EXTRA_LABELS = {"leadsAssigned": "Leads assigned", "tasksDone": "Tasks done", "t
 
 
 def metric_label(metric: str) -> str | None:
-    """Label of a drill-down metric: the eight figures, the lead / task totals and `stage:<0-11>` (candidates now at that stage)."""
+    """Label of a drill-down metric: the eight figures, the lead / task totals and `stage:<0-12>` (candidates now at that stage)."""
     if metric in LABELS:
         return LABELS[metric]
     if metric in EXTRA_LABELS:

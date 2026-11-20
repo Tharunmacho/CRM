@@ -175,9 +175,9 @@ def test_blank_candidate_form_has_every_docx_section_and_lists_what_is_missing(d
     assert data["recruitment"]["client"] is None and data["recruitment"]["source"] == "Walk-in"
     assert data["recruitment"]["recruiter"] == {"id": "staff", "name": "Staff"}
     assert [row["key"] for row in data["tracking"]["rows"]] == [
-        "prescreening", "forwarded", "interview_scheduling", "interview_result", "offer_letter", "pcc", "medical",
+        "prescreening", "forwarded", "interview_scheduling", "interview_result", "offer_letter", "medical", "pcc",
         "passport_collection", "advance_payment", "visa", "visa_stamping", "ticket"]  # the invoice row is the admin's alone
-    assert {row["status"] for row in data["tracking"]["rows"]} == {"not_started", "not_applicable"}
+    assert {row["status"] for row in data["tracking"]["rows"]} == {"not_started"}   # every row is a stage now (the not-applicable PCC row is gone)
     missing = {item["key"]: item for item in data["completeness"]["missing"]}
     assert missing["documents.passport"]["message"] == "Passport not uploaded"
     assert missing["personal.fatherName"]["message"] == "Father's name is missing"
@@ -456,7 +456,8 @@ def test_tracking_follows_the_stage_records_live(desk):
     assert data["recruitment"]["position"] == "Welder" and data["recruitment"]["clientContact"] == "Mr Contact"
     rows = {r["key"]: r for r in data["tracking"]["rows"]}
     assert rows["prescreening"]["status"] == "in_progress" and rows["forwarded"]["status"] == "not_started"
-    assert rows["pcc"]["status"] == "not_applicable" and rows["pcc"]["stage"] is None
+    assert rows["pcc"]["status"] == "not_started" and rows["pcc"]["stage"] == 7 and rows["pcc"]["systemLabel"] == "PCC"   # PCC is a stage like the others
+    assert [rows[key]["stage"] for key in ("medical", "pcc", "passport_collection", "advance_payment", "visa", "visa_stamping", "ticket")] == [6, 7, 8, 9, 10, 11, 12]
     assert "invoice_generated" not in rows  # a recruiter's form carries no invoice evidence
     as_user(desk, "admin", Role.admin)
     admin_rows = {r["key"]: r for r in form(desk)["tracking"]["rows"]}
@@ -475,6 +476,12 @@ def test_tracking_follows_the_stage_records_live(desk):
     tracking = form(desk)["tracking"]
     assert tracking["summary"]["completed"] == 6 and tracking["summary"]["currentStage"] == 7
     assert {r["key"]: r["status"] for r in tracking["rows"]}["medical"] == "completed"
+    assert {r["key"]: r["status"] for r in tracking["rows"]}["pcc"] == "in_progress"
+    assert {r["key"]: r["status"] for r in tracking["rows"]}["passport_collection"] == "not_started"
+    complete(desk, app_id, payload(desk, app_id, 7))
+    tracking = form(desk)["tracking"]
+    assert tracking["summary"]["completed"] == 7 and tracking["summary"]["currentStage"] == 8 and tracking["summary"]["currentStageLabel"] == "Passport"
+    assert {r["key"]: r["status"] for r in tracking["rows"]}["pcc"] == "completed"
     assert {r["key"]: r["status"] for r in tracking["rows"]}["passport_collection"] == "in_progress"
 
     as_user(desk, "admin", Role.admin)

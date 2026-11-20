@@ -33,7 +33,7 @@ const filterJs = ts.transpileModule(filterTree.statements.filter(statement => !t
 const components = {}
 const bindings = { ...stats, ...labels, PRD_COLUMNS: pools.PRD_COLUMNS, TRAVEL_CHOICES: pools.TRAVEL_CHOICES, parseTravel: pools.parseTravel, ChevronDown: 'svg', X: 'svg',
   Select: 'select', Field: 'label', Input: 'input', cn: (...values) => values.filter(Boolean).join(' '),
-  stageByNo: number => ({ title: `Workflow ${number}` }) }
+  stageByNo: number => ({ title: `Workflow ${number}` }), TOTAL_STAGES: 12 }
 new Function('exports', 'React', ...Object.keys(bindings), filterJs)(components, React, ...Object.values(bindings))
 const noop = () => {}
 const filterProps = (overrides = {}) => ({
@@ -65,11 +65,11 @@ test('source is visible in the main filter bar and preserves the backend source 
 
 test('an existing stage selection remains available in More filters and marks hidden filters active', () => {
   const changes = []
-  const tree = components.DataBankFilters(filterProps({ filters: { stage: '11' }, onFilter: (...args) => changes.push(args) }))
+  const tree = components.DataBankFilters(filterProps({ filters: { stage: '12' }, onFilter: (...args) => changes.push(args) }))
   const more = descendants(tree).find(node => node.props.id === 'db-more-filters')
   const stage = findLabel(more, 'Filter by Stage')
   assert.equal(more.props.hidden, true)
-  assert.equal(stage.props.value, '11')
+  assert.equal(stage.props.value, '12')
   assert.ok(findLabel(tree, 'Some of these filters are active'))
   stage.props.onChange({ target: { value: '' } })
   assert.deepEqual(changes, [['stage', '']])

@@ -33,7 +33,7 @@ function StageContent({ row }: { row: StageRow }) {
 }
 
 /**
- * Recruitment process tracking, a section of the working card: all eleven stages as rows on fixed columns (icon, number and name with its
+ * Recruitment process tracking, a section of the working card: all twelve stages as rows on fixed columns (icon, number and name with its
  * documents, status, date). A stage the candidate has not reached shows a lock, the current one an open lock, a finished one a
  * tick and its date. The lock opens by itself when the live feed brings the candidate to the stage.
  */

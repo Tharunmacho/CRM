@@ -6,7 +6,7 @@ import type { ApplicationStatus } from '@/shared/model/types'
 type Segment = 'done' | 'now' | 'closed' | 'todo'
 
 /**
- * The 11-stage tracker: one segment per stage. `numbered` draws the stage number inside each
+ * The 12-stage tracker: one segment per stage. `numbered` draws the stage number inside each
  * segment (the stage modal); without it the bar is a slim strip for list rows.
  * `reached` lists stages with a recorded outcome; when omitted, every stage before the current
  * one counts as done.
@@ -32,7 +32,7 @@ export function StageRail({
   }
   const remaining = STAGES.filter((stage) => stateOf(stage.no) === 'todo').length
   return (
-    <ol className={cn('sr', numbered && 'is-numbered', className)} aria-label={remaining > 0 ? `The 11 stages, ${remaining} more ${remaining === 1 ? 'step' : 'steps'} to go` : 'The 11 stages'}>
+    <ol className={cn('sr', numbered && 'is-numbered', className)} aria-label={remaining > 0 ? `The 12 stages, ${remaining} more ${remaining === 1 ? 'step' : 'steps'} to go` : 'The 12 stages'}>
       {STAGES.map((stage) => {
         const state = stateOf(stage.no)
         const label = `${stage.no}. ${stage.title}`
@@ -53,7 +53,7 @@ export function StageRail({
 
 /** The stage number and name beside a slim rail, e.g. "3 Interview scheduling". */
 export function StageCaption({ no, status }: { no: number; status: ApplicationStatus }) {
-  if (status === 'deployed') return <span className="sr-caption">Deployed · all 11 stages</span>
+  if (status === 'deployed') return <span className="sr-caption">Deployed · all 12 stages</span>
   const title = stageByNo(no).title
   return <span className="sr-caption"><b className="tnum">{no}</b>{title}{status === 'closed' ? ' · closed here' : ''}</span>
 }

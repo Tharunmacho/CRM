@@ -23,7 +23,7 @@ export function OwnerTag({ name }: { name?: string }) {
   )
 }
 
-/** The 11-stage tracker: one segment per stage, passed stages filled, the current one marked. */
+/** The 12-stage tracker: one segment per stage, passed stages filled, the current one marked. */
 export function StageTrack({ no }: { no?: number }) {
   if (!no) {
     return (

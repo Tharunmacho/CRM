@@ -8,8 +8,8 @@ ones with a stage waiting, then the furthest along; a candidate in both lists ap
 
 * DOC: the placement's date of commencement as DD-MMM-YYYY text (blank when none).
 * Agency: the row's `agency` (the client tracker's Ref column, `agency_display_expression`, read in the rows' own statement).
-* Advance: the client tracker's Advance cell (`advance_text.advance_cell` over the stage-8 record); blank when none.
-* Stage: "Stage 9 - Visa arrival + Google review", or "Initial call" before a stage starts.
+* Advance: the client tracker's Advance cell (`advance_text.advance_cell` over the stage-9 record); blank when none.
+* Stage: "Stage 10 - Visa arrival + Google review", or "Initial call" before a stage starts.
 * Today: "Called 10:45" / "Stage moved 10:45" (agency clock) when that happened today, else blank. Writing a remark is not listed here.
 * Remark: the newest remark on the row.
 Text is written as inline strings, which Excel never evaluates, so a value such as `=cmd|...` stays text.
@@ -86,7 +86,7 @@ def stage_text(stage: int | None) -> str:
 
 
 def read_extras(db, rows: list[dict]) -> tuple[dict, dict, str]:
-    """(stage-8 facts by application id, recruiter name by id, default advance currency): three statements, one round."""
+    """(stage-9 facts by application id, recruiter name by id, default advance currency): three statements, one round."""
     application_ids = [r["applicationId"] for r in rows if r.get("applicationId")]
     owner_ids = sorted({r["ownerId"] for r in rows if r.get("ownerId")})
     facts, owners, currency = daily_work.read_together(

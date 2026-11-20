@@ -86,7 +86,7 @@ def _daily_work(db: Session, user: User, staff: str | None) -> dict:
 @router.get("/follow-up")
 def follow_up(staff: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """
-    Follow-up: the candidates a recruiter owns whose application is active at stage 2 to 11 (still going forward), stalest first.
+    Follow-up: the candidates a recruiter owns whose application is active at stage 2 to 12 (still going forward), stalest first.
     A closed application (a negative exit) or a deployed one (it shows on Travelled) is not listed. Same scoping as `/daily-work`:
     a recruiter sees their own, admin and MD everyone's or `staff=<id>`'s, with a per-recruiter count. A read only.
     """

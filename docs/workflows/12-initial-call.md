@@ -1,6 +1,6 @@
 # Initial call and interest confirmation
 
-The first task asks the assigned recruiter to contact the candidate and confirm interest. It is separate from the eleven recruitment stages. Source: PRD page 7. Requirement: **ASSIGN-04**, with task creation under ASSIGN-02 and TASK-02.
+The first task asks the assigned recruiter to contact the candidate and confirm interest. It is separate from the twelve recruitment stages. Source: PRD page 7. Requirement: **ASSIGN-04**, with task creation under ASSIGN-02 and TASK-02.
 
 ## Roles and preparation
 

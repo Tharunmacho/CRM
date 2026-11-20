@@ -6,7 +6,7 @@ import type { Application } from '@/shared/model/types'
  * so the lead decided:
  *  - matched  = applications that are still active on the order (not closed, not yet deployed)
  *  - selected = active applications past stage 4 "Interview result", i.e. the client picked them
- *  - deployed = applications that finished stage 11
+ *  - deployed = applications that finished stage 12
  * Closed applications (unmapped, rejected, not interested, ...) never count. The backend keeps the
  * same rule in app/services/reporting.py (`order_counts`).
  */

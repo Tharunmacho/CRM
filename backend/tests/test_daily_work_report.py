@@ -148,16 +148,16 @@ def seed(sessions):
         did("c7", 5, "Not received", ist(THU, 10, 20), "ravi")
         did("c8", 4, "Rejected", ist(THU, 13), "ravi")
         did("c9", 6, "Fit", ist(THU, 10), "meena", owner="meena", order="order2")
-        did("c9", 9, "Arrived", ist(THU, 11), "meena", owner="meena", order="order2")
-        did("c10", 9, "Visa rejected", ist(THU, 11, 10), "meena", owner="meena")
-        did("c11", 11, "Booked", ist(THU, 12), "meena", owner="meena", data={"travelDate": "2026-11-20"})
-        did("c12", 11, "Not travelling", ist(THU, 12, 10), "meena", owner="meena")
+        did("c9", 10, "Arrived", ist(THU, 11), "meena", owner="meena", order="order2")
+        did("c10", 10, "Visa rejected", ist(THU, 11, 10), "meena", owner="meena")
+        did("c11", 12, "Booked", ist(THU, 12), "meena", owner="meena", data={"travelDate": "2026-11-20"})
+        did("c12", 12, "Not travelling", ist(THU, 12, 10), "meena", owner="meena")
         did("c22", 3, "Interview not possible", ist(THU, 11, 20), "meena", owner="meena")
         did("c23", 3, "Completed manually", ist(THU, 11, 30), "meena", owner="meena")
         did("c19", 1, "Passed", ist(date(2026, 10, 30), 10), "asha", owner="asha")
         did("c17", 2, "Forwarded", ist(date(2026, 10, 30), 11), "ravi")
         did("c20", 1, "Passed", ist(date(2026, 10, 31), 10), "meena", owner="meena")
-        did("c24", 11, "Booked", ist(date(2026, 11, 1), 12), "meena", owner="meena")
+        did("c24", 12, "Booked", ist(date(2026, 11, 1), 12), "meena", owner="meena")
         did("c18", 2, "Forwarded", ist(date(2026, 10, 20), 10), "ravi")
 
         assigned = ist(date(2026, 10, 1), 9)
@@ -199,10 +199,10 @@ def seed(sessions):
 
         # The pipeline right now: where each active placement stands, and who is closed / deployed / not on an order yet.
         for key, stage_no in (("c1", 5), ("c15", 2), ("c16", 2), ("c19", 2), ("c3", 3), ("c5", 6), ("c6", 6), ("c8", 5), ("c13", 3),
-                              ("c14", 3), ("c17", 3), ("c18", 3), ("c9", 10), ("c22", 3), ("c23", 4), ("c20", 2)):
+                              ("c14", 3), ("c17", 3), ("c18", 3), ("c9", 11), ("c22", 3), ("c23", 4), ("c20", 2)):
             db.execute(text("UPDATE crm_applications SET current_stage = :s WHERE id = :a"), {"s": stage_no, "a": f"app-{key}"})
         db.execute(text("UPDATE crm_applications SET status = 'closed' WHERE id IN ('app-c2', 'app-c4', 'app-c7', 'app-c10', 'app-c12')"))
-        db.execute(text("UPDATE crm_applications SET status = 'deployed', current_stage = 11 WHERE id IN ('app-c11', 'app-c24')"))
+        db.execute(text("UPDATE crm_applications SET status = 'deployed', current_stage = 12 WHERE id IN ('app-c11', 'app-c24')"))
         db.execute(text("UPDATE crm_candidates SET status = 'deployed' WHERE id IN ('c11', 'c24')"))
         for key, owner, status in (("u1", "asha", CandidateStatus.new), ("u2", "asha", CandidateStatus.in_process),
                                    ("u3", "ravi", CandidateStatus.not_interested), ("u4", "meena", CandidateStatus.new)):
@@ -286,8 +286,8 @@ def test_the_counted_outcomes_are_the_ones_the_stage_rules_write():
         3: [{"scheduled": "yes"}, {}, {"stop": "not_possible"}],
         4: [{"result": "selected"}, {"result": "rejected"}],
         5: [{"result": "agreed"}, {"result": "declined"}, {"result": "not_received"}],
-        9: [{"arrived": "yes"}, {}, {"stop": "visa_rejected"}],
-        11: [{"file": {"id": "f"}, "travelDate": "2026-11-05"}, {"stop": "not_travelling"}],
+        10: [{"arrived": "yes"}, {}, {"stop": "visa_rejected"}],
+        12: [{"file": {"id": "f"}, "travelDate": "2026-11-05"}, {"stop": "not_travelling"}],
     }
     for key, (number, outcomes) in service.STAGE_RULES.items():
         produced = {stage_by_no(number).evaluate(sample).outcome for sample in samples[number]}
@@ -743,15 +743,15 @@ def test_the_management_table_leads_tasks_and_the_pipeline_right_now(env):
 
     stages = body["stages"]
     assert [(x["no"], x["count"]) for x in stages["totals"]] == [
-        (0, 8), (1, 0), (2, 4), (3, 6), (4, 1), (5, 2), (6, 2), (7, 0), (8, 0), (9, 0), (10, 1), (11, 0)]
+        (0, 8), (1, 0), (2, 4), (3, 6), (4, 1), (5, 2), (6, 2), (7, 0), (8, 0), (9, 0), (10, 0), (11, 1), (12, 0)]
     assert stages["totals"][0] == {"no": 0, "key": "unmapped", "label": "Not on an order yet", "count": 8}
     assert stages["totals"][2]["key"] == "forwarded" and stages["totals"][3]["label"] == "Interview scheduling"
     by_id = {x["id"]: x for x in stages["perStaff"]}
     assert [x["id"] for x in stages["perStaff"]] == [p["id"] for p in body["staff"]]   # same order as the staff rows
-    assert by_id["asha"]["counts"] == {str(n): {0: 3, 2: 3, 5: 1}.get(n, 0) for n in range(12)} and by_id["asha"]["total"] == 7
+    assert by_id["asha"]["counts"] == {str(n): {0: 3, 2: 3, 5: 1}.get(n, 0) for n in range(13)} and by_id["asha"]["total"] == 7
     assert by_id["ravi"]["counts"]["3"] == 5 and by_id["ravi"]["counts"]["6"] == 2 and by_id["ravi"]["counts"]["0"] == 2
-    assert by_id["meena"]["counts"]["0"] == 3 and by_id["meena"]["counts"]["10"] == 1 and by_id["zed"]["total"] == 0   # deployed / closed are nowhere
-    for no in range(12):
+    assert by_id["meena"]["counts"]["0"] == 3 and by_id["meena"]["counts"]["11"] == 1 and by_id["zed"]["total"] == 0   # deployed / closed are nowhere
+    for no in range(13):
         assert sum(x["counts"][str(no)] for x in stages["perStaff"]) == stages["totals"][no]["count"]
     # the pipeline is "now": it does not change with the chosen period
     other = report(env, **{"from": "2026-10-01", "to": "2026-10-02"})["stages"]
@@ -762,7 +762,7 @@ def test_the_management_table_leads_tasks_and_the_pipeline_right_now(env):
     assert mine["leadSheet"]["totalLeads"] == 4 and mine["leadSheet"]["unassigned"] == 0 and mine["leadSheet"]["assigned"] == 4
     assert [x["id"] for x in mine["stages"]["perStaff"]] == ["ravi"] and mine["stages"]["totals"][3]["count"] == 5
     one = report(env, staff="meena", **day)
-    assert one["tasks"]["total"] == 0 and one["stages"]["totals"][10]["count"] == 1 and one["leadSheet"]["totalLeads"] == 0
+    assert one["tasks"]["total"] == 0 and one["stages"]["totals"][11]["count"] == 1 and one["leadSheet"]["totalLeads"] == 0
     # /mine carries the staff row only (no extra statements for the pipeline)
     assert "tasks" not in get(env, "ravi", "/mine").json()
 
@@ -813,7 +813,7 @@ def test_drilldown_of_the_new_numbers_matches_each_total(env):
     overdue = drill(metric="tasksOverdue", **day)
     assert {r["detail"] for r in overdue["rows"]} == {"Task overdue: Forward CV to client"} and overdue["label"] == "Tasks overdue"
     assert drill(metric="tasksDone", **{"from": "2026-11-02", "to": "2026-11-05"})["total"] == 4
-    for no in range(12):
+    for no in range(13):
         body = drill(metric=f"stage:{no}")
         assert body["total"] == len(body["rows"]) == overview["stages"]["totals"][no]["count"], no
     third = drill(metric="stage:3")
@@ -831,7 +831,7 @@ def test_drilldown_of_the_new_numbers_matches_each_total(env):
     get(env, "ravi", "/drilldown", expect=403, metric="stage:3", staff="asha")
     pages = [get(env, "admin", "/drilldown", metric="stage:3", page=n, page_size=4).json() for n in (0, 1, 2)]
     assert [(p["total"], len(p["rows"])) for p in pages] == [(6, 4), (6, 2), (6, 0)]
-    for bad in ("stage:12", "stage:x", "stage:", "tasks", "stage:-1"):
+    for bad in ("stage:13", "stage:x", "stage:", "tasks", "stage:-1"):
         get(env, "admin", "/drilldown", expect=422, metric=bad)
     blob = json.dumps([leads, overdue, third, unmapped])
     assert PASSPORT not in blob and TRAVELLER not in blob and not [p for p in PHONES if p in blob] and "+9180000000" not in blob
@@ -851,10 +851,10 @@ def test_the_export_has_the_leads_and_tasks_and_stages_now_sheets(env):
     assert ["Backlog (assigned, never contacted)", 3] in table
     assert ["Unassigned", 1] in table and ["Status: Interested", 2] in table and ["All leads on the sheet", 11] in table
     stages = book["Stages now"]
-    assert stages[0][0] == "Recruiter" and stages[0][1] == "Not on an order yet" and stages[0][-1] == "Total" and len(stages[0]) == 14
+    assert stages[0][0] == "Recruiter" and stages[0][1] == "Not on an order yet" and stages[0][-1] == "Total" and len(stages[0]) == 15
     assert [r[0] for r in stages[1:]] == ["Asha", "Ravi", "Meena", "Zed", "Total"]
     assert stages[-1][1:] == [x["count"] for x in body["stages"]["totals"]] + [sum(x["count"] for x in body["stages"]["totals"])]
-    assert stages[1][1:] == [3, 0, 3, 0, 0, 1, 0, 0, 0, 0, 0, 0, 7]
+    assert stages[1][1:] == [3, 0, 3, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 7]
     assert PASSPORT not in raw.decode("utf-8", "ignore")
 
 

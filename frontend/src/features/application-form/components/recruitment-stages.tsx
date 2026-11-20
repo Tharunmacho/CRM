@@ -1,5 +1,6 @@
 import { Check, ChevronRight, Route } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
+import { TOTAL_STAGES } from '@/shared/workflow/stages'
 import { Select } from '@/shared/ui/primitives'
 import { formatFormDate, STAGE_NAMES } from '../form-model'
 import { PROCESS_EMPTY_LINE, stageRows, stagesDoneText } from '../process-stages'
@@ -22,7 +23,7 @@ export function StageControl({ form, canOpen, onOpen }: StageProps) {
         disabled={!application || !canOpen} onClick={() => onOpen(current)} aria-label={`${label}. Manage recruitment stages`}>
         <span className="af-stage-control-icon" aria-hidden="true">{deployed ? <Check /> : <Route />}</span>
         <span className="af-stage-control-name">{label}</span>
-        {application && <small>{current}/11</small>}<ChevronRight aria-hidden="true" />
+        {application && <small>{current}/{TOTAL_STAGES}</small>}<ChevronRight aria-hidden="true" />
       </button>
     </div>
   )

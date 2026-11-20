@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session, undefer
 from app.db.models import (Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry, Base,
     Candidate, CandidateStatus, Client, Company, DailyWorkItem, Designation, DocumentExtractionJob,
     Order, OrderStatus, Role, Task, User)
-from app.domain.stages import stage_by_no, validate_payload
+from app.domain.stages import TOTAL_STAGES, stage_by_no, validate_payload
 from app.services.candidate_identity import merge_ocr_data, name_relation, normalize_email, normalize_passport, normalize_phone
 from app.services.document_storage import put_bytes, read_bytes
 from scripts.import_travelled_candidates import kinds_from_name
@@ -30,8 +30,8 @@ from scripts.import_travelled_candidates import kinds_from_name
 ACTION = "Reconciled confirmed historical travel"
 MERGE_ACTION = "Merged verified duplicate candidate"
 CURRENCY = {"UAE": "AED", "Kuwait": "KWD", "Malaysia": "MYR"}
-STAGE_FILES = {"signed_offer": "stage_5_file", "passport": "stage_7_copy", "visa": "stage_9_file",
-               "visa_stamping": "stage_10_file", "air_ticket": "stage_11_file"}
+STAGE_FILES = {"signed_offer": "stage_5_file", "passport": "stage_8_copy", "visa": "stage_10_file",
+               "visa_stamping": "stage_11_file", "air_ticket": "stage_12_file"}
 
 
 class ReconciliationError(ValueError):
@@ -265,7 +265,7 @@ def build_plan(db, placements, documents, decisions):
             if application.order_id != master["orderId"]:
                 raise ReconciliationError("An existing deployed placement belongs to a different job")
             stage = db.scalar(select(ApplicationStage).where(ApplicationStage.application_id == application.id,
-                ApplicationStage.stage == 11).order_by(ApplicationStage.attempt.desc()).limit(1))
+                ApplicationStage.stage == TOTAL_STAGES).order_by(ApplicationStage.attempt.desc()).limit(1))
             if stage is None or (stage.data or {}).get("travelDate") != day:
                 raise ReconciliationError("An existing deployed placement has different travel evidence")
         people.append({"index": index, "candidateId": selected, "mergeCandidateIds": aliases,
@@ -465,7 +465,7 @@ def reconcile(db, user, settings, placements, documents, decisions, approved_pla
         if application is None:
             application = Application(candidate_id=candidate.id, order_id=order.id, owner_id=candidate.owner_id or user.id, draft={})
             db.add(application); db.flush()
-        application.order_id, application.status, application.current_stage = order.id, ApplicationStatus.deployed, 11
+        application.order_id, application.status, application.current_stage = order.id, ApplicationStatus.deployed, TOTAL_STAGES
         application.closure_reason, application.lock_version = None, application.lock_version + 1
         data = {key: placement[source] for source, key in (("travel_date", "travelDate"), ("airline", "airline"), ("pnr", "pnr")) if placement.get(source)}
         for kind, slot in STAGE_FILES.items():
@@ -481,8 +481,8 @@ def reconcile(db, user, settings, placements, documents, decisions, approved_pla
                 data["file"] = {"id": evidence.id, "name": evidence.file_name, "url": f"/api/files/{evidence.id}", "sizeKb": evidence.size_kb, "version": evidence.version}
         # Completion is the office's confirmed historical fact. No fictitious
         # intermediate payment, interview or visa milestone is manufactured.
-        outcome_label = stage_by_no(11).evaluate({"file": {"id": "confirmed-history"}}).outcome
-        stage = ApplicationStage(application_id=application.id, stage=11, attempt=1, data=validate_payload(11, data),
+        outcome_label = stage_by_no(TOTAL_STAGES).evaluate({"file": {"id": "confirmed-history"}}).outcome
+        stage = ApplicationStage(application_id=application.id, stage=TOTAL_STAGES, attempt=1, data=validate_payload(TOTAL_STAGES, data),
                                  outcome=outcome_label, completed_by=user.id, owner_id=application.owner_id, completed_at=now)
         db.add(stage)
         candidate.status = CandidateStatus.deployed
@@ -507,7 +507,7 @@ def reconcile(db, user, settings, placements, documents, decisions, approved_pla
     for person in fresh["people"]:
         candidate = candidates[person["candidateId"]]
         application = exactly_one(list(db.scalars(select(Application).where(Application.candidate_id == candidate.id))), "reconciled placement")
-        stage = db.scalar(select(ApplicationStage).where(ApplicationStage.application_id == application.id, ApplicationStage.stage == 11)
+        stage = db.scalar(select(ApplicationStage).where(ApplicationStage.application_id == application.id, ApplicationStage.stage == TOTAL_STAGES)
                           .order_by(ApplicationStage.attempt.desc()).limit(1)) if application else None
         placement = placements[person["index"] - 1]
         order = orders[(placement["client"], placement["job"], placement["country"])]

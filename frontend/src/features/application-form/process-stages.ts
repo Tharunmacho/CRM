@@ -1,5 +1,5 @@
 /**
- * The "Process tracking" section: all eleven stages, each locked until the candidate reaches it, open while the candidate is on it
+ * The "Process tracking" section: all twelve stages, each locked until the candidate reaches it, open while the candidate is on it
  * and ticked once it is done, with the documents that belong to the stage and, on the last stage, whether the candidate is ready
  * to deploy. The documents themselves are never locked (see `document-rows.ts`); the stages are. Plain data in, plain data out,
  * so the rules are tested without a browser.
@@ -12,7 +12,8 @@ export type StageKey = 'locked' | 'current' | 'done' | 'failed'
 export type StageIcon = 'lock' | 'unlock' | 'check' | 'alert'
 export type StageChip = 'Locked' | 'In progress' | 'Completed' | 'Failed'
 
-export const STAGE_COUNT = 11
+// One name per stage in STAGE_NAMES, so adding a stage there adds its row here (this file is loaded without the '@/shared/workflow' alias by the tests).
+export const STAGE_COUNT = Object.keys(STAGE_NAMES).length
 export const PROCESS_EMPTY_LINE = 'Choose a job at the top to start the process.'
 
 const CHIPS: Record<StageKey, { icon: StageIcon; chip: StageChip }> = {
@@ -62,7 +63,7 @@ export function stageDocuments(stage: number, documents: ApplicationFormData['do
 }
 
 /**
- * The eleven rows. With no job every stage is locked. With a job, a stage is done when the server says it is completed (or the
+ * The twelve rows. With no job every stage is locked. With a job, a stage is done when the server says it is completed (or the
  * candidate is already past it), current when it is the stage the application is on, and locked otherwise; it changes by itself as
  * the live feed brings the next stage in.
  */
@@ -97,5 +98,5 @@ export function stageRows(
   })
 }
 
-/** "3 of 11 stages completed". */
+/** "3 of 12 stages completed". */
 export const stagesDoneText = (rows: Pick<StageRow, 'key'>[]): string => `${rows.filter((row) => row.key === 'done').length} of ${rows.length} stages completed`

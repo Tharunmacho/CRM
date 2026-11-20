@@ -26,7 +26,7 @@ from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry, Candidate, Client, Company,
     Designation, DocumentExtractionJob, Order, Priority, Role, Source, Task, TodoItem, User,
 )
-from app.domain.stages import STOP_OUTCOMES, stage_by_no
+from app.domain.stages import STOP_OUTCOMES, TOTAL_STAGES, stage_by_no
 from app.services import form_assignment, form_feedback
 from app.services import form_extraction as fx
 from app.services.candidate_identity import identity_matches, normalize_candidate_values, normalize_passport, normalize_phone, normalized_labels
@@ -48,12 +48,12 @@ SLOT_SPECS = (
     ("medical", "Medical", "The medical fitness report.", 6, False, False, False),
     ("signed_offer", "Signed offer", "The offer letter signed by the candidate.", 5, False, False, False),
     ("pcc", "Police clearance certificate (PCC)", "The police clearance certificate.", 7, False, False, False),
-    ("visa", "Visa", "The visa received for the candidate.", 9, False, False, False),
-    ("air_ticket", "Air ticket", "The air ticket.", 11, False, False, False),
-    ("undertaking_letter", "Undertaking letter", "The undertaking letter signed by the candidate, before deployment.", 11, False, False, False),
-    ("emigration", "Emigration", "The emigration clearance, required after the visa stage.", 10, False, False, False),
-    ("insurance", "Insurance", "The candidate's insurance policy, before deployment.", 11, False, False, False),
-    ("invoice", "Invoice", "The candidate's invoice, before deployment.", 11, False, False, False),
+    ("visa", "Visa", "The visa received for the candidate.", 10, False, False, False),
+    ("air_ticket", "Air ticket", "The air ticket.", 12, False, False, False),
+    ("undertaking_letter", "Undertaking letter", "The undertaking letter signed by the candidate, before deployment.", 12, False, False, False),
+    ("emigration", "Emigration", "The emigration clearance, required after the visa stage.", 11, False, False, False),
+    ("insurance", "Insurance", "The candidate's insurance policy, before deployment.", 12, False, False, False),
+    ("invoice", "Invoice", "The candidate's invoice, before deployment.", 12, False, False, False),
     ("photo", "Photo", "Optional. A recent passport-size photo (an image).", None, False, False, False),
     ("education_certificate", "Education certificate", "Optional. The highest qualification certificate.", None, False, True, False),
     ("experience_certificate", "Experience certificate", "Optional. Certificates from previous employers.", None, False, False, False),
@@ -93,21 +93,19 @@ TRACKING = (
     ("interview_scheduling", "Interview scheduling", 3, False),
     ("interview_result", "Interview result / selection", 4, False),
     ("offer_letter", "Offer Letter", 5, True),
-    ("pcc", "PCC", None, True),
     ("medical", "Medical", 6, True),
-    ("passport_collection", "Passport collection", 7, False),
-    ("advance_payment", "Advance payment", 8, False),
-    ("visa", "Visa", 9, True),
-    ("visa_stamping", "Visa Stamping", 10, True),
-    ("ticket", "Ticket", 11, True),
+    ("pcc", "PCC", 7, True),
+    ("passport_collection", "Passport collection", 8, False),
+    ("advance_payment", "Advance payment", 9, False),
+    ("visa", "Visa", 10, True),
+    ("visa_stamping", "Visa Stamping", 11, True),
+    ("ticket", "Ticket", 12, True),
     ("invoice_generated", "Invoice", None, True),
 )
-NOT_TRACKED_NOTE = {
-    "pcc": "Police clearance is not a stage in the CRM, so it is not tracked here.",
-}
+NOT_TRACKED_NOTE: dict[str, str] = {}  # every row but the invoice evidence is a stage now (PCC became stage 7 with migration 0048)
 # Outcomes after which the candidate stopped at that stage: the older negative exits plus the stopping exit every stage offers.
 _FAILED_BASE = {1: {"Failed"}, 2: {"Not forwarded"}, 4: {"Rejected"}, 5: {"Declined", "Not received"}, 6: {"Unfit"}}
-FAILED_OUTCOMES = {no: _FAILED_BASE.get(no, set()) | STOP_OUTCOMES[no] for no in range(1, 12)}
+FAILED_OUTCOMES = {no: _FAILED_BASE.get(no, set()) | STOP_OUTCOMES[no] for no in range(1, TOTAL_STAGES + 1)}
 CLOSURE_LABELS = {
     "prescreen_failed": "Failed prescreening", "not_interested": "Candidate not interested",
     "resume_not_received": "Resume not received", "interview_rejected": "Rejected at interview",
@@ -116,6 +114,7 @@ CLOSURE_LABELS = {
     "stage_rejected": "Rejected", "stage_declined": "Candidate declined", "interview_not_possible": "Interview not possible",
     "passport_not_available": "Passport not available", "advance_not_paid": "Advance not paid", "visa_rejected": "Visa rejected",
     "visa_stamping_refused": "Visa stamping refused", "not_travelling": "Not travelling",
+    "pcc_not_cleared": "PCC not cleared",
 }
 FOLLOW_UP_LABEL = "Follow-up"
 SAME_AS_PHONE = object()
@@ -213,13 +212,13 @@ def tracking_payload(application, stage_rows: list, names: dict[str, str], tz: Z
             row["status"] = "not_applicable"
             row["note"] = "The application is closed."
         rows.append(row)
-    # Invoice evidence is visible but is not a twelfth workflow stage.
+    # Invoice evidence is visible but is not a workflow stage.
     tracked = [r for r in rows if r["stage"] is not None]
     done = sum(1 for r in tracked if r["status"] == "completed")
     summary = {
         "completed": done, "tracked": len(tracked), "percent": round(100 * done / len(tracked)),
         "currentStage": application.current_stage if application is not None else None,
-        "currentStageLabel": stage_by_no(application.current_stage).title if application is not None and 1 <= application.current_stage <= 11 else None,
+        "currentStageLabel": stage_by_no(application.current_stage).title if application is not None and 1 <= application.current_stage <= TOTAL_STAGES else None,
         "applicationStatus": application.status.value if application is not None else "none",
         "closureLabel": CLOSURE_LABELS.get(application.closure_reason.value) if application is not None and application.closure_reason else None,
     }
@@ -386,7 +385,7 @@ def _document(row, names: dict[str, str], splits: dict[str, dict] | None = None)
     return out
 
 
-DEPLOY_STAGE = 11  # completing this stage (Air ticket) deploys the candidate
+DEPLOY_STAGE = TOTAL_STAGES  # completing this stage (Air ticket) deploys the candidate
 
 
 def required_for_deployment(include_invoice: bool = True) -> list[tuple[str, str]]:

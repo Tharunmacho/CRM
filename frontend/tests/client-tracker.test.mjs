@@ -12,7 +12,7 @@ async function load(relative) {
 const m = await load('../src/features/reports/client-tracker-model.ts')
 const row = (over = {}) => ({
   sNo: 1, applicationId: 'a1', candidateId: 'c1', orderId: 'o1', orderRef: 'ORD-1', client: 'Tawseel', country: 'Kuwait', name: 'Benny', position: 'Driver',
-  referral: 'Sigma', advance: '10k collected/50k', stage: 'Waiting for stamp', remarks: '', stageNo: 10, travelled: false, travelDate: null, ...over,
+  referral: 'Sigma', advance: '10k collected/50k', stage: 'Waiting for stamp', remarks: '', stageNo: 11, travelled: false, travelDate: null, ...over,
 })
 
 test('the columns are the clients sheet, in order', () => {

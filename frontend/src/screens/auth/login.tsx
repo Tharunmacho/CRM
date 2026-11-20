@@ -18,7 +18,7 @@ const DESTINATIONS = [
   { code: 'kw', name: 'Kuwait' }, { code: 'om', name: 'Oman' }, { code: 'bh', name: 'Bahrain' },
 ]
 
-/** The route is drawn in a 640 x 230 box; the eleven stage nodes are spread along it by arc length. */
+/** The route is drawn in a 640 x 230 box; the twelve stage nodes are spread along it by arc length. */
 const ROUTE = 'M 124 182 C 178 182 184 96 244 104 S 344 184 406 144 S 526 58 606 72'
 const NODE_SPAN = 0.9
 const HOLD_MS = 1650
@@ -27,7 +27,7 @@ const prefersReducedMotion = () => typeof window !== 'undefined' && window.match
 type Point = { x: number; y: number }
 
 /**
- * Decorative placement route: a candidate token rides the eleven real workflow stages from India to the Gulf.
+ * Decorative placement route: a candidate token rides the twelve real workflow stages from India to the Gulf.
  * Static copy only, no data; paused (fully drawn) for people who prefer reduced motion.
  */
 function PlacementJourney() {

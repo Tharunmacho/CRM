@@ -9,7 +9,7 @@ import { cn } from '@/shared/lib/cn'
  * Props
  *  - title        node
  *  - description? node   one sentence saying what the screen is for
- *  - route?       string | node   small route chip above the title (e.g. "Stage 4 of 11"); a string gets the route stub
+ *  - route?       string | node   small route chip above the title (e.g. "Stage 4 of 12"); a string gets the route stub
  *  - actions?     node   primary action last; wraps under the title on phones
  *  - back?        { label, to?, onClick? }   a quiet "back" link above the header
  *  - children?    node   extra row under the header (tabs, summary)

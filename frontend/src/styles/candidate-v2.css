@@ -1,5 +1,5 @@
 /*
- * Candidate profile (`.cp-*`), the 11-stage tracker and SLA ring (`.sr-*`, `.sla-*`) and the stage
+ * Candidate profile (`.cp-*`), the 12-stage tracker and SLA ring (`.sr-*`, `.sla-*`) and the stage
  * modal (`.sm-*`, now in stage-modal.css). Flat and token based (theme.css): white cards with a 1px hairline, 12px radius,
  * no shadows or gradients, soft pills, circular avatars. The modal renders in a portal, so none of
  * its rules rely on a page-level scope class.
@@ -8,8 +8,8 @@
 .cp :is(button, input, select, textarea) { font-family: inherit; }
 .cp :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
-/* ================================================================== 11-stage tracker */
-.sr { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
+/* ================================================================== 12-stage tracker */
+.sr { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
 .sr-seg { min-width: 0; height: 6px; border-radius: 3px; background: var(--tint-3); transition: background-color .14s; }
 .sr-seg.is-done { background: color-mix(in srgb, var(--primary) 42%, var(--bg-card)); }
 .sr-seg.is-now { background: var(--primary); }

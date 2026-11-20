@@ -334,9 +334,9 @@ def test_a_deployed_travelled_or_invoiced_duplicate_is_never_merged_away(env):
 def deploy_target(env):
     """CI-139 as the owner has it: deployed at stage 11, with its own tasks, an issued invoice and a stage document."""
     with env.sessions() as db:
-        db.add(m.Application(id="t-app", candidate_id=TGT, order_id="o1", owner_id="staff", status=m.ApplicationStatus.deployed, current_stage=11))
+        db.add(m.Application(id="t-app", candidate_id=TGT, order_id="o1", owner_id="staff", status=m.ApplicationStatus.deployed, current_stage=12))
         db.flush()
-        db.add(m.ApplicationStage(application_id="t-app", stage=11, data={"flown": True}))
+        db.add(m.ApplicationStage(application_id="t-app", stage=12, data={"flown": True}))
         db.add(m.Task(id="t-task", kind=m.TaskKind.stage, title="Stage 11", candidate_id=TGT, application_id="t-app", owner_id="staff", completed_at=NOW))
         db.add(m.CandidateInvoice(id="t-inv", candidate_id=TGT, application_id="t-app", scope_key="t-app", number="INV-9"))
         db.get(m.Candidate, TGT).traveller_id = "CI-T-001"

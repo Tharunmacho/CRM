@@ -131,16 +131,16 @@ def move(db, key, stage, outcome, at, owner, *, attempt=1, reopened=None):
 def seed_pipeline(desk):
     with desk.sessions() as db:
         add_candidate(db, "c1", "asha", stage=3)
-        add_candidate(db, "c2", "asha", stage=11, status=ApplicationStatus.deployed)
+        add_candidate(db, "c2", "asha", stage=12, status=ApplicationStatus.deployed)
         add_candidate(db, "c3", "asha", stage=1, created=NOW - timedelta(days=20))  # stuck: nothing completed for 20 days
         add_candidate(db, "c4", "ravi", stage=2)
         add_candidate(db, "c5", "ravi", stage=1, status=ApplicationStatus.closed)
         move(db, "c1", 1, "Passed", ist(MONDAY, 11), "asha")
         move(db, "c1", 2, "Forwarded", ist(TUESDAY, 11), "asha")
         move(db, "c1", 2, "Forwarded", ist(WEDNESDAY, 11), "asha", attempt=2, reopened="redo")  # reopened: not counted
-        move(db, "c2", 9, "Arrived", ist(TUESDAY, 12), "asha")
-        move(db, "c2", 10, "Stamped", ist(WEDNESDAY, 12), "asha")
-        move(db, "c2", 11, "Booked", ist(THURSDAY, 10), "asha")
+        move(db, "c2", 10, "Arrived", ist(TUESDAY, 12), "asha")
+        move(db, "c2", 11, "Stamped", ist(WEDNESDAY, 12), "asha")
+        move(db, "c2", 12, "Booked", ist(THURSDAY, 10), "asha")
         # Week boundaries in agency time: 23:59 on the Sunday before is last week, 00:00 Monday is this week.
         move(db, "c4", 1, "Passed", ist(MONDAY - timedelta(days=1), 23, 59), "ravi")
         move(db, "c4", 2, "Forwarded", ist(MONDAY, 0), "ravi")
@@ -302,12 +302,12 @@ def test_stage_moves_outcomes_snapshot_and_week_boundaries(desk):
 def test_team_funnel_counts_reached_stages_and_conversion(desk):
     seed_pipeline(desk)
     funnel = {row["stage"]: row for row in report(desk)["funnel"]}
-    assert [funnel[n]["reached"] for n in (1, 2, 3, 4, 11)] == [5, 3, 2, 1, 1]  # c1 at 3 and c2 deployed pass stage 3
+    assert [funnel[n]["reached"] for n in (1, 2, 3, 4, 12)] == [5, 3, 2, 1, 1]  # c1 at 3 and c2 deployed pass stage 3
     assert funnel[2]["conversionPercent"] == 60.0 and funnel[2]["lostFromPrevious"] == 2
     assert funnel[1]["conversionPercent"] is None
     assert funnel[1]["inStageNow"] == 1 and funnel[1]["closedHere"] == 1 and funnel[3]["inStageNow"] == 1
     assert sum(row["movesInPeriod"] for row in funnel.values()) == 7
-    assert [row["label"] for row in funnel.values()][0] == "Prescreening" and len(funnel) == 11
+    assert [row["label"] for row in funnel.values()][0] == "Prescreening" and len(funnel) == 12
 
 
 def test_stuck_candidates_and_the_idle_highlight(desk):
@@ -327,10 +327,10 @@ def test_detail_lists_each_candidate_end_to_end(desk):
     assert [p["id"] for p in data["staff"]] == ["asha"]
     items = {c["candidateId"]: c for c in data["candidates"]["items"]}
     assert data["candidates"]["total"] == 3
-    assert items["c2"]["status"] == "deployed" and items["c2"]["reached"] == 11 and [h["stage"] for h in items["c2"]["history"]] == [9, 10, 11]
+    assert items["c2"]["status"] == "deployed" and items["c2"]["reached"] == 12 and [h["stage"] for h in items["c2"]["history"]] == [10, 11, 12]
     assert items["c1"]["stageLabel"] == "Interview scheduling" and items["c1"]["movedInRange"] == 2
     assert items["c3"]["daysInStage"] == 20 and items["c3"]["order"] == "ORD-1" and items["c3"]["client"] == "Mr Contact"
-    assert len(data["moves"]) == 5 and data["moves"][0]["stage"] == 11  # newest first
+    assert len(data["moves"]) == 5 and data["moves"][0]["stage"] == 12  # newest first
     assert all(row["careId"] and row["careId"].startswith("CI-") for row in [*items.values(), *data["moves"]])   # Care India ID beside the CND ref
 
 

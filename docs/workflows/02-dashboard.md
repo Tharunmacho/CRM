@@ -10,7 +10,7 @@ Admin sees team totals and can select a recruiter. Manager and Recruiter see the
 
 1. Sign in and review today's candidate intake, separated by email and WhatsApp, with other manual sources distinguished.
 2. Review open, due-today, overdue, escalated and not-updated-today work. Select a card to open the corresponding task queue.
-3. Select one of the eleven pipeline stages to see the active applications at that stage. Open a candidate/application from that result.
+3. Select one of the twelve pipeline stages to see the active applications at that stage. Open a candidate/application from that result.
 4. Review open orders. Compare openings, currently matched candidates, selected candidates and deployed candidates. Open an order to inspect its actual applications.
 5. Work the personal task list in due-time order. An overdue item stays visibly overdue until the relevant workflow action closes it.
 6. Admin reviews source health: last sync/receipt, worker activity and queued, failed or review-needed files. Open the source or recovery list to resolve a failure.
@@ -29,8 +29,8 @@ Loading must not appear as confirmed zero. Refresh failures should be visible. T
 Four pressed-state cards sit under Today's work. They use the same server scope as the pipeline and task cards: recruiters see only their own candidates, admin and manager see the whole team or the person chosen in the recruiter picker (recruiters naming another person get a 403). `GET /api/dashboard` returns them under `overview` (additive; one statement, no extra queries); each card lists at most 200 placements and carries the full count.
 
 - **Overall offer letter**: value = active candidates waiting at stage 5; detail = offer letters issued in total (stage 5 completed, including candidates who moved on or were later closed).
-- **Overall visa**: value = active candidates waiting at stage 9 or 10; detail = visas received (stage 9 completed) and stamped (stage 10 completed).
-- **Overall departure**: value = active candidates waiting at stage 11 (ticket); detail = candidates departed (deployed placements).
+- **Overall visa**: value = active candidates waiting at stage 10 or 11; detail = visas received (stage 10 completed) and stamped (stage 11 completed).
+- **Overall departure**: value = active candidates waiting at stage 12 (ticket); detail = candidates departed (deployed placements).
 - **Overall idle stage**: active placements with no stage completed for 7 or more days (`STUCK_DAYS` in `staff_weekly.py`, the same rule as the weekly recruiter report; never-progressed placements count from when they were mapped). Detail shows the longest wait.
 
 Reopened stage records never count. Pressing a card lists the people (name, job and order, client, country, stage, recruiter for the team view, days waiting, Open and Application form). The counts are also in Export. Implementation: `pipeline_overview` in [reporting service](../../backend/app/services/reporting.py), [overview helpers](../../frontend/src/features/dashboard/overview.ts), [panel](../../frontend/src/features/dashboard/components/overview-panel.tsx).
@@ -43,7 +43,7 @@ A stale task can close between opening a card and opening the record; show the c
 
 - [ ] Compare cards and destination rows for Admin team scope, one recruiter filter and Recruiters self scope.
 - [ ] Test records just before and after agency midnight.
-- [ ] Verify all eleven stage cards and an order with matched, selected and deployed candidates.
+- [ ] Verify all twelve stage cards and an order with matched, selected and deployed candidates.
 - [ ] Complete or reassign a task and refresh; every related number agrees.
 - [ ] Stop a test worker and verify source health points to the correct recovery action.
 - [ ] Confirm another person's private to-dos never appear in team scope.

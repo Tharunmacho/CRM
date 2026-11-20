@@ -215,7 +215,7 @@ export function LeadSheetView({ report, roster, today, scope, staff, onPickStaff
 
 /* ---------------------------------------------------------------- Candidate monitoring */
 
-/** Candidates and tasks only: who holds how many at each of the 11 stages (and none on an order yet), and their tasks. */
+/** Candidates and tasks only: who holds how many at each of the 12 stages (and none on an order yet), and their tasks. */
 export function CandidateMonitoringView({ report, roster, scope, staff, onPickStaff, onDrill }: ViewProps) {
   const cols = taskStageCols(report)
   const hasStages = !!report.stages && cols.length > 3

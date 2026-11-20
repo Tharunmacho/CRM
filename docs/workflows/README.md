@@ -34,7 +34,7 @@ The unchecked boxes are a review checklist, **not a claim that all listed behavi
 | 12 [Initial call](12-initial-call.md) | Contact → Called/Interested outcome → task/pool/next action | Connected; operating sequence needs recruiter review |
 | 13 [Order matching](13-order-matching.md) | Backend search/evidence → application → unmap → fresh remap | Connected; bounded matching validated, scale benchmark separate |
 | 14 [Stages one to five](14-stages-one-to-five.md) | Prescreen → forward → schedule → result → offer, including exits/reopen | Connected; review every branch with representative records |
-| 15 [Stages six to eleven](15-stages-six-to-eleven.md) | Repeated medical → passport → advance → visa → stamping → deployment | Connected; document/capacity/reopen acceptance required |
+| 15 [Stages six to twelve](15-stages-six-to-twelve.md) | Repeated medical → PCC → passport → advance → visa → stamping → deployment | Connected; document/capacity/reopen acceptance required |
 | 16 [Tasks SLA and daily updates](16-tasks-sla-daily-updates.md) | Event task → daily remark → overdue/escalation → transfer/reset/closure | Connected; deployed scheduler timing needs acceptance |
 | 17 [Reports](17-reports.md) | Six reports → shared filters/role scope → workbook/PDF | Connected; legacy history and volume limits disclosed |
 | 18 [Personal to-dos](18-personal-todos.md) | Private item → due reminder → complete/reopen/delete | Connected; deployed reminder delay needs acceptance |
@@ -113,13 +113,13 @@ Every original requirement ID appears once below with a module and section. Rela
 | STAGE-01 | Sequential application modal/header/history | [14 Access and stage modal](14-stages-one-to-five.md#access-and-stage-modal) |
 | STAGE-02 | Admin reason-required completed-stage reopen | [14 Shared backend transaction and recovery](14-stages-one-to-five.md#shared-backend-transaction-and-recovery) |
 | STAGE-03 | Atomic stage/history/task handoff | [14 Shared backend transaction and recovery](14-stages-one-to-five.md#shared-backend-transaction-and-recovery) |
-| STAGE-04 | Only stages 1/2/4/6 close negatively | [14 Stages and shared recovery](14-stages-one-to-five.md#shared-backend-transaction-and-recovery), [15 Medical](15-stages-six-to-eleven.md#stage-6-medical-and-repeated-examinations) |
+| STAGE-04 | Only stages 1/2/4/6 close negatively | [14 Stages and shared recovery](14-stages-one-to-five.md#shared-backend-transaction-and-recovery), [15 Medical](15-stages-six-to-twelve.md#stage-6-medical-and-repeated-examinations) |
 | FILE-01 | Immutable upload versions | [06 Screen and backend contract](06-documents-ocr.md#screen-and-backend-contract) |
 | STAGE-05 | Exact stages 1–5 fields and completion/exit rules | [14 Stage 1 onward](14-stages-one-to-five.md#stage-1-prescreening) |
-| STAGE-06 | Repeated medical and Fit/Unfit branches | [15 Stage 6](15-stages-six-to-eleven.md#stage-6-medical-and-repeated-examinations) |
-| STAGE-07 | Passport custody and variable advance/receipt | [15 Stage 7](15-stages-six-to-eleven.md#stage-7-passport), [15 Stage 8](15-stages-six-to-eleven.md#stage-8-advance-payment) |
-| STAGE-08 | Visa, review, stamping and ticket fields | [15 Stage 9 onward](15-stages-six-to-eleven.md#stage-9-visa-arrival-and-google-review) |
-| DEPLOY-01 | Stage 11 deployment and filled capacity | [15 Stage 11](15-stages-six-to-eleven.md#stage-11-air-ticket-and-deployment) |
+| STAGE-06 | Repeated medical and Fit/Unfit branches; the PCC stage that follows it | [15 Stage 6](15-stages-six-to-twelve.md#stage-6-medical-and-repeated-examinations), [15 Stage 7 PCC](15-stages-six-to-twelve.md#stage-7-pcc-and-the-twelve-stage-migration) |
+| STAGE-07 | Passport custody and variable advance/receipt | [15 Stage 8](15-stages-six-to-twelve.md#stage-8-passport), [15 Stage 9](15-stages-six-to-twelve.md#stage-9-advance-payment) |
+| STAGE-08 | Visa, review, stamping and ticket fields | [15 Stage 10 onward](15-stages-six-to-twelve.md#stage-10-visa-arrival-and-google-review) |
+| DEPLOY-01 | Stage 12 deployment and filled capacity | [15 Stage 12](15-stages-six-to-twelve.md#stage-12-air-ticket-and-deployment) |
 | SLA-01 | 48-hour event tasks and no waiting pause | [16 Deadline and daily-check rules](16-tasks-sla-daily-updates.md#deadline-and-daily-check-rules) |
 | SLA-02 | Fifteen-minute escalation scan and repeat policy | [16 Deadline and daily-check rules](16-tasks-sla-daily-updates.md#deadline-and-daily-check-rules) |
 | SLA-03 | Reassignment preserves clock; explicit Admin reset and history | [16 User journey](16-tasks-sla-daily-updates.md#user-journey) |

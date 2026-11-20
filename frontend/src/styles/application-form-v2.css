@@ -143,7 +143,7 @@
 }
 @media (prefers-reduced-motion: reduce) { .af .af-docrow-progress i, .af .af-assign-saving svg { animation: none; } }
 
-/* ------------------------------------------------------------ Process tracking: the eleven stages, locked until reached */
+/* ------------------------------------------------------------ Process tracking: the twelve stages, locked until reached */
 /* A thin line joins the status icons: green where a stage is done, grey after the current one. */
 .af .af-stages { list-style: none; margin: 0; padding: 0; }
 .af .af-stage { position: relative; }

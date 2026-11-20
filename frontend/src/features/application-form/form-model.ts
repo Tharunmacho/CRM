@@ -1165,7 +1165,7 @@ export function applicationFormHref(candidateId: string, orderId?: string | null
 /** The pipeline stage names, to say "Needed from Offer letter" (contract section 3 of the form contract). */
 export const STAGE_NAMES: Record<number, string> = {
   1: 'Prescreening', 2: 'Forwarded to client', 3: 'Interview scheduling', 4: 'Interview result', 5: 'Offer letter', 6: 'Medical',
-  7: 'Passport', 8: 'Advance payment', 9: 'Visa arrival', 10: 'Visa stamping', 11: 'Air ticket',
+  7: 'PCC', 8: 'Passport', 9: 'Advance payment', 10: 'Visa arrival', 11: 'Visa stamping', 12: 'Air ticket',
 }
 
 export type DocumentState = 'uploaded' | 'required' | 'later' | 'optional'

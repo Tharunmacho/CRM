@@ -56,13 +56,13 @@ PLACEMENTS = [
     ("offer-ann", "ann", "active", 5, 40, {1: 39, 2: 30, 3: 20, 4: 3}),
     ("offer-bob", "bob", "active", 5, 40, {1: 39, 4: 2}),
     ("issued", "ann", "active", 6, 60, {4: 30, 5: 4}),
-    # visa: waiting at 9, waiting at 10, and one stamped who moved on to the ticket
-    ("visa9", "ann", "active", 9, 80, {4: 40, 5: 30, 8: 10}),
-    ("visa10", "bob", "active", 10, 80, {4: 40, 5: 30, 9: 5}),
-    ("stamped", "bob", "active", 11, 90, {4: 50, 5: 40, 9: 20, 10: 6}),
+    # visa: waiting at 10 (visa arrival), waiting at 11 (stamping), and one stamped who moved on to the ticket (12)
+    ("visa9", "ann", "active", 10, 80, {4: 40, 5: 30, 9: 10}),
+    ("visa10", "bob", "active", 11, 80, {4: 40, 5: 30, 10: 5}),
+    ("stamped", "bob", "active", 12, 90, {4: 50, 5: 40, 10: 20, 11: 6}),
     # departure: ticket stage (the stamped one above) plus two deployed
-    ("flown-a", "ann", "deployed", 11, 120, {5: 90, 9: 60, 10: 50, 11: 12}),
-    ("flown-b", "bob", "deployed", 11, 120, {5: 90, 9: 60, 10: 50, 11: 1}),
+    ("flown-a", "ann", "deployed", 12, 120, {5: 90, 10: 60, 11: 50, 12: 12}),
+    ("flown-b", "bob", "deployed", 12, 120, {5: 90, 10: 60, 11: 50, 12: 1}),
     # a closed placement after an offer must still count as an issued offer, never as waiting
     ("closed", "ann", "closed", 6, 70, {4: 40, 5: 35}),
 ]
@@ -87,7 +87,7 @@ def test_offer_visa_departure_counts_and_lists_for_the_whole_team(dataset):
     assert ids(offer)[:2] == ["a-offer-ann", "a-offer-bob"]  # waiting first
     assert [row["state"] for row in offer["items"][:2]] == ["current", "current"]
     assert {row["state"] for row in offer["items"][2:]} == {"done"} and offer["itemsTotal"] == 9
-    # Visa: waiting at 9 or 10; received = stage 9 done; stamped = stage 10 done.
+    # Visa: waiting at 10 or 11; received = stage 10 done; stamped = stage 11 done.
     assert visa["current"] == 2 and set(ids(visa)[:2]) == {"a-visa9", "a-visa10"}
     assert visa["received"] == 4 and visa["stamped"] == 3
     assert "a-offer-ann" not in ids(visa)
@@ -115,7 +115,7 @@ def test_idle_uses_the_weekly_report_threshold_and_reports_the_longest_wait():
         ("oldest", "ann", "active", 4, 100, {3: 45}),
         ("never", "ann", "active", 1, 9, {}),                 # no stage ever finished: measured from when it was mapped
         ("new-app", "ann", "active", 1, 2, {}),
-        ("deployed-old", "ann", "deployed", 11, 200, {11: 100}),   # not active, never idle
+        ("deployed-old", "ann", "deployed", 12, 200, {12: 100}),   # not active, never idle
         ("closed-old", "ann", "closed", 2, 200, {2: 100}),
     ])
     idle = dashboard_data(data, ADMIN, now=NOW)["overview"]["idle"]

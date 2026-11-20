@@ -523,31 +523,37 @@
         },
         {
           "no": 7,
-          "key": "stage7",
-          "label": "Visa documents",
-          "count": 1
+          "key": "pcc",
+          "label": "PCC",
+          "count": 0
         },
         {
           "no": 8,
           "key": "stage8",
-          "label": "Visa processing",
-          "count": 0
+          "label": "Visa documents",
+          "count": 1
         },
         {
           "no": 9,
           "key": "stage9",
-          "label": "Visa arrival",
-          "count": 1
+          "label": "Visa processing",
+          "count": 0
         },
         {
           "no": 10,
           "key": "stage10",
-          "label": "Flight documents",
-          "count": 0
+          "label": "Visa arrival",
+          "count": 1
         },
         {
           "no": 11,
           "key": "stage11",
+          "label": "Flight documents",
+          "count": 0
+        },
+        {
+          "no": 12,
+          "key": "stage12",
           "label": "Air ticket",
           "count": 1
         }
@@ -563,11 +569,12 @@
             "4": 2,
             "5": 1,
             "6": 0,
-            "7": 1,
-            "8": 0,
-            "9": 1,
-            "10": 0,
-            "11": 0
+            "7": 0,
+            "8": 1,
+            "9": 0,
+            "10": 1,
+            "11": 0,
+            "12": 0
           },
           "total": 28
         },
@@ -585,7 +592,8 @@
             "8": 0,
             "9": 0,
             "10": 0,
-            "11": 1
+            "11": 0,
+            "12": 1
           },
           "total": 13
         },
@@ -603,7 +611,8 @@
             "8": 0,
             "9": 0,
             "10": 0,
-            "11": 0
+            "11": 0,
+            "12": 0
           },
           "total": 0
         }

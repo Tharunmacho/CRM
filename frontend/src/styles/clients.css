@@ -1,7 +1,7 @@
 /*
  * Clients, client detail and Companies. Flat, token based (theme.css): hairline cards, no shadows,
  * no gradients. The shared components (KPI cards, tabs, table, badges) come from depth.css; this sheet
- * only adds the screen blocks and Care India's own touches: flags, hue avatars, the 11-stage tracker
+ * only adds the screen blocks and Care India's own touches: flags, hue avatars, the 12-stage tracker
  * and the deployed/openings progress.
  */
 
@@ -49,7 +49,7 @@
 .cl-view > button[aria-pressed='true'] { background: var(--primary); color: var(--on-primary); }
 .cl-view > button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
-/* The 11-stage tracker */
+/* The 12-stage tracker */
 .cl-track { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
 .cl-track-bar { display: inline-grid; flex: none; grid-auto-flow: column; gap: 2px; }
 .cl-track-bar > i { display: block; width: 7px; height: 6px; border-radius: 2px; background: var(--tint-3); }

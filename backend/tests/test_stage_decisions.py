@@ -171,7 +171,7 @@ def test_only_an_admin_can_reopen_a_stopped_stage_and_it_needs_a_fresh_answer(wo
     reach(env, app_id, stage)
     complete(env, app_id, data)
     body = {"stage": stage, "reason": "The candidate changed their mind", "lock_version": version(env, app_id)}
-    for actor, role in (("staff", Role.staff), ("manager", Role.manager)):
+    for actor, role in (("staff", Role.staff), ("other", Role.staff)):   # reopening is admin-level (Admin or MD): a recruiter never can
         env.actor = SimpleNamespace(id=actor, role=role)
         assert env.client.post(f"/api/applications/{app_id}/reopen", json=body).status_code == 403
     env.actor = SimpleNamespace(id="admin", role=Role.admin)

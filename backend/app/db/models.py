@@ -6,7 +6,7 @@ spec cares about are enforced here rather than in application code:
 
 * a candidate can hold only one *active* application at a time — a partial unique index,
   so two users matching the same candidate from different order pages cannot race past it
-* the eleven stages are heterogeneous, so each stage record keeps its payload in JSONB
+* the twelve stages are heterogeneous, so each stage record keeps its payload in JSONB
   and denormalises only what the reports aggregate on
 * the 48-hour escalation scan runs every 15 minutes forever, so open tasks carry their
   own partial index
@@ -130,15 +130,17 @@ class ClosureReason(str, enum.Enum):
     changed_job = "changed_job"  # moved to another job from the application form before prescreening was passed (migration 0027)
     offer_declined = "offer_declined"  # stage 5: the candidate declined the offer (migration 0042)
     offer_not_received = "offer_not_received"  # stage 5: the offer letter never came (migration 0042)
-    # The stopping exit every stage offers (migration 0043): Rejected / Declined at any of stages 1-10 and the stage-specific ones.
+    # The stopping exit every stage offers (migration 0043): Rejected / Declined at any of stages 1-11 and the stage-specific ones.
+    # Migration 0048 inserted PCC as stage 7, so the stages named below are the numbers after it.
     stage_rejected = "stage_rejected"
     stage_declined = "stage_declined"
     interview_not_possible = "interview_not_possible"  # stage 3
-    passport_not_available = "passport_not_available"  # stage 7
-    advance_not_paid = "advance_not_paid"  # stage 8
-    visa_rejected = "visa_rejected"  # stage 9
-    visa_stamping_refused = "visa_stamping_refused"  # stage 10
-    not_travelling = "not_travelling"  # stage 11: cancelled or declined before departure; never deploys
+    passport_not_available = "passport_not_available"  # stage 8
+    advance_not_paid = "advance_not_paid"  # stage 9
+    visa_rejected = "visa_rejected"  # stage 10
+    visa_stamping_refused = "visa_stamping_refused"  # stage 11
+    not_travelling = "not_travelling"  # stage 12: cancelled or declined before departure; never deploys
+    pcc_not_cleared = "pcc_not_cleared"  # stage 7 (migration 0048): the police clearance certificate was refused or cannot be had
 
 
 class TaskKind(str, enum.Enum):
@@ -539,7 +541,7 @@ class Attachment(Base, PkMixin):
     Every uploaded file, for any record.
 
     One table rather than one per owner: a client agreement, a candidate's passport scan
-    and a stage 8 receipt differ only in what they hang off. Nothing is overwritten —
+    and a stage 9 receipt differ only in what they hang off. Nothing is overwritten —
     replacing a file writes the next version and the history stays readable.
     """
 
@@ -607,7 +609,7 @@ class Application(Base, PkMixin, TimestampMixin):
     lock_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     __table_args__ = (
-        CheckConstraint("current_stage between 1 and 11", name="ck_application_stage_range"),
+        CheckConstraint("current_stage between 1 and 12", name="ck_application_stage_range"),
         # The spec's "one order at a time", enforced by the database rather than by
         # application code — this is what stops two users double-mapping a candidate.
         Index(
@@ -636,7 +638,7 @@ class ApplicationStage(Base, PkMixin):
     data: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
     outcome: Mapped[str | None] = mapped_column(String(60))
-    amount: Mapped[float | None] = mapped_column(Numeric(12, 2))  # stage 8, for reports
+    amount: Mapped[float | None] = mapped_column(Numeric(12, 2))  # stage 9 (advance), for reports
     # The advance has its own currency — it is collected in India while the salary is
     # paid abroad, so it cannot be assumed to match the order's.
     amount_currency: Mapped[str | None] = mapped_column(String(8))
@@ -652,7 +654,7 @@ class ApplicationStage(Base, PkMixin):
 
     __table_args__ = (
         UniqueConstraint("application_id", "stage", "attempt"),
-        CheckConstraint("stage between 1 and 11", name="ck_stage_range"),
+        CheckConstraint("stage between 1 and 12", name="ck_stage_range"),
         {"comment": "Recorded attempts and outcomes for each stage of a candidate application."},
     )
 
@@ -1202,7 +1204,7 @@ class WorkflowSettings(Base):
 
 
 class Currency(Base):
-    """A currency the order form and the stage-8 advance offer. Retired codes are switched off, never deleted."""
+    """A currency the order form and the stage-9 advance offer. Retired codes are switched off, never deleted."""
 
     __tablename__ = "currencies"
     code: Mapped[str] = mapped_column(String(3), primary_key=True)
@@ -1215,7 +1217,7 @@ class Currency(Base):
     __table_args__ = (
         CheckConstraint("code ~ '^[A-Z]{3}$'", name="ck_currencies_code"),
         CheckConstraint("length(btrim(name)) > 0", name="ck_currencies_name"),
-        {"comment": "Admin-managed currency list for orders and the stage-8 advance; inactive codes stay valid on stored records."},
+        {"comment": "Admin-managed currency list for orders and the stage-9 advance; inactive codes stay valid on stored records."},
     )
 
 

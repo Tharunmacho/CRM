@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { createPortal } from 'react-dom'
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
+import { TOTAL_STAGES } from '@/shared/workflow/stages'
 import { CountryFlag as SharedCountryFlag } from '@/shared/ui/country-flag'
 import { Select } from '@/shared/ui/primitives'
 import { trendCaption, type ArrivalTrend } from '@/features/candidates/data-bank-trends'
@@ -30,10 +31,10 @@ export function Avatar({ name, className, size }: { name: string; className?: st
   return <span className={cn('db-avatar', `hue-${hueOf(name)}`, size === 'sm' && 'is-sm', className)} aria-hidden="true">{initials(name)}</span>
 }
 
-const STAGE_COUNT = 11
+const STAGE_COUNT = TOTAL_STAGES
 
 /**
- * The 11-stage tracker: one segment per stage (finished, current, still to come) with the
+ * The 12-stage tracker: one segment per stage (finished, current, still to come) with the
  * current stage's number and name beside it. Compact enough for a table cell or a card.
  */
 export function StageTracker({ stage, title }: { stage: number; title: string }) {

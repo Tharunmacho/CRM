@@ -7,8 +7,8 @@ A recruiter's candidates move between three buckets on their own, computed from 
 | Bucket | Screen | Who is in it |
 | --- | --- | --- |
 | **Today's candidates** | Tasks (`GET /api/daily-work`) | Candidates the recruiter owns, status `new`, `in_process` or `needs_review`, with NO active application yet or an active application at **stage 1 (Prescreening)**. Finishing prescreening completes the task. |
-| **Follow-up** | Tasks > Follow-up (`GET /api/follow-up`) | Candidates the recruiter owns whose application is `status = active` at `current_stage` **2 to 11** (selected and moving). |
-| **Travelled** | `/travelled` (`GET /api/travelled`, unchanged) | Applications with `status = deployed` (stage 11 completed). |
+| **Follow-up** | Tasks > Follow-up (`GET /api/follow-up`) | Candidates the recruiter owns whose application is `status = active` at `current_stage` **2 to 12** (selected and moving). |
+| **Travelled** | `/travelled` (`GET /api/travelled`, unchanged) | Applications with `status = deployed` (stage 12 completed). |
 
 A stage 1 completion moves the placement to stage 2: the candidate leaves *To work* (it is ticked under *Done today* until the day ends) and appears in Follow-up. A negative exit (`closure_reason` such as `interview_rejected`, `offer_declined`, `offer_not_received`, `medical_unfit`, `not_interested`, `resume_not_received`, `unmapped`, or any later one) sets the application to `closed`, so it drops out of Follow-up; the stage rules (`app/domain/stages.py`) decide what closes an application and this feature reads only `status` and `current_stage`, never an outcome. Completing stage 11 sets `deployed`: the candidate leaves Follow-up and shows on Travelled. A candidate with several active placements is in Follow-up once per placement and not in Today's candidates while one of them is past stage 1. The screens follow the live topics `tasks`, `candidates` and `applications` (and Travelled follows `reports`), which every stage completion and application close publishes, so a candidate changes bucket without a reload.
 
@@ -69,7 +69,7 @@ This is the stable read contract for reports built on the former Tasks daily-quo
 | `work_date` | Agency day it was allocated. An unfinished item is **postponed** on every later day (see below). |
 | `kind` | `stage`: a matched candidate's open application-stage task. `call`: a candidate the recruiter owns who is not matched to an order yet, worked through the initial call (then matching). |
 | `task_id`, `application_id`, `candidate_id` | For `stage`: the stage task (`workflow_tasks`) and placement (`crm_applications`; client/country/position come from its order). For `call`: both are null (the row falls back on the candidate's `designations[0]` (else first skill) for position and `country_preference` for country, flagged `positionIsPreferred` / `countryIsPreferred`; client has no fallback). `candidate_id` is always set. |
-| `stage` | Stage the candidate was at when allocated (1 to 11); null for `call`. |
+| `stage` | Stage the candidate was at when allocated (1 to 12); null for `call`. |
 | `slot_no`, `session` | Place in the day's quota (1-based) and `morning` or `evening`. Default quota 5: slots 1-3 morning, 4-5 evening. |
 | `due_at` | The hourly deadline for this slot. |
 | `status` | `open` (to do), `completed`, `released` (cancelled, reassigned, deployed or not interested before it was done; ignore for performance). `completed` means: `stage`: the stage task was completed by the owner; `call`: the initial call was recorded with a real outcome (called, interest yes or no) **after** the allocation, or a stage was completed for the candidate after allocation. |

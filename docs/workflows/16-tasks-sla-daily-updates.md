@@ -14,9 +14,9 @@ A candidate, application or medical follow-up must exist before its task exists.
 | --- | --- | --- |
 | New candidate receives an owner | Initial call: confirm interest | A valid confirmed call outcome; an unanswered or unmade call remains open |
 | Candidate maps to an order | Stage 1: prescreening | Stage 1 completion |
-| Stages 1 through 10 complete | Next stage's task | Completion of that matching stage |
+| Stages 1 through 11 complete | Next stage's task (the PCC task follows the medical) | Completion of that matching stage |
 | Medical is unfit and the candidate reapplies | Re-medical follow-up | Recording the next medical result through the medical workflow |
-| Stage 11 completes | No next task | Application becomes Deployed |
+| Stage 12 completes | No next task | Application becomes Deployed |
 | Application closes or is unmapped | No next task for that application | Its remaining open tasks are cancelled, not falsely counted as completed |
 
 An Admin reopen cancels obsolete downstream work and creates appropriate current work while retaining history. See the [initial call](12-initial-call.md) and recruitment-stage guides for the actions that finish each task.
@@ -62,7 +62,7 @@ Assignments link to [Recruiter Directory](11-staff-assignment-directory.md), com
 ## Acceptance checklist
 
 - [ ] Create a candidate, map an application, complete a stage and repeat a medical attempt; verify one appropriate task per event.
-- [ ] Verify stage 11 creates no further task, and unmapping cancels open application tasks.
+- [ ] Verify stage 12 creates no further task, and unmapping cancels open application tasks.
 - [ ] Check a task exactly at its deadline and immediately after it; only the latter is overdue.
 - [ ] Run repeated scheduler checks and verify one initial escalation, with 24-hour repeats only when enabled.
 - [ ] Transfer an overdue candidate and verify deadlines, remarks and completed work remain unchanged.

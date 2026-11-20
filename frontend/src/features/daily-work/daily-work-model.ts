@@ -41,11 +41,11 @@ export interface DailyItem {
   positionSource: 'order' | 'preference' | 'skill' | null
   positionIsPreferred: boolean
   orderRef: string | null
-  /** Advance the candidate paid (stage 8) on this placement; null when none is recorded. Never an invoice figure. */
+  /** Advance the candidate paid (stage 9) on this placement; null when none is recorded. Never an invoice figure. */
   advanceAmount: number | null
   /** The currency the advance was recorded in (INR unless another was chosen); null with no advance. */
   advanceCurrency: string | null
-  /** Stage 9 Google review: obtained, pending (stage 9 or later, not obtained yet) or null (not applicable yet). */
+  /** Stage 10 Google review: obtained, pending (stage 10 or later, not obtained yet) or null (not applicable yet). */
   googleReview: GoogleReview
   referral: { source: string; label: string; detail: string | null }
   /** The candidate's agency as the client tracker words it (the server's agency_display_expression); null when none. An older server sends nothing. */
@@ -81,7 +81,7 @@ export interface DailyWorkResponse {
   staff?: DailyStaffSummary[]
 }
 
-/** One candidate in Follow-up: an active placement at stage 2 to 11, one row per placement. */
+/** One candidate in Follow-up: an active placement at stage 2 to 12, one row per placement. */
 export interface FollowUpItem {
   /** The application id. */
   id: string
@@ -110,11 +110,11 @@ export interface FollowUpItem {
   /** The candidate's agency as the client tracker words it; null when none. An older server sends nothing. */
   agency?: string | null
   orderRef: string | null
-  /** Advance the candidate paid (stage 8) on this placement; null when none is recorded. Never an invoice figure. */
+  /** Advance the candidate paid (stage 9) on this placement; null when none is recorded. Never an invoice figure. */
   advanceAmount: number | null
   /** The currency the advance was recorded in (INR unless another was chosen); null with no advance. */
   advanceCurrency: string | null
-  /** Stage 9 Google review: obtained, pending (stage 9 or later, not obtained yet) or null (not applicable yet). */
+  /** Stage 10 Google review: obtained, pending (stage 10 or later, not obtained yet) or null (not applicable yet). */
   googleReview: GoogleReview
   remark: { body: string; at: string; by: string; count: number } | null
   /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form. */
@@ -142,7 +142,7 @@ export type BucketKey = 'daily' | 'follow-up' | 'travelled'
 
 /**
  * The three buckets a candidate moves through, as the Tasks tab strip shows them: Today's candidates (prescreening still to do),
- * Follow-up (selected and moving through stages 2 to 11) and Travelled (deployed: the Travelled screen, a link, not a copy).
+ * Follow-up (selected and moving through stages 2 to 12) and Travelled (deployed: the Travelled screen, a link, not a copy).
  * The counts are the candidates still to work today and the follow-up candidates; Travelled carries none.
  */
 export function bucketTabs(counts: { today: number | null; followUp: number | null }): { key: BucketKey; label: string }[] {
@@ -441,7 +441,7 @@ export function followUpAsDaily(item: FollowUpItem): DailyItem {
 
 /**
  * One row per candidate a recruiter holds: the daily list (initial calls and waiting stages, with what was finished today) plus
- * the follow-up list (placements moving through stages 2 to 11). A candidate in both appears once, from the daily list.
+ * the follow-up list (placements moving through stages 2 to 12). A candidate in both appears once, from the daily list.
  * Candidates nobody touched today come first; inside each half the ones with a stage waiting, then the furthest along.
  */
 export function taskRows(daily: DailyItem[], followUp: FollowUpItem[], today: string, timeZone?: string): TaskRow[] {
@@ -450,7 +450,7 @@ export function taskRows(daily: DailyItem[], followUp: FollowUpItem[], today: st
   for (const item of daily) merged.set(item.candidateId, item)
   for (const item of followUp) {
     if (!merged.has(item.candidateId)) merged.set(item.candidateId, followUpAsDaily(item))
-    // A placement in Follow-up whose stage was finished today (stage 2 to 11) is "stage moved" today, like a finished prescreening.
+    // A placement in Follow-up whose stage was finished today (stage 2 to 12) is "stage moved" today, like a finished prescreening.
     if (item.stageMovedAt && dayOf(item.stageMovedAt, timeZone) === today) movedToday.set(item.candidateId, item.stageMovedAt)
   }
   const rows = [...merged.values()].map((item): TaskRow => ({

@@ -76,7 +76,7 @@ function StageHours({ data }: { data: Data }) {
   const hours: RankRow[] = data.stageHours.map(s => ({ key: String(s.stage), stage: s.stage, name: s.label, value: s.averageHours, label: fmtHours(s.averageHours), sub: s.completed ? `${plural(s.completed, 'task')} finished` : 'No finished task' }))
   const slowest = data.stageHours.filter(s => s.averageHours != null).reduce<typeof data.stageHours[number] | null>((best, s) => (!best || (s.averageHours as number) > (best.averageHours as number) ? s : best), null)
   return <ChartCard title="Average hours per stage" hint="Time from when a task is created to when its stage is finished. Stages with no finished task have no average; they are not counted as zero." empty={noHours}
-    emptyHint="No stage was finished in this period, so there is no average time to show." summary="Average completion time for each of the 11 stages."
+    emptyHint="No stage was finished in this period, so there is no average time to show." summary="Average completion time for each of the 12 stages."
     insight={slowest ? <>Slowest stage: <b>Stage {slowest.stage} · {slowest.label}</b>, {fmtHours(slowest.averageHours)} on average.</> : undefined}>
     <Lollipops rows={hours} colour={SERIES.violet} ranked={false} label="Average hours for each stage" />
   </ChartCard>
@@ -241,7 +241,7 @@ export function AdvanceReport({ data, go }: { data: Data; go: Go }) {
   return <>
     {data.advanceTotals.length
       ? <MiniStats items={data.advanceTotals.map(t => { const n = data.advances.filter(a => a.currency === t.currency).length; return { label: `Collected (${t.currency})`, value: fmtMoney(t.amount), detail: `${n} collection${n === 1 ? '' : 's'}`, colour: SERIES.primary, icon: Banknote } })} />
-      : <p className="rv-quiet" role="status">No advance money was collected in this period. It shows here when stage 8 records an advance as collected.</p>}
+      : <p className="rv-quiet" role="status">No advance money was collected in this period. It shows here when stage 9 records an advance as collected.</p>}
     {currencies.length > 0 && <div className="rv-pair">
       {currencies.map(currency => {
         const months = monthRange(data.advanceMonths.filter(m => m.currency === currency).map(m => ({ month: m.month, amount: Number(m.amount) })))

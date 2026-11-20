@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import Numeric, case, cast, func, or_, select
 
 from app.core.config import get_settings
+from app.domain.stages import ADVANCE_STAGE
 from app.db.models import ApplicationStage, AuditEntry, Candidate, CandidateInvoice, InvoicePayment, InvoiceSettings, Role, User
 from app.services import candidate_invoices as invoices
 from app.services.invoice_access import can_see_invoices, ensure_can_see_invoices
@@ -71,7 +72,7 @@ def _today():
 
 def _advance(stage):
     data = stage.data or {}
-    if stage.stage != 8 or stage.reopened_reason or data.get("collected") != "yes":
+    if stage.stage != ADVANCE_STAGE or stage.reopened_reason or data.get("collected") != "yes":
         return None
     currency = (data.get("amountCurrency") or stage.amount_currency or "").upper()
     if currency != "INR" or data.get("mode") not in {"cash", "bank", "upi", "cheque"}:
@@ -91,7 +92,7 @@ def _advances(db, app):
     if not app or db.scalar(select(InvoicePayment.id).where(InvoicePayment.source_application_id == app.id)):
         return []
     rows = db.scalars(select(ApplicationStage).where(ApplicationStage.application_id == app.id,
-        ApplicationStage.stage == 8, ApplicationStage.reopened_reason.is_(None)).order_by(ApplicationStage.attempt.desc()))
+        ApplicationStage.stage == ADVANCE_STAGE, ApplicationStage.reopened_reason.is_(None)).order_by(ApplicationStage.attempt.desc()))
     for stage in rows:
         advance = _advance(stage)
         if advance:

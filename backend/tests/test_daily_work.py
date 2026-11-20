@@ -604,7 +604,7 @@ def test_follow_up_is_active_placements_at_stages_two_to_eleven_only(desk):
     apps = mapped_candidates(desk, 5)
     for candidate, stage in (("c1", 2), ("c2", 6), ("c3", 10)):
         set_application(desk, apps[candidate], stage=stage)
-    set_application(desk, apps["c4"], stage=11)  # an active placement at 11 (ticket booking pending) is not yet travelled: still Follow-up
+    set_application(desk, apps["c4"], stage=12)  # an active placement at 12 (ticket booking pending) is not yet travelled: still Follow-up
     assert sorted(ids(follow(desk, "asha"))) == ["c1", "c2", "c3", "c4"]
     assert ids(listing(desk, "asha")) == ["c0"]  # only the one still at prescreening
 
@@ -625,11 +625,11 @@ def test_a_negative_outcome_takes_the_candidate_out_of_follow_up(desk, reason):
 def test_deployment_moves_the_candidate_from_follow_up_to_travelled(desk):
     from app.api.routers import travelled as travelled_router
     apps = mapped_candidates(desk, 1)
-    set_application(desk, apps["c0"], stage=11)
+    set_application(desk, apps["c0"], stage=12)
     assert ids(follow(desk, "asha")) == ["c0"]  # ticket booking pending: still Follow-up, not yet Travelled
     with desk.sessions() as db:
         assert travelled_router.read_rows(db, db.get(User, "asha")) == []
-    set_application(desk, apps["c0"], status="deployed", candidate_status="deployed")  # stage 11 completed
+    set_application(desk, apps["c0"], status="deployed", candidate_status="deployed")  # stage 12 completed
     assert follow(desk, "asha")["items"] == [] and listing(desk, "asha")["items"] == []
     with desk.sessions() as db:
         assert [r["candidateId"] for r in travelled_router.read_rows(db, db.get(User, "asha"))] == ["c0"]
@@ -694,25 +694,25 @@ def record_stage(env, app_id, stage, *, attempt=1, amount=None, currency=None, d
 
 def test_follow_up_rows_carry_the_advance_collected_and_the_google_review_state(desk):
     apps = mapped_candidates(desk, 6)
-    for candidate, stage in (("c0", 2), ("c1", 8), ("c2", 9), ("c3", 9), ("c4", 8), ("c5", 10)):
+    for candidate, stage in (("c0", 2), ("c1", 9), ("c2", 10), ("c3", 10), ("c4", 9), ("c5", 11)):
         set_application(desk, apps[candidate], stage=stage)
-    record_stage(desk, apps["c1"], 8, amount=5000, currency="INR", data={"collected": "yes", "amount": "5000.00", "amountCurrency": "INR"})
-    record_stage(desk, apps["c2"], 8, amount=12500.5, currency="INR", data={"collected": "yes"})
-    record_stage(desk, apps["c2"], 9, data={"arrived": "yes", "googleReview": True})
-    record_stage(desk, apps["c3"], 9, data={"arrived": "yes", "googleReview": False})
-    # c4: the first attempt was reopened (ignored); the latest attempt counts. A stage 8 with no amount is no advance.
-    record_stage(desk, apps["c4"], 8, attempt=1, amount=999, currency="INR", reopened="Receipt corrected")
-    record_stage(desk, apps["c4"], 8, attempt=2, amount=7000, currency="AED", data={"collected": "yes"}, at=TUESDAY + timedelta(hours=1))
-    record_stage(desk, apps["c5"], 8, data={"collected": "no"})
+    record_stage(desk, apps["c1"], 9, amount=5000, currency="INR", data={"collected": "yes", "amount": "5000.00", "amountCurrency": "INR"})
+    record_stage(desk, apps["c2"], 9, amount=12500.5, currency="INR", data={"collected": "yes"})
+    record_stage(desk, apps["c2"], 10, data={"arrived": "yes", "googleReview": True})
+    record_stage(desk, apps["c3"], 10, data={"arrived": "yes", "googleReview": False})
+    # c4: the first attempt was reopened (ignored); the latest attempt counts. A stage 9 with no amount is no advance.
+    record_stage(desk, apps["c4"], 9, attempt=1, amount=999, currency="INR", reopened="Receipt corrected")
+    record_stage(desk, apps["c4"], 9, attempt=2, amount=7000, currency="AED", data={"collected": "yes"}, at=TUESDAY + timedelta(hours=1))
+    record_stage(desk, apps["c5"], 9, data={"collected": "no"})
     rows = {item["candidateId"]: item for item in follow(desk, "asha")["items"]}
     got = {k: (v["advanceAmount"], v["advanceCurrency"], v["googleReview"]) for k, v in rows.items()}
     assert got == {
         "c0": (None, None, None),                 # stage 2: nothing yet
-        "c1": (5000.0, "INR", None),              # advance collected, stage 8: review not applicable yet
+        "c1": (5000.0, "INR", None),              # advance collected, stage 9: review not applicable yet
         "c2": (12500.5, "INR", "obtained"),       # review obtained
-        "c3": (None, None, "pending"),            # at stage 9, not obtained
+        "c3": (None, None, "pending"),            # at stage 10, not obtained
         "c4": (7000.0, "AED", None),              # latest non-reopened attempt wins, in its own currency
-        "c5": (None, None, "pending"),            # stage 10 and no review recorded: still pending
+        "c5": (None, None, "pending"),            # stage 11 and no review recorded: still pending
     }
     # No invoice, CGST or GST figure rides along on a row.
     assert not any(any(key.lower().startswith(("invoice", "cgst", "gst", "tax")) for key in item) for item in rows.values())
@@ -722,8 +722,8 @@ def test_a_recruiter_sees_the_advance_of_their_own_candidates_and_supervisors_se
     mine = mapped_candidates(desk, 1)
     theirs = mapped_candidates(desk, 1, owner="ravi", start=20)
     for app in (*mine.values(), *theirs.values()):
-        set_application(desk, app, stage=8)
-        record_stage(desk, app, 8, amount=4000 if app in mine.values() else 6000, currency="INR", data={"collected": "yes"})
+        set_application(desk, app, stage=9)
+        record_stage(desk, app, 9, amount=4000 if app in mine.values() else 6000, currency="INR", data={"collected": "yes"})
     assert [(i["candidateId"], i["advanceAmount"]) for i in follow(desk, "asha")["items"]] == [("c0", 4000.0)]
     assert [(i["candidateId"], i["advanceAmount"]) for i in follow(desk, "ravi")["items"]] == [("c20", 6000.0)]
     assert {i["candidateId"]: i["advanceAmount"] for i in follow(desk, "manager")["items"]} == {"c0": 4000.0, "c20": 6000.0}
@@ -733,7 +733,7 @@ def test_a_recruiter_sees_the_advance_of_their_own_candidates_and_supervisors_se
 def test_todays_rows_have_the_same_fields_blank_for_an_unmatched_candidate_and_read_from_the_active_placement(desk):
     owned_candidates(desk, 1)
     apps = mapped_candidates(desk, 1)
-    record_stage(desk, apps["c0"], 8, amount=3000, currency="INR", data={"collected": "yes"})
+    record_stage(desk, apps["c0"], 9, amount=3000, currency="INR", data={"collected": "yes"})
     body = listing(desk, "asha")
     rows = {item["candidateId"]: item for item in body["items"]}
     assert rows["u100"]["advanceAmount"] is None and rows["u100"]["advanceCurrency"] is None and rows["u100"]["googleReview"] is None

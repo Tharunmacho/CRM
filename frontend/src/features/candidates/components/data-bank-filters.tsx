@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { ChevronDown, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
-import { stageByNo } from '@/shared/workflow/stages'
+import { stageByNo, TOTAL_STAGES } from '@/shared/workflow/stages'
 import type { User } from '@/shared/model/types'
 import { Field, Input, Select } from '@/shared/ui/primitives'
 import { PRD_COLUMNS, TRAVEL_CHOICES, parseTravel, type DataBankPool, type TravelFilter } from '@/features/candidates/data-bank-pools'
@@ -133,7 +133,7 @@ export function DataBankFilters(props: Props) {
               {poolChoices(me.role, pool).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </Select>
           ))}
-          {labelled('Stage', choice('stage', 'Any stage', [['0', 'No order yet'], ...Array.from({ length: 11 }, (_, index): [string, string] => [String(index + 1), `Stage ${index + 1} · ${stageByNo(index + 1).title}`])]))}
+          {labelled('Stage', choice('stage', 'Any stage', [['0', 'No order yet'], ...Array.from({ length: TOTAL_STAGES }, (_, index): [string, string] => [String(index + 1), `Stage ${index + 1} · ${stageByNo(index + 1).title}`])]))}
           {labelled('Passport', choice('passport', 'Any passport', [['Yes', 'Has a passport'], ['No', 'No passport']]))}
           {text('name', 'Contains')}
           {text('phone', 'Contains')}

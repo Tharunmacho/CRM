@@ -3,7 +3,7 @@
 Two tables hold them (migration 0017): the singleton `agency_settings` row (name, default currencies, home calling
 code, default acknowledgement text) and the `currencies` list. They are optional at run time on purpose: when they
 are missing (a database that has not had the migration yet) or empty, the compiled-in last-resort values below keep
-orders, the stage-8 advance and phone matching working exactly as before. They are never the first choice.
+orders, the stage-9 advance and phone matching working exactly as before. They are never the first choice.
 
 The managed job category list (migration 0019, table `job_categories`) rides along but has its own presence flag: a
 database that has 0017 and not yet 0019 keeps its agency settings and simply reports no category list.
@@ -274,7 +274,7 @@ def home_digits(db: Session | None = None) -> str:
 # ---------------------------------------------------------------- currency usage
 
 def currency_in_use(db: Session, code: str) -> bool:
-    """True when any order, stored advance or saved stage-8 draft carries this code."""
+    """True when any order, stored advance or saved stage-9 draft carries this code."""
     return bool(db.scalar(select(or_(
         exists().where(Order.currency == code),
         exists().where(or_(ApplicationStage.amount_currency == code, ApplicationStage.data["amountCurrency"].astext == code)),

@@ -1,9 +1,9 @@
-"""What the stage-8 advance reads like in the client's tracker sheet ("60k Collected", "10k collected/50k", "Pending/45k").
+"""What the stage-9 advance reads like in the client's tracker sheet ("60k Collected", "10k collected/50k", "Pending/45k").
 
-Pure functions, no database: they turn the facts of a stage-8 record into the words of the sheet's Advance cell and read
+Pure functions, no database: they turn the facts of a stage-9 record into the words of the sheet's Advance cell and read
 the record's status. The owner's style is kept exactly: no spaces around the slash, `k` for round thousands.
 
-Stage 8 stores (in the stage record's JSON, `crm_application_stages.data`):
+Stage 9 stores (in the stage record's JSON, `crm_application_stages.data`):
   advanceStatus       "collected" | "pending"   (records saved before it existed have none, see `advance_status`)
   amount              the advance collected, or the advance expected while the status is pending
   amountCurrency      its currency (the agency's default advance currency when none was chosen)
@@ -28,7 +28,7 @@ def _positive(value: Any) -> Decimal | None:
 
 
 def advance_status(data: Mapping[str, Any] | None, amount: Any = None) -> AdvanceStatus | None:
-    """'collected', 'pending' or None for a stage-8 record's data.
+    """'collected', 'pending' or None for a stage-9 record's data.
 
     The explicit `advanceStatus` wins. Older records have none: `collected` 'yes' (or any positive amount, the
     only thing the old stage kept) reads as Collected, `collected` 'no' with no amount as Pending, and a record with nothing is None.
@@ -94,7 +94,7 @@ def format_advance(status: str | None, amount: Any, total: Any = None, currency:
 
 
 def advance_cell(fact: Mapping[str, Any] | None, default_currency: str | None = None) -> str | None:
-    """The Advance cell from one application's entry of `daily_work.stage_facts` (None when it has no stage-8 record)."""
+    """The Advance cell from one application's entry of `daily_work.stage_facts` (None when it has no stage-9 record)."""
     if not fact:
         return None
     collected = fact.get("advance")

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     Application, ApplicationFeedback, ApplicationStatus, AuditEntry, Candidate, Notification, Role, User,
 )
-from app.domain.stages import stage_by_no
+from app.domain.stages import TOTAL_STAGES, stage_by_no
 from app.core.roles import ADMIN_LEVEL_ROLES, is_admin_level
 
 KINDS = ("update", "delay", "issue", "client", "candidate")
@@ -64,7 +64,7 @@ def stage_clock(application, tasks: list, stage_rows: list, items: list, now: da
     `tasks` are the candidate's open tasks (application_id, stage, created_at, sla_started_at, due_at); `stage_rows` the
     application's stage records; `items` the newest notes. None when there is no active application.
     """
-    if application is None or application.status != ApplicationStatus.active or not 1 <= application.current_stage <= 11:
+    if application is None or application.status != ApplicationStatus.active or not 1 <= application.current_stage <= TOTAL_STAGES:
         return None
     task = next((t for t in sorted(tasks, key=lambda t: t.created_at, reverse=True)
                  if t.application_id == application.id and t.stage == application.current_stage), None)

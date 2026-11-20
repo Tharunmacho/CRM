@@ -1,4 +1,5 @@
 import { CalendarClock, Route } from 'lucide-react'
+import { TOTAL_STAGES } from '@/shared/workflow/stages'
 import { recruitmentRows, RECRUITMENT_EMPTY_TEXT } from '../paper-model'
 import { STAGE_NAMES, formatFormDate } from '../form-model'
 import type { ApplicationFormData } from '../types'
@@ -19,7 +20,7 @@ export function ContextStrip({ form, commencement, onOpen }: { form: Pick<Applic
       {rows.length === 0 ? <span className="af-context-empty">{RECRUITMENT_EMPTY_TEXT}</span> : (
         <dl className="af-context-cells">
           {rows.map((row) => <div className="af-ctx" data-ctx={row.key} key={row.key}><dt>{row.label}</dt><dd title={row.value}>{row.value}</dd></div>)}
-          {stage && <div className="af-ctx" data-ctx="stage"><dt>Stage</dt><dd title={stage}><Route aria-hidden="true" />{stage}{current ? <small className="tnum">{current}/11</small> : null}</dd></div>}
+          {stage && <div className="af-ctx" data-ctx="stage"><dt>Stage</dt><dd title={stage}><Route aria-hidden="true" />{stage}{current ? <small className="tnum">{current}/{TOTAL_STAGES}</small> : null}</dd></div>}
           {form.application && <div className="af-ctx" data-ctx="doc"><dt>DOC</dt><dd title="Date of commencement">{doc ? <><CalendarClock aria-hidden="true" />{doc}</> : <span className="af-ctx-empty">Not set</span>}</dd></div>}
         </dl>
       )}

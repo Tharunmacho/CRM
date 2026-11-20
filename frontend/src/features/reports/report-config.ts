@@ -63,7 +63,7 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
     key: 'advance', label: 'Advance collections', question: 'How much money came in?', title: 'Advance collections',
     note: 'Advance money collected from each candidate, and per month. Each currency is added up separately.',
     how: [
-      'An amount appears when stage 8 records the advance as collected.',
+      'An amount appears when stage 9 records the advance as collected.',
       'Currencies are never converted or mixed: each has its own total and chart.',
       'Months follow the collection date, in the agency time zone.',
     ],
@@ -94,6 +94,7 @@ export const REASON_COLOURS: Record<string, string> = {
   interview_not_possible: 'color-mix(in srgb, var(--rv-c2) 55%, white)', passport_not_available: 'color-mix(in srgb, var(--rv-c5) 55%, white)',
   advance_not_paid: 'color-mix(in srgb, var(--rv-c1) 55%, white)', visa_rejected: 'color-mix(in srgb, var(--rv-c5) 75%, black)',
   visa_stamping_refused: 'color-mix(in srgb, var(--rv-c4) 75%, black)', not_travelling: 'var(--rv-c-bad)',
+  pcc_not_cleared: 'color-mix(in srgb, var(--rv-c3) 75%, black)',
 }
 
 export const SOURCE_COLOURS: Record<string, string> = { email: SERIES.primary, whatsapp: SERIES.teal, walk_in: SERIES.amber, referral: 'color-mix(in srgb, var(--rv-c1) 42%, white)', other: 'var(--rv-c-neutral)' }

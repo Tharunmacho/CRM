@@ -1,4 +1,4 @@
-"""Every stage can end the application with a stopping exit (Rejected / Declined / its own wording; stage 11: Not travelling).
+"""Every stage can end the application with a stopping exit (Rejected / Declined / its own wording; stage 12: Not travelling).
 
 The exit needs written feedback, closes the application like the older negative exits (no next stage, no further task, the
 candidate goes back to the Data Bank), never deploys, and the admin can reopen it. Disposable PostgreSQL, synthetic data.
@@ -21,13 +21,28 @@ CANDIDATE_SAID_NO = {"stage_declined", "offer_declined", "not_interested", "not_
 
 
 def test_every_stage_offers_a_stopping_exit_with_the_wording_asked_for():
-    assert sorted(STOP_EXITS) == list(range(1, 12))
-    for n in range(1, 11):
+    assert sorted(STOP_EXITS) == list(range(1, 13))
+    for n in range(1, 12):
         assert {"rejected", "declined"} <= set(STOP_EXITS[n]), n
-    assert set(STOP_EXITS[11]) == {"not_travelling"}
-    assert "not_possible" in STOP_EXITS[3] and "not_available" in STOP_EXITS[7] and "not_paid" in STOP_EXITS[8]
-    assert "visa_rejected" in STOP_EXITS[9] and "refused" in STOP_EXITS[10]
+    assert set(STOP_EXITS[12]) == {"not_travelling"}
+    assert "not_possible" in STOP_EXITS[3] and "not_cleared" in STOP_EXITS[7] and "not_available" in STOP_EXITS[8] and "not_paid" in STOP_EXITS[9]
+    assert "visa_rejected" in STOP_EXITS[10] and "refused" in STOP_EXITS[11]
     assert all(stage.closer for stage in STAGES)
+
+
+def test_each_own_exit_stayed_with_its_stage_when_pcc_was_inserted():
+    # (stage, exit key) -> closure reason: the old stages 7..11 keep their exits one number higher; Medical keeps none of them;
+    # PCC has its own, and Medical's own closure is the Unfit answer, not a stopping exit.
+    own = {key: (reason, label, outcome) for stage in (3, 7, 8, 9, 10, 11, 12) for key, (reason, label, outcome) in STOP_EXITS[stage].items()
+           if key not in ("rejected", "declined")}
+    assert STOP_EXITS[7]["not_cleared"] == ("pcc_not_cleared", "PCC not cleared", "Not cleared")
+    assert STOP_EXITS[8]["not_available"][0] == "passport_not_available" and STOP_EXITS[9]["not_paid"][0] == "advance_not_paid"
+    assert STOP_EXITS[10]["visa_rejected"][0] == "visa_rejected" and STOP_EXITS[11]["refused"][0] == "visa_stamping_refused"
+    assert STOP_EXITS[12]["not_travelling"][0] == "not_travelling" and STOP_EXITS[3]["not_possible"][0] == "interview_not_possible"
+    assert set(own) == {"not_possible", "not_cleared", "not_available", "not_paid", "visa_rejected", "refused", "not_travelling"}
+    assert set(STOP_EXITS[6]) == {"rejected", "declined"}
+    for stage, wrong in ((6, "not_cleared"), (7, "not_available"), (8, "not_cleared"), (9, "not_available"), (11, "visa_rejected"), (10, "refused")):
+        assert not stage_by_no(stage).evaluate({"feedback": "x", "stop": wrong}).can_complete, (stage, wrong)
 
 
 def test_the_rules_close_without_inventing_a_next_stage_and_need_a_listed_choice():
@@ -36,14 +51,14 @@ def test_the_rules_close_without_inventing_a_next_stage_and_need_a_listed_choice
         assert result.can_complete and result.closes == reason and result.outcome == outcome and not result.repeats, (n, choice)
     # A choice that belongs to another stage, or a Rejected/Declined at the final stage, is not accepted.
     assert not stage_by_no(5).evaluate({"stop": "not_paid"}).can_complete
-    assert not stage_by_no(11).evaluate({"stop": "declined"}).can_complete
-    assert not stage_by_no(11).evaluate({"stop": "rejected"}).can_complete
+    assert not stage_by_no(12).evaluate({"stop": "declined"}).can_complete
+    assert not stage_by_no(12).evaluate({"stop": "rejected"}).can_complete
     # The stop wins over the stage's own answer, including a planned retest.
     assert stage_by_no(4).evaluate({"result": "selected", "stop": "declined"}).closes == "stage_declined"
     assert stage_by_no(6).evaluate({"result": "unfit", "reapplying": "yes", "retestDate": "2026-12-01", "stop": "declined"}).repeats is False
-    # Without a stop nothing changes: stage 3 still moves on, stage 11 still needs the ticket and the date.
+    # Without a stop nothing changes: stage 3 still moves on, stage 12 still needs the ticket and the date.
     assert stage_by_no(3).evaluate({"scheduled": "yes"}).closes is None
-    assert stage_by_no(11).evaluate({}).can_complete is False
+    assert stage_by_no(12).evaluate({}).can_complete is False
 
 
 @pytest.mark.parametrize(("stage", "choice", "reason", "outcome"), EXITS)
@@ -96,8 +111,10 @@ def test_a_stopping_exit_at_every_stage_closes_the_application(workflow, stage, 
     # The candidate's own no: a candidate whose data still needs review keeps that status (the flag stays too) and is still parked.
     (True, 4, {"stop": "declined"}, "stage_declined", CandidateStatus.needs_review, False),
     (True, 5, {"stop": "declined"}, "offer_declined", CandidateStatus.needs_review, False),
-    (True, 11, {"stop": "not_travelling"}, "not_travelling", CandidateStatus.needs_review, False),
+    (True, 12, {"stop": "not_travelling"}, "not_travelling", CandidateStatus.needs_review, False),
     (False, 4, {"stop": "declined"}, "stage_declined", CandidateStatus.not_interested, False),
+    # The PCC refusal is not their own no either: they return to the pool as New.
+    (False, 7, {"stop": "not_cleared"}, "pcc_not_cleared", CandidateStatus.new, True),
     # A rejection is not their own no: unchanged, they return to the pool (and to the Tasks list) as Needs review / New.
     (True, 4, {"stop": "rejected"}, "interview_rejected", CandidateStatus.needs_review, True),
     (False, 4, {"stop": "rejected"}, "interview_rejected", CandidateStatus.new, True),
@@ -141,7 +158,7 @@ def test_a_decline_keeps_the_needs_review_status_and_a_parked_candidate_stays_of
 def test_not_travelling_closes_even_when_every_opening_is_filled_and_never_deploys(workflow):  # noqa: F811
     env = workflow
     app_id = mapped(env)
-    reach(env, app_id, 11)
+    reach(env, app_id, 12)
     with env.sessions() as db:
         other = mapped(env, candidate="second-candidate")
         order = db.get(Order, "order")

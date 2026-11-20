@@ -5,6 +5,7 @@ import { useStore } from '@/shared/state/crm-store'
 import { Button, Select } from '@/shared/ui/primitives'
 import { EmptyState } from '@/shared/ui/display'
 import { agencyDay } from '@/shared/lib/task-time'
+import { TOTAL_STAGES } from '@/shared/workflow/stages'
 import { downloadClientTracker, useClientTracker } from './client-tracker-api'
 import {
   EMPTY_TRACKER_FILTERS, NO_TRACKER_OPTIONS, TRACKER_COLUMNS, activeTrackerFilters, cellText, trackerSummary, withChosen,
@@ -19,11 +20,11 @@ import '@/styles/touch-targets.css'
  */
 export function ClientTrackerReport() {
   const store = useStore()
-  // A chip on the Dashboard card opens the tracker already filtered to that stage (?stage=9).
+  // A chip on the Dashboard card opens the tracker already filtered to that stage (?stage=10).
   const [params, setParams] = useSearchParams()
   const [filters, setFilters] = useState<TrackerFilters>(() => {
     const wanted = Number(params.get('stage'))
-    return Number.isInteger(wanted) && wanted >= 1 && wanted <= 11 ? { ...EMPTY_TRACKER_FILTERS, stage: String(wanted) } : EMPTY_TRACKER_FILTERS
+    return Number.isInteger(wanted) && wanted >= 1 && wanted <= TOTAL_STAGES ? { ...EMPTY_TRACKER_FILTERS, stage: String(wanted) } : EMPTY_TRACKER_FILTERS
   })
   const { data: fresh, error, refresh, refreshing } = useClientTracker(filters, store.me.id)
   // Keep the previous sheet on screen (dimmed) while a new choice loads, so the page does not jump.

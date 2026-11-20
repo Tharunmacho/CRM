@@ -80,7 +80,7 @@ const NAME_FROM = {
 } as const
 
 function placementText(plan: ImportPlan): string {
-  if (plan.action === 'deploy') return 'All 11 stages recorded, deployed'
+  if (plan.action === 'deploy') return 'All 12 stages recorded, deployed'
   if (plan.action === 'in_progress') {
     return plan.completedThrough > 0 ? `Stages 1-${plan.completedThrough} recorded, continue at stage ${plan.currentStage}` : 'Starts at stage 1 (prescreening)'
   }
@@ -89,7 +89,7 @@ function placementText(plan: ImportPlan): string {
 }
 
 function resultText(result: ImportResult): string {
-  if (result.action === 'deploy') return 'All 11 stages recorded, deployed'
+  if (result.action === 'deploy') return 'All 12 stages recorded, deployed'
   if (result.action === 'in_progress') {
     return (result.completedThrough ?? 0) > 0 ? `Stages 1-${result.completedThrough} recorded, continue at stage ${result.currentStage}` : 'Starts at stage 1 (prescreening)'
   }

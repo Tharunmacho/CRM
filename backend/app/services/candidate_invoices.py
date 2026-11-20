@@ -106,7 +106,7 @@ def _record(db, candidate_id, app, *, lock=False):
 def _ticket(db, candidate_id, app, row=None, placements=None):
     matches = [(Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id) & (Attachment.slot == "air_ticket")]
     if app:
-        matches.append((Attachment.entity_type == "application") & (Attachment.entity_id == app.id) & (Attachment.slot == "stage_11_file"))
+        matches.append((Attachment.entity_type == "application") & (Attachment.entity_id == app.id) & (Attachment.slot == "stage_12_file"))
     options = list(db.scalars(select(Attachment).where(or_(*matches)).order_by(Attachment.uploaded_at.desc(), Attachment.version.desc())))
     options.sort(key=lambda ticket: ticket.entity_type != "application")
     placements = [placement.id for placement in (placements if placements is not None else _placements(db, candidate_id))]
@@ -330,7 +330,7 @@ def _issue(db, candidate_id, user, identifier):
 def on_ticket_uploaded(db, attachment, user):
     if attachment.entity_type == "candidate" and attachment.slot == "air_ticket":
         return reconcile(db, attachment.entity_id, user)
-    if attachment.entity_type == "application" and attachment.slot == "stage_11_file":
+    if attachment.entity_type == "application" and attachment.slot == "stage_12_file":
         app = db.get(Application, attachment.entity_id)
         if app:
             return reconcile(db, app.candidate_id, user, application_id=app.id)

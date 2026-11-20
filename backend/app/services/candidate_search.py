@@ -79,7 +79,7 @@ class Search:
 def has_travelled():
     """True for a candidate with a deployed placement: the SAME rule as the Travelled report (api/routers/travelled.py).
 
-    A placement counts as travelled when its application is deployed (stage 11, which also hands out the Traveller ID).
+    A placement counts as travelled when its application is deployed (stage 12, which also hands out the Traveller ID).
     It is decided per candidate over all of their applications, not by the one placement the Data Bank row displays, so
     someone with a new active order after an earlier flight is still a traveller. A candidate marked `deployed` with no
     deployed application is not counted, exactly as the report leaves them out."""

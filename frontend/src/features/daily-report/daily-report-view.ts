@@ -325,7 +325,7 @@ export function statusRows(sheet: LeadSheetSummary | undefined): StatusRow[] {
 /* ---------------------------------------------------------------- Stages tab */
 
 export interface StageCol extends TableCol { no: number }
-/** Columns "No order" then the stage numbers 1 to 11; the names are in the legend above the table and in each heading's title. */
+/** Columns "No order" then the stage numbers 1 to 12; the names are in the legend above the table and in each heading's title. */
 export function stageColumns(report: DailyReport): StageCol[] {
   const totals = report.stages?.totals ?? []
   return [...totals].sort((a, b) => a.no - b.no).map(item => ({
@@ -340,7 +340,7 @@ export const TASK_COLS: TableCol[] = [
   col('pending', 'Pending', { info: TASK_INFO.pending, drill: 'tasksPending', width: 84 }),
   col('overdue', 'Overdue', { info: TASK_INFO.overdue, drill: 'tasksOverdue', strong: true, width: 84 }),
 ]
-/** Tasks, then the candidates at each stage right now (No order, then 1 to 11): one flat set of columns. */
+/** Tasks, then the candidates at each stage right now (No order, then 1 to 12): one flat set of columns. */
 export function taskStageCols(report: DailyReport): TableCol[] {
   return [...TASK_COLS, ...stageColumns(report)]
 }
@@ -373,7 +373,7 @@ export function taskStageTotals(report: DailyReport): Cells {
   cells.total = report.stages ? report.stages.totals.reduce((all, item) => all + item.count, 0) : null
   return cells
 }
-/** "N candidates in progress" counts stages 1 to 11; those not on an order yet are named beside it. */
+/** "N candidates in progress" counts stages 1 to 12; those not on an order yet are named beside it. */
 export function stageSummary(report: DailyReport): { inProgress: number; notOnOrder: number } {
   const totals = report.stages?.totals ?? []
   return { inProgress: totals.filter(item => item.no >= 1).reduce((all, item) => all + item.count, 0), notOnOrder: totals.find(item => item.no === 0)?.count ?? 0 }

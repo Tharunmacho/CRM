@@ -7,9 +7,9 @@ It is the Excel sheet the clients ask for, built only from what the CRM already 
 * Client / Country / Position: the placement's order (the employer company's name, the order's country, else the company's, and
   the order's job title).
 * Name: the candidate. Ref: the candidate's referral agency (the assignment form's agency value, see agency_display).
-* Advance: read only from the placement's stage-8 advance record (never from invoices or receipts), worded by
+* Advance: read only from the placement's stage-9 advance record (never from invoices or receipts), worded by
   advance_text.advance_cell: "60k Collected", "10k collected/50k" (collected / total service charge), "Pending/45k", "Pending/10k"
-  (advance expected), "Pending"; blank when there is no stage-8 record. Every role sees the same cell.
+  (advance expected), "Pending"; blank when there is no stage-9 record. Every role sees the same cell.
 * Stage: the placement's current stage in plain words, or "Travelled on 11th NOV 2026" for a deployed placement.
 * Remarks: the newest remark written on the placement's tasks (else, for a placement still at its first stage, the newest remark on
   the candidate's initial call); "Travelled" for a deployed placement with no remark. Blank when there is nothing to say.
@@ -18,7 +18,7 @@ Which placements: status active (any stage, a candidate mapped to an order and s
 (unless left out). Closed placements (rejected, declined, not travelling...) never appear. A recruiter sees the placements they own;
 admin and MD see all (the rule of the travelled report).
 
-Cost: the placements, the stage-8 / stage-11 records, the newest remarks and the agency's default currency are independent reads,
+Cost: the placements, the stage-9 / stage-12 records, the newest remarks and the agency's default currency are independent reads,
 run side by side: one round trip whatever the number of rows. Filters and the S.No numbering are
 applied in memory on those rows, so changing a filter costs nothing.
 """
@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Candidate, CandidateStatus, Company, Designation, Order, Remark, Task, User,
 )
-from app.domain.stages import TOTAL_STAGES
+from app.domain.stages import ADVANCE_STAGE, TOTAL_STAGES
 from app.services import agency_settings
 from app.services.agency_display import agency_display_expression
 from app.services.advance_text import advance_cell
@@ -58,11 +58,12 @@ STAGE_WORDS = {
     4: "Waiting for interview result",
     5: "Waiting for signed offer",
     6: "Medical in progress",
-    7: "Waiting for passport",
-    8: "Waiting for advance",
-    9: "Waiting for visa",
-    10: "Waiting for stamp",
-    11: "Waiting for air ticket",
+    7: "Waiting for PCC",
+    8: "Waiting for passport",
+    9: "Waiting for advance",
+    10: "Waiting for visa",
+    11: "Waiting for stamp",
+    12: "Waiting for air ticket",
 }
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
@@ -148,10 +149,10 @@ def _read_rows(db: Session, user: User) -> list[dict]:
         .where(*_scope(user)))
     app_ids = select(Application.id).join(Candidate, Candidate.id == Application.candidate_id).where(*_scope(user))
     candidate_ids = select(Application.candidate_id).join(Candidate, Candidate.id == Application.candidate_id).where(*_scope(user))
-    # Stage 8 (the advance) and stage 11 (the ticket and travel date) records, never a reopened one.
+    # Stage 9 (the advance) and stage 12 (the ticket and travel date) records, never a reopened one.
     stages = (select(ApplicationStage.application_id, ApplicationStage.stage, ApplicationStage.attempt, ApplicationStage.completed_at,
                      ApplicationStage.amount, ApplicationStage.amount_currency, ApplicationStage.data)
-              .where(ApplicationStage.stage.in_((8, 11)), ApplicationStage.reopened_reason.is_(None),
+              .where(ApplicationStage.stage.in_((ADVANCE_STAGE, TOTAL_STAGES)), ApplicationStage.reopened_reason.is_(None),
                      ApplicationStage.application_id.in_(app_ids)))
     # The newest remark of every placement's tasks; tasks with no placement (the initial call) give one per candidate.
     remarks = (select(Task.application_id, Task.candidate_id, Remark.body)
@@ -166,12 +167,12 @@ def _read_rows(db: Session, user: User) -> list[dict]:
 
 
 def _assemble(found, stage_rows, remark_rows, default_currency: str) -> list[dict]:
-    from app.services.daily_work import stage_facts   # the stage-8 advance rule of the Tasks screen
-    advance_records = [row for row in stage_rows if row[1] == 8]
+    from app.services.daily_work import stage_facts   # the stage-9 advance rule of the Tasks screen
+    advance_records = [row for row in stage_rows if row[1] == ADVANCE_STAGE]
     advances = stage_facts(advance_records)
     travel: dict[str, tuple] = {}
     for application_id, stage, attempt, completed_at, _amount, _currency, data in stage_rows:
-        if stage == 11 and (application_id not in travel or (attempt, completed_at) > travel[application_id][0]):
+        if stage == TOTAL_STAGES and (application_id not in travel or (attempt, completed_at) > travel[application_id][0]):
             travel[application_id] = ((attempt, completed_at), (data or {}).get("travelDate"))
     by_application: dict[str, str] = {}
     by_candidate: dict[str, str] = {}

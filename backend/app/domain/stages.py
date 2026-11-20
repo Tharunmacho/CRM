@@ -1,4 +1,4 @@
-﻿"""Typed draft contracts and completion rules for the PRD's eleven stages."""
+﻿"""Typed draft contracts and completion rules for the twelve stages (stage 7, PCC, was split out of Medical by migration 0048)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,7 +10,7 @@ from typing import Any, Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-TOTAL_STAGES = 11
+TOTAL_STAGES = 12
 YesNo = Literal["yes", "no"]
 # Last-resort values, used only when the database has no currency list or agency settings (for example a
 # database that has not had migration 0017 yet). The real list and defaults are the `currencies` and
@@ -52,7 +52,7 @@ class StageInput(BaseModel):
     # Optional while drafting; the transition API requires fresh written feedback.
     feedback: str | None = Field(default=None, max_length=10000)
     # The stopping exit every stage offers: instead of moving on, the application closes here (see STOP_EXITS for what each stage allows).
-    stop: Literal["rejected", "declined", "not_possible", "not_available", "not_paid", "visa_rejected", "refused", "not_travelling"] | None = None
+    stop: Literal["rejected", "declined", "not_possible", "not_available", "not_paid", "visa_rejected", "refused", "not_travelling", "not_cleared"] | None = None
 
     @field_validator("*", mode="before")
     @classmethod
@@ -60,7 +60,7 @@ class StageInput(BaseModel):
         if isinstance(value, str) and not value.strip():
             return None
         if value is not None and info.field_name in {
-            "date", "dateForwarded", "appliedDate", "retestDate", "collectedDate", "travelDate",
+            "date", "dateForwarded", "appliedDate", "retestDate", "collectedDate", "travelDate", "pccAppliedDate", "pccReceivedDate",
         }:
             if not isinstance(value, (str, Date)) or (isinstance(value, str) and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)):
                 raise ValueError("Use a date in YYYY-MM-DD format.")
@@ -108,6 +108,15 @@ class Medical(StageInput):
     result: Literal["fit", "unfit"] | None = None
     reapplying: YesNo | None = None
     retestDate: Date | None = None
+
+
+class Pcc(StageInput):
+    # Police clearance certificate (stage 7). `pccStatus` is the explicit answer: Received, or Pending (applied for, not in hand yet).
+    # Nothing here is required beyond the feedback, like Passport: the copy and the dates are optional details.
+    pccStatus: Literal["received", "pending"] | None = None
+    pccAppliedDate: Date | None = None
+    pccReceivedDate: Date | None = None
+    file: FileRef | None = None
 
 
 class Passport(StageInput):
@@ -187,8 +196,10 @@ class Ticket(StageInput):
 
 
 SCHEMAS = [Prescreen, Forward, InterviewSchedule, InterviewResult, Offer, Medical,
-           Passport, Advance, VisaArrival, VisaStamping, Ticket]
-FILE_FIELDS = {5: ("file",), 7: ("copy",), 8: ("receipt",), 9: ("file",), 10: ("file",), 11: ("file",)}
+           Pcc, Passport, Advance, VisaArrival, VisaStamping, Ticket]
+FILE_FIELDS = {5: ("file",), 7: ("file",), 8: ("copy",), 9: ("receipt",), 10: ("file",), 11: ("file",), 12: ("file",)}
+# The stage numbers other code names, in one place (stages 8 to 12 were 7 to 11 before migration 0048).
+PCC_STAGE, PASSPORT_STAGE, ADVANCE_STAGE, VISA_STAGE, STAMPING_STAGE = 7, 8, 9, 10, 11
 
 
 def validate_payload(stage: int, data: dict[str, Any], options: StageOptions | None = None) -> dict[str, Any]:
@@ -223,7 +234,7 @@ def _close(reason: str, label: str, outcome: str) -> Evaluation:
 
 
 # The stopping exit of every stage: stage -> choice -> (closure reason, closure label, outcome written on the stage record).
-# Rejected and Declined are available at stages 1-10; each stage adds its own wording; stage 11 only has Not travelling,
+# Rejected and Declined are available at stages 1-11; each stage adds its own wording; stage 12 only has Not travelling,
 # because completing it is the one way to Deployed. Choosing one closes the application like the older negative exits.
 _GENERIC_STOPS = {
     "rejected": ("stage_rejected", "Rejected", "Rejected"),
@@ -234,14 +245,15 @@ _OWN_STOPS: dict[int, dict[str, tuple[str, str, str]]] = {
     3: {"not_possible": ("interview_not_possible", "Interview not possible", "Interview not possible")},
     4: {"rejected": ("interview_rejected", "Rejected at interview", "Rejected")},
     5: {"declined": ("offer_declined", "Offer declined", "Declined")},
-    7: {"not_available": ("passport_not_available", "Passport not available", "Passport not available")},
-    8: {"not_paid": ("advance_not_paid", "Advance not paid", "Not paid")},
-    9: {"visa_rejected": ("visa_rejected", "Visa rejected", "Visa rejected")},
-    10: {"refused": ("visa_stamping_refused", "Visa stamping refused", "Stamping refused")},
-    11: {"not_travelling": ("not_travelling", "Not travelling", "Not travelling")},
+    7: {"not_cleared": ("pcc_not_cleared", "PCC not cleared", "Not cleared")},
+    8: {"not_available": ("passport_not_available", "Passport not available", "Passport not available")},
+    9: {"not_paid": ("advance_not_paid", "Advance not paid", "Not paid")},
+    10: {"visa_rejected": ("visa_rejected", "Visa rejected", "Visa rejected")},
+    11: {"refused": ("visa_stamping_refused", "Visa stamping refused", "Stamping refused")},
+    12: {"not_travelling": ("not_travelling", "Not travelling", "Not travelling")},
 }
 STOP_EXITS: dict[int, dict[str, tuple[str, str, str]]] = {
-    no: ({"not_travelling": _OWN_STOPS[11]["not_travelling"]} if no == TOTAL_STAGES
+    no: ({"not_travelling": _OWN_STOPS[12]["not_travelling"]} if no == TOTAL_STAGES
          else {**_GENERIC_STOPS, **_OWN_STOPS.get(no, {})})
     for no in range(1, TOTAL_STAGES + 1)
 }
@@ -327,25 +339,32 @@ def _stage6(d: dict) -> Evaluation:
 
 
 def _stage7(d: dict) -> Evaluation:
-    return _ok("Collected") if d.get("collected") == "yes" else _ok("Completed manually")
+    # PCC: a Pending certificate is a legitimate thing to record and move on with; nothing is required beyond the feedback.
+    if d.get("pccStatus") == "pending":
+        return _ok("PCC pending")
+    return _ok("Received") if d.get("pccStatus") == "received" else _ok("Completed manually")
 
 
 def _stage8(d: dict) -> Evaluation:
+    return _ok("Collected") if d.get("collected") == "yes" else _ok("Completed manually")
+
+
+def _stage9(d: dict) -> Evaluation:
     # Nothing here is required beyond the feedback: a Pending advance is a legitimate thing to record and move on with.
     if d.get("advanceStatus") == "pending":
         return _ok("Advance pending")
     return _ok("Collected") if d.get("collected") == "yes" else _ok("Completed manually")
 
 
-def _stage9(d: dict) -> Evaluation:
+def _stage10(d: dict) -> Evaluation:
     return _ok("Arrived") if d.get("arrived") == "yes" else _ok("Completed manually")
 
 
-def _stage10(d: dict) -> Evaluation:
+def _stage11(d: dict) -> Evaluation:
     return _ok("Stamped") if d.get("done") == "yes" else _ok("Completed manually")
 
 
-def _stage11(d: dict) -> Evaluation:
+def _stage12(d: dict) -> Evaluation:
     # A candidate becomes deployed only after the actual travel ticket is on
     # file and a travel date has been recorded.  Earlier stages can be moved
     # manually when a recruiter has documented their work, but deployment is
@@ -388,11 +407,12 @@ _DEFINITIONS = [
     ("interview_result", "Interview result", "Record the interview result", True, False, _stage4),
     ("offer_letter", "Offer letter", "Obtain the offer letter", True, False, _stage5),
     ("medical", "Medical", "Complete the medical", True, True, _stage6),
-    ("passport", "Passport", "Collect original passport", True, False, _stage7),
-    ("advance", "Advance payment", "Collect the advance", True, False, _stage8),
-    ("visa_arrival", "Visa arrival + Google review", "Follow up the visa", True, False, _stage9),
-    ("visa_stamping", "Visa stamping", "Get the visa stamped", True, False, _stage10),
-    ("air_ticket", "Air ticket", "Book the air ticket", True, False, _stage11),
+    ("pcc", "PCC", "Collect the police clearance (PCC)", True, False, _stage7),
+    ("passport", "Passport", "Collect original passport", True, False, _stage8),
+    ("advance", "Advance payment", "Collect the advance", True, False, _stage9),
+    ("visa_arrival", "Visa arrival + Google review", "Follow up the visa", True, False, _stage10),
+    ("visa_stamping", "Visa stamping", "Get the visa stamped", True, False, _stage11),
+    ("air_ticket", "Air ticket", "Book the air ticket", True, False, _stage12),
 ]
 STAGES = [StageDef(no, key, title, task_title, closer, repeatable, _validated(no, evaluate))
           for no, (key, title, task_title, closer, repeatable, evaluate) in enumerate(_DEFINITIONS, 1)]

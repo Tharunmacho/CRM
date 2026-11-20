@@ -280,6 +280,7 @@ export type ClosureReason =
   | 'visa_rejected'
   | 'visa_stamping_refused'
   | 'not_travelling'
+  | 'pcc_not_cleared'
 
 export interface StageRecord {
   id?: string

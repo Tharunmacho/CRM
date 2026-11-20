@@ -5,11 +5,11 @@ import { STAGES } from '@/shared/workflow/stages'
 import { routeStates, routeSummary, STATE_TEXT, upcomingText, type RouteNodeState, type RouteStageDef } from './route-logic'
 
 /**
- * RouteTrack: the 11-stage placement route as a horizontal line of nodes.
+ * RouteTrack: the 12-stage placement route as a horizontal line of nodes.
  *
  * Props
  *  - stages?    { no, title }[]  default: the real STAGES list (src/shared/workflow/stages.ts)
- *  - current?   number           stage number the application is at (1..11); omit for "not started" / "finished"
+ *  - current?   number           stage number the application is at (1..12); omit for "not started" / "finished"
  *  - completed? number | number[] a count n = stages 1..n are done; an array = exactly those stage numbers; default = every stage before `current`
  *  - closed?    boolean | number true = the current stage ended the application; a number = the stage it closed at (shows a cross node)
  *  - size       'xs' | 'sm' | 'md' | 'lg'   xs/sm are small fixed-width strips for rows; md/lg fill their container

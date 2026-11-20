@@ -292,6 +292,7 @@ export const CLOSURE_LABEL: Record<string, string> = {
   stage_rejected: 'Rejected', stage_declined: 'Candidate declined', interview_not_possible: 'Interview not possible',
   passport_not_available: 'Passport not available', advance_not_paid: 'Advance not paid', visa_rejected: 'Visa rejected',
   visa_stamping_refused: 'Visa stamping refused', not_travelling: 'Not travelling',
+  pcc_not_cleared: 'PCC not cleared',
 }
 
 /** The "x of y" text used for hours and tasks cells. */

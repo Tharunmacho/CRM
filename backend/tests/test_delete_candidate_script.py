@@ -332,7 +332,7 @@ def test_a_filled_order_that_the_removal_leaves_with_a_free_opening_opens_again(
     seed(env)
     db = env.db
     candidate(db, "flown", "CND-09999")
-    application(db, "a-flown", "flown", "o36", m.ApplicationStatus.deployed, stage=11)
+    application(db, "a-flown", "flown", "o36", m.ApplicationStatus.deployed, stage=12)
     db.get(m.Order, "o36").status = m.OrderStatus.filled      # filled while 1 of 2 are deployed: the app reopens it on a withdraw
     db.commit()
     code, _ = run(env, "--candidate", REF, "--execute", typed=PHRASE)
@@ -350,7 +350,7 @@ def test_a_genuinely_full_order_stays_filled(env, capsys):
     db = env.db
     for key in ("f1", "f2"):
         candidate(db, key, f"CND-0999{key[1]}")
-        application(db, f"a-{key}", key, "o36", m.ApplicationStatus.deployed, stage=11)
+        application(db, f"a-{key}", key, "o36", m.ApplicationStatus.deployed, stage=12)
     db.get(m.Order, "o36").status = m.OrderStatus.filled
     db.commit()
     assert run(env, "--candidate", REF, "--execute", typed=PHRASE)[0] == 0
@@ -360,7 +360,7 @@ def test_a_genuinely_full_order_stays_filled(env, capsys):
 
 def test_deployed_candidate_is_refused(env, capsys):
     seed(env)
-    application(env.db, "a-dep", "target", "o37", m.ApplicationStatus.deployed, stage=11)
+    application(env.db, "a-dep", "target", "o37", m.ApplicationStatus.deployed, stage=12)
     env.db.commit()
     before = snapshot(env)
     for flags in ((), ("--execute",)):

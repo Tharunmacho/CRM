@@ -57,15 +57,15 @@ def env(schema_database):
                                   care_id=f"CI-{number:03d}", traveller_id="CI-T-001" if number == 1 else None)
             db.add_all([order, candidate])
             db.flush()
-            application = Application(id=f"a{number}", candidate_id=candidate.id, order_id=order.id, owner_id=recruiter, current_stage=11,
+            application = Application(id=f"a{number}", candidate_id=candidate.id, order_id=order.id, owner_id=recruiter, current_stage=12,
                                       status=ApplicationStatus(status))
             db.add(application)
             db.flush()
             if extra is not None:
                 data = {**({"travelDate": when} if when else {}), **extra}
                 # an earlier attempt of the ticket stage must not be read: only the latest attempt counts
-                db.add(ApplicationStage(application_id=application.id, stage=11, attempt=1, data={"travelDate": "2001-01-01"}, completed_by=recruiter))
-                db.add(ApplicationStage(application_id=application.id, stage=11, attempt=2, data=data, completed_by=recruiter))
+                db.add(ApplicationStage(application_id=application.id, stage=12, attempt=1, data={"travelDate": "2001-01-01"}, completed_by=recruiter))
+                db.add(ApplicationStage(application_id=application.id, stage=12, attempt=2, data=data, completed_by=recruiter))
         # Akash has all eleven checklist documents. Arun has four required documents and retained optional evidence;
         # an application-stage file does not fill a candidate slot.
         for slot, _label in required_for_deployment():
@@ -185,7 +185,7 @@ def test_a_reopened_ticket_is_no_longer_travelled(env):
 
 def test_an_active_booking_does_not_count_as_confirmed_travel(env):
     with env.sessions() as db:
-        db.add(ApplicationStage(application_id="a7", stage=11, attempt=1, data={"travelDate": "2026-05-01"}, completed_by="staff"))
+        db.add(ApplicationStage(application_id="a7", stage=12, attempt=1, data={"travelDate": "2026-05-01"}, completed_by="staff"))
         db.commit()
     assert "Shijo" not in names(get(env))
 

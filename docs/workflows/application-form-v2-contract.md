@@ -60,13 +60,13 @@ Answers the whole form (same as the other PUTs). Rules:
 | `aadhaar` | Aadhaar | yes | optional; front/back and additional files retained |
 | `medical` | Medical | no | from stage 6 |
 | `signed_offer` | Signed offer | no | from stage 5 (Offer letter) |
-| `pcc` | Police clearance certificate (PCC) | no | from stage 7 (Passport) |
-| `visa` | Visa | no | from stage 9 (Visa arrival) |
-| `air_ticket` | Air ticket | no | from stage 11 |
-| `undertaking_letter` | Undertaking letter | no | from stage 11, before deployment |
-| `emigration` | Emigration | no | from stage 10, after visa |
-| `insurance` | Insurance | no | from stage 11, before deployment |
-| `invoice` | Invoice | no | from stage 11, before deployment. **Admin only**: for a recruiter or manager the slot is absent from `documents` and `documentOrder`, and from the checklist counts below |
+| `pcc` | Police clearance certificate (PCC) | no | from stage 7 (PCC) |
+| `visa` | Visa | no | from stage 10 (Visa arrival) |
+| `air_ticket` | Air ticket | no | from stage 12 |
+| `undertaking_letter` | Undertaking letter | no | from stage 12, before deployment |
+| `emigration` | Emigration | no | from stage 11, after visa |
+| `insurance` | Insurance | no | from stage 12, before deployment |
+| `invoice` | Invoice | no | from stage 12, before deployment. **Admin only**: for a recruiter or manager the slot is absent from `documents` and `documentOrder`, and from the checklist counts below |
 | `photo` | Photo | no | optional; existing uploads retained |
 | `education_certificate` | Education certificate | no | optional; existing uploads retained |
 | `experience_certificate` | Experience certificate | no | optional (never counted as missing) |
@@ -90,7 +90,7 @@ The eleven non-optional slots form the management document checklist (ten for a 
 The checklist reports missing evidence independently of candidate status. Uploads may be added before their checklist stage. The optional application
 form slot retains uploaded evidence: printing the editable form alone does not mark it received. The `invoice_generated` tracking key is
 retained for compatibility, labelled **Invoice**, and reflects the latest invoice attachment and its upload time, never payment status.
-It does not add a workflow stage or change the eleven-stage progress denominator. It is returned to the admin only; for a recruiter or manager the row does not exist
+It does not add a workflow stage or change the twelve-stage progress denominator. It is returned to the admin only; for a recruiter or manager the row does not exist
 (the form has twelve tracking rows).
 Optional documents never lower it and are listed under `completeness.optionalDocuments: [{slot,label,uploaded}]`. With no application the
 total is 18 (16 fields + resume and passport); each required-by-stage document adds one.
@@ -99,7 +99,7 @@ The candidate profile (`GET /api/candidates/{id}`) adds the form-only slots afte
 seven older keys (labels now "Passport" and "Photo").
 
 **Manual stages and independent checklist (2026-11-12).** The owner's latest instruction removes document gates for every stage,
-including final deployment. The form places all eleven stages next to Recruiter. Recruiters select a stage to inspect its saved history;
+including final deployment. The form places all twelve stages next to Recruiter. Recruiters select a stage to inspect its saved history;
 the current stage moves only after written feedback and manual confirmation. `POST /api/applications/{id}/complete` requires nonblank
 `data.feedback` (up to 10,000 characters), saving feedback, actor/time, stage outcome and movement atomically. A feedback-only move records
 `Completed manually`, without inventing a result, payment or date. Explicit negative/retest decisions retain their existing behavior.
@@ -108,7 +108,7 @@ An unknown travel date remains unknown. Reopening preserves earlier feedback in 
 requires fresh feedback. Document uploads do not advance stages. See [stage rules](14-stages-one-to-five.md).
 
 `application_form.missing_required_documents(db, candidate_id)` still computes the inspection checklist. The payload retains its existing shape:
-`"deployment": { "ready": bool, "missing": [ { "slot": "signed_offer", "label": "Signed offer" } ] }` (always computed against stage 11,
+`"deployment": { "ready": bool, "missing": [ { "slot": "signed_offer", "label": "Signed offer" } ] }` (always computed against stage 12,
 whatever stage the application is on; `missing` is in contract order). Here `ready` means the document checklist is complete, not permission
 to advance or deploy. Missing evidence remains visible even after manual deployment.
 

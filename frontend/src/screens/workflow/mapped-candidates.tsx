@@ -199,7 +199,7 @@ export default function MappedCandidatesPage() {
       description={
         hasFilters ? 'Try another search or filter, or clear them to see everything.'
           : tab === 'active' ? 'Match candidates to an order from the Jobs page and they will show up here.'
-            : tab === 'deployed' ? 'A candidate shows up here once stage 11 is done.'
+            : tab === 'deployed' ? 'A candidate shows up here once stage 12 is done.'
               : 'Matches that ended at prescreening, interview or medical show up here.'
       }
       action={hasFilters ? <Button onClick={clearFilters}>Clear filters</Button> : undefined}
@@ -225,7 +225,7 @@ export default function MappedCandidatesPage() {
     <div className="db mc">
       <PageHeader
         title="Matched candidates"
-        description="Candidates who are matched to an order. Open one to work on its 11 stages, from prescreening to deployment."
+        description="Candidates who are matched to an order. Open one to work on its 12 stages, from prescreening to deployment."
       />
 
       <KpiCards

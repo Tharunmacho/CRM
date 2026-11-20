@@ -238,7 +238,7 @@ test('the Candidate table: Recruiter 200, Done / Pending / Overdue 84, No order 
   const html = render(views.CandidateMonitoringView)
   const table = html.slice(html.indexOf('<table'))
   const widths = [...table.matchAll(/<col style="width:([\d.]+)%/g)].map(m => Number(m[1]))
-  const px = [200, 84, 84, 84, 92, ...Array(11).fill(56), 84]
+  const px = [200, 84, 84, 84, 92, ...Array(12).fill(56), 84]
   const total = px.reduce((a, b) => a + b, 0)
   assert.equal(widths.length, px.length)
   widths.forEach((w, i) => assert.ok(Math.abs(w - (px[i] / total) * 100) < 0.01, 'column ' + i))
@@ -267,8 +267,8 @@ test('headings are bold in the normal text colour: every report table heading an
 test('Candidate monitoring: candidates and tasks only; the stage names are the header hover texts, not a legend line', () => {
   const html = render(views.CandidateMonitoringView)
   assert.deepEqual(tileLabels(html), ['Candidates in progress', 'Tasks done', 'Tasks pending', 'Tasks overdue'])
-  assert.deepEqual(headings(html), ['Recruiter', 'Done', 'Pending', 'Overdue', 'No order', ...Array.from({ length: 11 }, (_, i) => String(i + 1)), 'Total'])
-  assert.deepEqual(personRows(html), [17, 17, 17])
+  assert.deepEqual(headings(html), ['Recruiter', 'Done', 'Pending', 'Overdue', 'No order', ...Array.from({ length: 12 }, (_, i) => String(i + 1)), 'Total'])
+  assert.deepEqual(personRows(html), [18, 18, 18])
   const t = text(html)
   assert.match(t, /Candidates in progress 36/)
   assert.ok(!/Stages:|not on an order yet|1 Prescreening|select a number/.test(t), 'no legend line, no captions')

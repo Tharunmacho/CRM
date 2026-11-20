@@ -4,7 +4,7 @@ import { CountryFlag } from '@/shared/ui/country-flag'
 import { initials } from '@/shared/lib/format'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 
-/** Care India's own touches for the jobs screens: per-name avatars, country flags and the 11-stage tracker. */
+/** Care India's own touches for the jobs screens: per-name avatars, country flags and the 12-stage tracker. */
 
 const HUES = [222, 268, 160, 28, 340, 190]
 export const hueOf = (name: string) => HUES[[...name].reduce((total, character) => total + character.charCodeAt(0), 0) % HUES.length]
@@ -30,7 +30,7 @@ export function Place({ city, country, empty = 'Place not added' }: { city?: str
 }
 
 /**
- * Where an application stands among the eleven stages: one segment per stage, the stages passed
+ * Where an application stands among the twelve stages: one segment per stage, the stages passed
  * filled, the current one marked, with its number and name beside it.
  */
 export function StageMini({ no, closed }: { no: number; closed?: boolean }) {

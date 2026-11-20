@@ -22,6 +22,8 @@ Keep credentials in server secrets. Confirm which database an environment uses b
 
 Alembic records which revisions have already been applied. Running `upgrade head` applies pending revisions, then becomes a no-op when the database is current. It does not migrate every record on every browser refresh. A new schema-changing release needs a coordinated upgrade; a normal frontend refresh or a release with no schema change does not need a fresh migration.
 
+**Migration `0048_pcc_stage` renumbers data, not just the schema.** It makes PCC stage 7 and moves every stored stage number from 7 up by one (stage records, current stage, tasks, daily-work items, notes, stage document slots, audit entries and notices), so the release that ships it must be deployed together with the migration: code from before it would read stage 8 as the advance and stage 11 as the ticket. Run it once on the shared database (it is one transaction of set-based statements, takes a moment on a database of this size and is a no-op on an empty one), take a backup first, and do not leave an older installation sharing that database afterwards. `alembic downgrade 0047_agency_active_flag` merges PCC back and shifts down (see [stages six to twelve](15-stages-six-to-twelve.md#stage-7-pcc-and-the-twelve-stage-migration)).
+
 ## Startup paths and database readiness
 
 | Startup path | Actual behavior |

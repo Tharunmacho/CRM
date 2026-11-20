@@ -1,9 +1,10 @@
 import type { ClosureReason } from '@/shared/model/types'
 
 /**
- * The eleven stages are configuration, not code. The modal renders from this file,
+ * The twelve stages are configuration, not code. The modal renders from this file,
  * completion is validated against it, and the task engine reads the next task title
- * from it. Adding a twelfth stage is an entry here, not a refactor.
+ * from it. Adding a stage is an entry here (PCC, stage 7, was added that way); the stage
+ * numbers other code names are the constants below.
  */
 
 export type FieldType =
@@ -107,8 +108,8 @@ const manual = (outcome = 'Completed manually'): StageEvaluation => ({ canComple
 
 /**
  * The stopping exit of every stage (mirrors STOP_EXITS in backend/app/domain/stages.py): choice -> closure reason, closure label
- * and the outcome written on the stage record. Rejected and Declined are offered at stages 1-10, each stage adds its own wording,
- * and stage 11 only has Not travelling (completing it is the one way to Deployed). An explicit stop wins over the stage's answers.
+ * and the outcome written on the stage record. Rejected and Declined are offered at stages 1-11, each stage adds its own wording,
+ * and stage 12 only has Not travelling (completing it is the one way to Deployed). An explicit stop wins over the stage's answers.
  */
 type StopExit = { value: string; label: string; reason: ClosureReason; closure: string; outcome: string }
 const GENERIC_STOPS: StopExit[] = [
@@ -120,14 +121,15 @@ const OWN_STOPS: Record<number, StopExit[]> = {
   3: [{ value: 'not_possible', label: 'Interview not possible', reason: 'interview_not_possible', closure: 'Interview not possible', outcome: 'Interview not possible' }],
   4: [{ value: 'rejected', label: 'Rejected', reason: 'interview_rejected', closure: 'Rejected at interview', outcome: 'Rejected' }],
   5: [{ value: 'declined', label: 'Declined', reason: 'offer_declined', closure: 'Offer declined', outcome: 'Declined' }],
-  7: [{ value: 'not_available', label: 'Passport not available', reason: 'passport_not_available', closure: 'Passport not available', outcome: 'Passport not available' }],
-  8: [{ value: 'not_paid', label: 'Not paid', reason: 'advance_not_paid', closure: 'Advance not paid', outcome: 'Not paid' }],
-  9: [{ value: 'visa_rejected', label: 'Visa rejected', reason: 'visa_rejected', closure: 'Visa rejected', outcome: 'Visa rejected' }],
-  10: [{ value: 'refused', label: 'Visa stamping refused', reason: 'visa_stamping_refused', closure: 'Visa stamping refused', outcome: 'Stamping refused' }],
-  11: [{ value: 'not_travelling', label: 'Not travelling', reason: 'not_travelling', closure: 'Not travelling', outcome: 'Not travelling' }],
+  7: [{ value: 'not_cleared', label: 'PCC not cleared', reason: 'pcc_not_cleared', closure: 'PCC not cleared', outcome: 'Not cleared' }],
+  8: [{ value: 'not_available', label: 'Passport not available', reason: 'passport_not_available', closure: 'Passport not available', outcome: 'Passport not available' }],
+  9: [{ value: 'not_paid', label: 'Not paid', reason: 'advance_not_paid', closure: 'Advance not paid', outcome: 'Not paid' }],
+  10: [{ value: 'visa_rejected', label: 'Visa rejected', reason: 'visa_rejected', closure: 'Visa rejected', outcome: 'Visa rejected' }],
+  11: [{ value: 'refused', label: 'Visa stamping refused', reason: 'visa_stamping_refused', closure: 'Visa stamping refused', outcome: 'Stamping refused' }],
+  12: [{ value: 'not_travelling', label: 'Not travelling', reason: 'not_travelling', closure: 'Not travelling', outcome: 'Not travelling' }],
 }
 export const stopExits = (no: number): StopExit[] => {
-  if (no === 11) return OWN_STOPS[11]
+  if (no === 12) return OWN_STOPS[12]
   const own = OWN_STOPS[no] ?? []
   return [...GENERIC_STOPS.map((generic) => own.find((item) => item.value === generic.value) ?? generic), ...own.filter((item) => !GENERIC_STOPS.some((generic) => generic.value === item.value))]
 }
@@ -422,6 +424,52 @@ export const STAGES: StageDef[] = [
   },
   {
     no: 7,
+    key: 'pcc',
+    title: 'PCC',
+    taskTitle: 'Collect the police clearance (PCC)',
+    summary: 'Apply for the police clearance certificate and record when it is in hand.',
+    closer: false,
+    fields: [
+      // Like the advance, the stage keeps one explicit answer: Received, or Pending (applied for, not in hand yet). Nothing else is required.
+      {
+        name: 'pccStatus',
+        required: true,
+        label: 'PCC status',
+        type: 'radio',
+        options: [
+          { value: 'received', label: 'Received' },
+          { value: 'pending', label: 'Pending' },
+        ],
+      },
+      {
+        name: 'pccAppliedDate',
+        label: 'Date applied',
+        type: 'date',
+        width: 'half',
+        showWhen: { field: 'pccStatus', in: ['received', 'pending'] },
+      },
+      {
+        name: 'pccReceivedDate',
+        label: 'Date received',
+        type: 'date',
+        width: 'half',
+        showWhen: { field: 'pccStatus', in: ['received'] },
+      },
+      {
+        name: 'file',
+        label: 'PCC copy',
+        type: 'file',
+        showWhen: { field: 'pccStatus', in: ['received'] },
+      },
+    ],
+    evaluate: (d) => {
+      // Nothing is required beyond the feedback: a Pending certificate is recorded and the candidate moves on (mirrors _stage7).
+      if (d.pccStatus === 'pending') return manual('PCC pending')
+      return manual(d.pccStatus === 'received' ? 'Received' : undefined)
+    },
+  },
+  {
+    no: 8,
     key: 'passport',
     title: 'Passport',
     taskTitle: 'Collect original passport',
@@ -456,7 +504,7 @@ export const STAGES: StageDef[] = [
     },
   },
   {
-    no: 8,
+    no: 9,
     key: 'advance',
     title: 'Advance payment',
     taskTitle: 'Collect the advance',
@@ -540,13 +588,13 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      // Nothing is required beyond the feedback: a Pending advance is recorded and the candidate moves on (mirrors _stage8).
+      // Nothing is required beyond the feedback: a Pending advance is recorded and the candidate moves on (mirrors _stage9).
       if (d.advanceStatus === 'pending') return manual('Advance pending')
       return manual(d.advanceStatus === 'collected' || d.collected === 'yes' ? 'Collected' : undefined)
     },
   },
   {
-    no: 9,
+    no: 10,
     key: 'visa_arrival',
     title: 'Visa arrival + Google review',
     taskTitle: 'Follow up the visa',
@@ -574,7 +622,7 @@ export const STAGES: StageDef[] = [
     },
   },
   {
-    no: 10,
+    no: 11,
     key: 'visa_stamping',
     title: 'Visa stamping',
     taskTitle: 'Get the visa stamped',
@@ -602,7 +650,7 @@ export const STAGES: StageDef[] = [
     },
   },
   {
-    no: 11,
+    no: 12,
     key: 'air_ticket',
     title: 'Air ticket',
     taskTitle: 'Book the air ticket',
@@ -665,8 +713,8 @@ for (const definition of STAGES) {
       if (field.type === 'checkbox' && typeof value !== 'boolean') invalid.push(`${field.label}: choose yes or no`)
       if (field.type === 'number' && (typeof value === 'boolean' || !Number.isFinite(Number(value)) || Number(value) <= 0 || Number(value) >= 10_000_000_000 || Math.abs(Number(value) * 100 - Math.round(Number(value) * 100)) > 0.000001)) invalid.push(`${field.label}: enter a positive amount with at most two decimal places`)
     }
-    if (definition.no === 8 && data.serviceChargeTotal != null && data.serviceChargeTotal !== '' && data.amount != null && data.amount !== '' && Number(data.amount) > Number(data.serviceChargeTotal)) invalid.push('Total service charge cannot be less than the advance')
-    if (definition.no === 6 && data.result === 'unfit' && data.reapplying === 'yes' && data.retestDate && data.appliedDate && data.retestDate < data.appliedDate) invalid.push('New medical date must be on or after the previous medical date')
+    if (definition.no === ADVANCE_STAGE && data.serviceChargeTotal != null && data.serviceChargeTotal !== '' && data.amount != null && data.amount !== '' && Number(data.amount) > Number(data.serviceChargeTotal)) invalid.push('Total service charge cannot be less than the advance')
+    if (definition.no === MEDICAL_STAGE && data.result === 'unfit' && data.reapplying === 'yes' && data.retestDate && data.appliedDate && data.retestDate < data.appliedDate) invalid.push('New medical date must be on or after the previous medical date')
     if (!invalid.length && data.stop != null && data.stop !== '') {
       const exit = stopExits(definition.no).find((item) => item.value === data.stop)
       return exit
@@ -681,6 +729,14 @@ for (const definition of STAGES) {
 
 export const stageByNo = (no: number) => STAGES[no - 1]
 export const TOTAL_STAGES = STAGES.length
+
+/** The stage numbers other code names (stages 8 to 12 were 7 to 11 before PCC became stage 7). */
+export const MEDICAL_STAGE = 6
+export const PCC_STAGE = 7
+export const PASSPORT_STAGE = 8
+export const ADVANCE_STAGE = 9
+export const VISA_STAGE = 10
+export const STAMPING_STAGE = 11
 
 /** Route filters may be edited or linked from outside the application. */
 export function parseStageNumber(value: string | null): number | null {
@@ -706,6 +762,7 @@ export const closureLabels: Record<ClosureReason, string> = {
   visa_rejected: 'Visa rejected',
   visa_stamping_refused: 'Visa stamping refused',
   not_travelling: 'Not travelling',
+  pcc_not_cleared: 'PCC not cleared',
 }
 
 /** Whether a field should render given the values recorded so far. */

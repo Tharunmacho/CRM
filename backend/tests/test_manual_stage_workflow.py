@@ -35,10 +35,10 @@ POSITIVE = {4: {"result": "selected"}, 5: {"result": "agreed"}, 6: {"result": "f
 POSITIVE_OUTCOME = {4: "Selected", 5: "Agreed", 6: "Fit"}
 
 
-def test_first_ten_stages_accept_feedback_only_but_deployment_requires_ticket_and_date(workflow):
+def test_first_eleven_stages_accept_feedback_only_but_deployment_requires_ticket_and_date(workflow):
     env = workflow
     app_id = mapped(env)
-    for stage in range(1, 11):
+    for stage in range(1, 12):
         lock = version(env, app_id)
         body = {"lock_version": lock, "data": {"feedback": f"  Stage {stage}: recruiter approved this move.  ", **POSITIVE.get(stage, {})}}
         if stage in POSITIVE:
@@ -49,11 +49,11 @@ def test_first_ten_stages_accept_feedback_only_but_deployment_requires_ticket_an
             assert env.client.get(f"/api/applications/{app_id}/draft").json()["lockVersion"] == lock
         response = env.client.post(f"/api/applications/{app_id}/complete", json=body)
         assert response.status_code == 200, response.text
-        assert response.json()["currentStage"] == min(stage + 1, 11)
+        assert response.json()["currentStage"] == min(stage + 1, 12)
         # A duplicate submit cannot complete the next stage using the same feedback.
         repeated = env.client.post(f"/api/applications/{app_id}/complete", json=body)
         assert repeated.status_code == 409
-        if stage < 11:
+        if stage < 12:
             next_without_feedback = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": version(env, app_id)})
             assert next_without_feedback.status_code == 422
     # A final-stage note is not evidence of travel.  The actual ticket and
@@ -67,11 +67,11 @@ def test_first_ten_stages_accept_feedback_only_but_deployment_requires_ticket_an
     with env.sessions() as db:
         app = db.get(Application, app_id)
         assert app.status == ApplicationStatus.active
-        assert app.current_stage == 11
+        assert app.current_stage == 12
         assert db.get(Candidate, "candidate").status == CandidateStatus.in_process
         assert not db.scalar(select(Attachment.id))
         records = list(db.scalars(select(ApplicationStage).where(ApplicationStage.application_id == app_id).order_by(ApplicationStage.stage)))
-        assert len(records) == 10
+        assert len(records) == 11      # Medical (6) and PCC (7) each have their own record
         for stage, row in enumerate(records, 1):
             assert row.data["feedback"] == f"Stage {stage}: recruiter approved this move."
             assert row.outcome == POSITIVE_OUTCOME.get(stage, "Completed manually") and row.completed_by == "staff"

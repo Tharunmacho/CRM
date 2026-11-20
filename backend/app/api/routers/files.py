@@ -68,13 +68,14 @@ CONTENT_TYPES = {
 # A workflow-stage upload is evidence for the candidate too.  Keep a candidate
 # document record that points to the *same immutable bytes*, so a recruiter can
 # always find the file in the candidate's Documents section without uploading
-# it again.  Stage 7 already uses the candidate passport directly and stage 8
+# it again.  Stage 8 already uses the candidate passport directly and stage 9
 # has no corresponding candidate-document slot.
 _STAGE_FILE_DOCUMENT_SLOTS = {
     "stage_5_file": "signed_offer",
-    "stage_9_file": "visa",
-    "stage_10_file": "visa_stamping",
-    "stage_11_file": "air_ticket",
+    "stage_7_file": "pcc",
+    "stage_10_file": "visa",
+    "stage_11_file": "visa_stamping",
+    "stage_12_file": "air_ticket",
 }
 
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -398,7 +399,7 @@ def upload(
             ) from exc
         raise
 
-    if (entity_type == "candidate" and slot == "air_ticket") or (entity_type == "application" and slot == "stage_11_file"):
+    if (entity_type == "candidate" and slot == "air_ticket") or (entity_type == "application" and slot == "stage_12_file"):
         # The ticket is already committed. Invoice generation has its own durable pending request,
         # so a PDF/storage problem cannot erase a successful ticket upload or advance a stage.
         try:

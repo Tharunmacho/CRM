@@ -159,9 +159,9 @@ refetches (section 8). The explicit extraction POST answers `202` with `{form,qu
 ```jsonc
 { "key": "prescreening", "label": "Pre-screening",          // docx wording
   "systemLabel": "Prescreening",                              // the CRM stage title, null for untracked rows
-  "stage": 1,                                                 // 1..11, null when the CRM has no such stage
+  "stage": 1,                                                 // 1..12, null when the CRM has no such stage
   "extra": false,                                             // true for CRM stages that the docx does not list
-  "tracked": true,                                            // false for PCC / Invoice Generated
+  "tracked": true,                                            // false for Invoice Generated
   "status": "not_started|in_progress|completed|failed|not_applicable",
   "checked": true,                                            // status === "completed" (the docx checkbox)
   "date": "YYYY-MM-DD|null",                                  // completion date in the agency time zone
@@ -197,16 +197,16 @@ somewhat_interested, nextFollowUpDate. They are not part of `percent`.
 | (extra) Interview scheduling | `interview_scheduling` | 3 |
 | (extra) Interview result / selection | `interview_result` | 4 |
 | Offer Letter | `offer_letter` | 5 Offer letter |
-| PCC | `pcc` | none: the CRM has no police-clearance stage -> `tracked:false`, `not_applicable` |
 | Medical | `medical` | 6 Medical |
-| (extra) Passport collection | `passport_collection` | 7 Passport |
-| (extra) Advance payment | `advance_payment` | 8 Advance payment |
-| Visa | `visa` | 9 Visa arrival + Google review |
-| Visa Stamping | `visa_stamping` | 10 Visa stamping |
-| Ticket | `ticket` | 11 Air ticket |
+| PCC | `pcc` | 7 PCC (its own stage since migration 0048; before that the CRM had no police-clearance stage) |
+| (extra) Passport collection | `passport_collection` | 8 Passport |
+| (extra) Advance payment | `advance_payment` | 9 Advance payment |
+| Visa | `visa` | 10 Visa arrival + Google review |
+| Visa Stamping | `visa_stamping` | 11 Visa stamping |
+| Ticket | `ticket` | 12 Air ticket |
 | Invoice Generated | `invoice_generated` | none: invoicing is not a CRM stage -> `tracked:false`, `not_applicable`. Admin only: omitted for recruiters and managers (see [candidate invoices](candidate-invoices.md)) |
 
-Rows come back in exactly this order (13 rows). Extra rows should be shown after the docx rows' styling but in this
+Rows come back in exactly this order, stage order (13 rows; the PCC row follows Medical). Extra rows should be shown after the docx rows' styling but in this
 order, labelled so the recruiter sees they are additional CRM stages.
 
 ## 4. PUT /api/candidates/{id}/application-form

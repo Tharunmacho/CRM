@@ -36,7 +36,7 @@ test('the fixture keeps the server invariants the tables rely on', () => {
   assert.equal(report.staff.reduce((s, p) => s + p.leads.neverContacted, 0) + un.neverContacted, report.leadSheet.neverContacted)
   assert.equal(report.staff.reduce((s, p) => s + p.leads.assignedInPeriod, 0), report.leadSheet.assignedInPeriod)
   for (const item of report.stages.perStaff) assert.equal(Object.values(item.counts).reduce((a, b) => a + b, 0), item.total)
-  assert.deepEqual(report.stages.totals.map(s => s.no), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+  assert.deepEqual(report.stages.totals.map(s => s.no), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
   assert.deepEqual(report.funnel.map(f => f.key), ['prescreened', 'forwarded', 'shortlisted', 'interviews', 'offers', 'visas', 'travelled'])
 })
 

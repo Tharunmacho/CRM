@@ -36,7 +36,7 @@ const v2 = (patch = {}) => base({
   documentOrder: DOCUMENT_SLOT_KEYS,
   documents: Object.fromEntries(DOCUMENT_SLOT_KEYS.map((key) => [key, slot(key, {
     required: ['resume', 'passport', 'signed_offer'].includes(key),
-    requiredFromStage: { signed_offer: 5, medical: 6, pcc: 7, visa: 9, emigration: 10, air_ticket: 11, undertaking_letter: 11, insurance: 11, invoice: 11 }[key] ?? null,
+    requiredFromStage: { signed_offer: 5, medical: 6, pcc: 7, visa: 10, emigration: 11, air_ticket: 12, undertaking_letter: 12, insurance: 12, invoice: 12 }[key] ?? null,
     multiple: key === 'other',
   })])),
   assignment: {
@@ -489,7 +489,7 @@ test('the shared labels always win: the photo is "Photo" even when an older serv
 /* ------------------------------------------------------------------ Process tracking: the stages are the part that locks */
 const stagesSource = await readFile(new URL('../src/features/application-form/process-stages.ts', import.meta.url), 'utf8')
 const stages = await import(moduleUrl(stagesSource.replace("'./form-model'", `'${modelUrl}'`).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`)))
-const trackingRows = (done, current) => Array.from({ length: 11 }, (_, index) => ({
+const trackingRows = (done, current) => Array.from({ length: 12 }, (_, index) => ({
   key: `s${index + 1}`, label: `Stage ${index + 1}`, systemLabel: '', stage: index + 1, extra: false, tracked: true,
   status: index + 1 <= done ? 'completed' : index + 1 === current ? 'in_progress' : 'not_started',
   date: index + 1 <= done ? `2026-10-${String(index + 1).padStart(2, '0')}` : '', completedBy: index + 1 <= done ? 'Ravi' : '', outcome: '', attempt: 1, note: '', current: index + 1 === current,
@@ -499,16 +499,16 @@ const stageForm = (stage, extra = {}) => {
   return { ...form, tracking: { summary: { ...form.tracking.summary, currentStage: stage }, rows: trackingRows(stage - 1, stage) }, ...extra }
 }
 
-test('with no job all eleven stages are locked and nothing can be opened', () => {
+test('with no job all twelve stages are locked and nothing can be opened', () => {
   const form = { ...model.normalizeForm(v2()), application: null }
   const list = stages.stageRows({ ...form, tracking: { summary: {}, rows: [] } }, true)
-  assert.equal(list.length, 11)
+  assert.equal(list.length, 12)
   assert.ok(list.every((row) => row.key === 'locked' && row.icon === 'lock' && row.chip === 'Locked' && !row.openable && row.date === ''))
   assert.equal(stages.PROCESS_EMPTY_LINE, 'Choose a job at the top to start the process.')
 })
 
 test('the lock opens by itself as the candidate reaches each stage: done, current, then locked', () => {
-  for (const stage of [1, 5, 9, 11]) {
+  for (const stage of [1, 5, 7, 10, 12]) {
     const list = stages.stageRows(stageForm(stage), true)
     list.forEach((row) => {
       const expected = row.stage < stage ? 'done' : row.stage === stage ? 'current' : 'locked'
@@ -517,7 +517,7 @@ test('the lock opens by itself as the candidate reaches each stage: done, curren
     const now = list[stage - 1]
     assert.deepEqual([now.icon, now.chip], ['unlock', 'In progress'])
     if (stage > 1) assert.deepEqual([list[0].icon, list[0].chip, list[0].date], ['check', 'Completed', '2026-10-01'])
-    if (stage < 11) assert.deepEqual([list[10].icon, list[10].chip], ['lock', 'Locked'])
+    if (stage < 12) assert.deepEqual([list[11].icon, list[11].chip], ['lock', 'Locked'])
   }
   // The same candidate a moment later, one stage on: the next row opens, nothing else changes.
   assert.equal(stages.stageRows(stageForm(5), true)[5].key, 'locked')
@@ -539,18 +539,18 @@ test('each stage lists the documents that belong to it, with their live status',
   const docs = (stage) => list[stage - 1].documents.map((item) => [item.label, item.uploaded])
   assert.deepEqual(docs(5), [['Signed offer', false]])
   assert.deepEqual(docs(6), [['Medical', true]])
-  assert.deepEqual(docs(7), [['Police clearance certificate (PCC)', false]])
-  assert.deepEqual(docs(9), [['Visa', false]])
-  assert.deepEqual(docs(10), [['Emigration', false]])
-  assert.deepEqual(docs(11), [['Air ticket', false], ['Undertaking letter', false], ['Insurance', false], ['Invoice', false]])
-  for (const stage of [1, 2, 3, 4, 8]) assert.deepEqual(docs(stage), [])
+  assert.deepEqual(docs(7), [['Police clearance certificate (PCC)', false]])   // the PCC document belongs to the PCC stage
+  assert.deepEqual(docs(10), [['Visa', false]])
+  assert.deepEqual(docs(11), [['Emigration', false]])
+  assert.deepEqual(docs(12), [['Air ticket', false], ['Undertaking letter', false], ['Insurance', false], ['Invoice', false]])
+  for (const stage of [1, 2, 3, 4, 8, 9]) assert.deepEqual(docs(stage), [])
 })
 
 test('stage cards retain saved dates for stages omitted from the printed form', () => {
-  const form = stageForm(9)
-  for (const stage of [3, 4, 7, 8]) form.tracking.rows[stage - 1].extra = true
+  const form = stageForm(10)
+  for (const stage of [3, 4, 8, 9]) form.tracking.rows[stage - 1].extra = true
   const rows = stages.stageRows(form, true)
-  for (const stage of [3, 4, 7, 8]) {
+  for (const stage of [3, 4, 8, 9]) {
     assert.equal(rows[stage - 1].key, 'done')
     assert.equal(rows[stage - 1].date, `2026-10-${String(stage).padStart(2, '0')}`)
     assert.equal(rows[stage - 1].completedBy, 'Ravi')
@@ -558,11 +558,11 @@ test('stage cards retain saved dates for stages omitted from the printed form', 
 })
 
 test('already deployed candidates show all stages complete without inventing missing completion dates', () => {
-  const form = stageForm(11)
+  const form = stageForm(12)
   form.application.status = 'deployed'
   form.tracking.rows = []
   const rows = stages.stageRows(form, true)
-  assert.equal(stages.stagesDoneText(rows), '11 of 11 stages completed')
+  assert.equal(stages.stagesDoneText(rows), '12 of 12 stages completed')
   assert.ok(rows.every((row) => row.date === '' && row.completedBy === ''))
 })
 
@@ -572,12 +572,14 @@ test('the last stage says whether the candidate is ready to deploy; an older ser
   assert.equal(stages.deploymentText(undefined), null)
   const withBlock = model.normalizeForm(v2({ deployment: { ready: false, missing: [{ slot: 'medical', label: 'Medical report' }, { slot: 'visa' }] } }))
   assert.deepEqual(withBlock.deployment.missing.map((item) => item.label), ['Medical', 'Visa'])
-  const list = stages.stageRows({ ...stageForm(11), deployment: withBlock.deployment }, true)
-  assert.equal(list[10].readiness.text, 'Needs: Medical, Visa')
-  assert.ok(list.slice(0, 10).every((row) => row.readiness === null))
-  assert.equal(stages.stageRows(stageForm(11), true)[10].readiness, null)
+  const list = stages.stageRows({ ...stageForm(12), deployment: withBlock.deployment }, true)
+  assert.equal(list[11].readiness.text, 'Needs: Medical, Visa')
+  assert.ok(list.slice(0, 11).every((row) => row.readiness === null))
+  assert.equal(stages.stageRows(stageForm(12), true)[11].readiness, null)
   assert.equal(model.normalizeForm(v2()).deployment, undefined)
-  assert.equal(stages.stagesDoneText(stages.stageRows(stageForm(4), true)), '3 of 11 stages completed')
+  assert.equal(stages.stagesDoneText(stages.stageRows(stageForm(4), true)), '3 of 12 stages completed')
+  assert.equal(stages.STAGE_COUNT, 12)
+  assert.equal(stages.stageRows(stageForm(7), true)[6].name, 'PCC')
 })
 
 /* ------------------------------------------------------------------ The paper form: the seven sections of the official form, nothing more */

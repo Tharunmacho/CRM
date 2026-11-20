@@ -182,7 +182,7 @@ def advance(env, app, identifier="advance-1", **updates):
     data = {"collected": "yes", "amount": "3000", "amountCurrency": "INR", "date": "2026-01-02",
             "mode": "bank", "receiptNo": "BANK-1", **updates}
     with env.sessions() as db:
-        db.add(ApplicationStage(id=identifier, application_id=app, stage=8, attempt=1, data=data))
+        db.add(ApplicationStage(id=identifier, application_id=app, stage=9, attempt=1, data=data))
         db.commit()
 
 
@@ -198,7 +198,7 @@ def test_advance_is_only_counted_after_confirmation_and_reopen_cannot_duplicate_
     with ledger.sessions() as db:
         original = db.get(ApplicationStage, "advance-1")
         original.reopened_reason = "Correction"
-        db.add(ApplicationStage(id="advance-2", application_id=app, stage=8, attempt=2, data=original.data))
+        db.add(ApplicationStage(id="advance-2", application_id=app, stage=9, attempt=2, data=original.data))
         db.commit()
     duplicate = ledger.client.post(endpoint(), json=body(**{**source, "sourceStageId": "advance-2", "idempotencyKey": "receipt-0002"}))
     assert duplicate.status_code == 409

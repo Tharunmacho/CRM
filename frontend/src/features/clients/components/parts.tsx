@@ -12,7 +12,7 @@ import { isDeployed } from '@/features/jobs/order-counts'
 import '@/styles/clients.css'
 
 /**
- * Care India's own touches for the client side: country flags, soft hue avatars, the 11-stage
+ * Care India's own touches for the client side: country flags, soft hue avatars, the 12-stage
  * mini tracker, the deployed/openings progress and the list/cards switch. Styles: styles/clients.css.
  */
 
@@ -47,7 +47,7 @@ export function Avatar({ name, size = 'md', className }: { name: string; size?: 
 
 /* ----------------------------------------------------------- stage tracker */
 
-/** Where an application stands among the eleven stages: a segment per stage, the number and name beside it. */
+/** Where an application stands among the twelve stages: a segment per stage, the number and name beside it. */
 export function StageMini({ no, state }: { no: number; state: 'live' | 'closed' | 'deployed' }) {
   const stage = STAGES[Math.max(1, Math.min(TOTAL_STAGES, no)) - 1]
   return (

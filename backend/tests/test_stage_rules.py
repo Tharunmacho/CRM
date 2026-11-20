@@ -1,7 +1,7 @@
 """Pure validation of mandatory PRD outcomes and malformed supplied values."""
 import pytest
 
-from app.domain.stages import blocked_message, stage_by_no, validate_payload
+from app.domain.stages import STAGES, TOTAL_STAGES, blocked_message, stage_by_no, validate_payload
 
 
 @pytest.mark.parametrize(("stage", "data"), [
@@ -10,17 +10,21 @@ from app.domain.stages import blocked_message, stage_by_no, validate_payload
     (5, {"result": "agreed", "file": "not-an-attachment"}),
     (5, {"result": "maybe"}),
     (6, {"result": "pending"}),
-    (8, {"collected": "yes", "amount": -100, "receipt": {"id": "receipt"}}),
-    (8, {"collected": "yes", "amount": True, "receipt": {"id": "receipt"}}),
-    (8, {"collected": "yes", "amount": "NaN", "receipt": {"id": "receipt"}}),
-    (8, {"collected": "yes", "amount": 1.234, "receipt": {"id": "receipt"}}),
-    (8, {"collected": "yes", "amount": 100, "amountCurrency": "XXX", "receipt": {"id": "receipt"}}),
-    (10, {"done": "yes", "file": {"id": ""}}),
-    (11, {"bookedBy": "unsupported", "travelDate": "not-a-date", "file": {"id": "ticket"}}),
+    (7, {"pccStatus": "maybe"}),
+    (7, {"pccStatus": "received", "pccReceivedDate": "2026-02-30"}),
+    (7, {"pccStatus": "received", "file": "not-an-attachment"}),
+    (7, {"collected": "yes"}),    # a Passport answer is not a PCC field
+    (9, {"collected": "yes", "amount": -100, "receipt": {"id": "receipt"}}),
+    (9, {"collected": "yes", "amount": True, "receipt": {"id": "receipt"}}),
+    (9, {"collected": "yes", "amount": "NaN", "receipt": {"id": "receipt"}}),
+    (9, {"collected": "yes", "amount": 1.234, "receipt": {"id": "receipt"}}),
+    (9, {"collected": "yes", "amount": 100, "amountCurrency": "XXX", "receipt": {"id": "receipt"}}),
+    (11, {"done": "yes", "file": {"id": ""}}),
+    (12, {"bookedBy": "unsupported", "travelDate": "not-a-date", "file": {"id": "ticket"}}),
     (3, {"scheduled": "yes", "date": "2026-02-30"}),
     (3, {"scheduled": "yes", "date": 0}),
     (3, {"scheduled": "yes", "date": "2026-10-21", "time": "25:00"}),
-    (9, {"arrived": "yes", "googleReview": "false"}),
+    (10, {"arrived": "yes", "googleReview": "false"}),
     (1, {"result": "passed", "arbitrary": "value"}),
 ])
 def test_invalid_values_never_complete(stage, data):
@@ -34,11 +38,12 @@ def test_invalid_values_never_complete(stage, data):
     (4, {"result": "selected", "remarks": " Meets requirements "}),
     (5, {"result": "agreed", "file": {"id": "uploaded"}}),
     (6, {"result": "fit"}),
-    (7, {"collected": "yes"}),
-    (8, {"collected": "yes", "amount": 100, "receipt": {"id": "uploaded"}}),
-    (9, {"arrived": "yes", "googleReview": False}),
-    (10, {"done": "yes", "file": {"id": "uploaded"}}),
-    (11, {"file": {"id": "uploaded"}, "travelDate": "2026-10-21"}),
+    (7, {"pccStatus": "received", "pccAppliedDate": "2026-10-01", "pccReceivedDate": "2026-10-20", "file": {"id": "uploaded"}}),
+    (8, {"collected": "yes"}),
+    (9, {"collected": "yes", "amount": 100, "receipt": {"id": "uploaded"}}),
+    (10, {"arrived": "yes", "googleReview": False}),
+    (11, {"done": "yes", "file": {"id": "uploaded"}}),
+    (12, {"file": {"id": "uploaded"}, "travelDate": "2026-10-21"}),
 ])
 def test_prd_completion_columns_do_not_gain_extra_blockers(stage, data):
     assert stage_by_no(stage).evaluate(data).can_complete
@@ -73,10 +78,10 @@ def test_exact_negative_exits(stage, data, reason):
 
 def test_drafts_allow_incomplete_values_and_normalize_money_and_whitespace():
     assert validate_payload(1, {"remarks": "  In progress  "}) == {"remarks": "In progress"}
-    assert validate_payload(8, {"amount": "10.25"}) == {"amount": 10.25, "amountCurrency": "INR"}
+    assert validate_payload(9, {"amount": "10.25"}) == {"amount": 10.25, "amountCurrency": "INR"}
 
 
-@pytest.mark.parametrize("stage", [1, 2, 3, 7, 8, 9, 10])
+@pytest.mark.parametrize("stage", [1, 2, 3, 7, 8, 9, 10, 11])
 def test_feedback_only_stage_move_never_invents_documents_results_or_dates(stage):
     data = validate_payload(stage, {"feedback": "  Recruiter confirmed this manual move.  "})
     assert data["feedback"] == "Recruiter confirmed this manual move."
@@ -91,8 +96,10 @@ def test_feedback_only_stage_move_never_invents_documents_results_or_dates(stage
     (4, {"result": "selected"}, "Selected"),
     (5, {"result": "agreed"}, "Agreed"),
     (6, {"result": "fit"}, "Fit"),
+    (7, {"pccStatus": "received"}, "Received"),
+    (7, {"pccStatus": "pending"}, "PCC pending"),
     (8, {"collected": "yes"}, "Collected"),
-    (10, {"done": "yes"}, "Stamped"),
+    (11, {"done": "yes"}, "Stamped"),
 ])
 def test_optional_documents_and_details_do_not_gate_a_manual_move(stage, data, outcome):
     result = stage_by_no(stage).evaluate(data)
@@ -105,13 +112,13 @@ def test_optional_documents_and_details_do_not_gate_a_manual_move(stage, data, o
     ({"travelDate": "2026-10-21"}, ["Air ticket"]),
 ])
 def test_ticket_stage_requires_real_ticket_and_travel_date_before_deployment(data, missing):
-    result = stage_by_no(11).evaluate(data)
+    result = stage_by_no(12).evaluate(data)
     assert not result.can_complete
     assert result.missing == missing
 
 
 def test_ticket_stage_deploys_only_with_real_ticket_and_travel_date():
-    result = stage_by_no(11).evaluate({"file": {"id": "uploaded"}, "travelDate": "2026-10-21"})
+    result = stage_by_no(12).evaluate({"file": {"id": "uploaded"}, "travelDate": "2026-10-21"})
     assert result.can_complete
     assert result.outcome == "Booked"
 
@@ -177,3 +184,36 @@ def test_unfit_stops_unless_a_retest_is_planned():
 
 def test_every_decision_stage_can_close_an_application():
     assert [stage_by_no(n).closer for n in (4, 5, 6)] == [True, True, True]
+
+
+# ---------------------------------------------------- twelve stages: Medical (6) and PCC (7, split out of Medical)
+
+def test_the_workflow_has_twelve_stages_in_order_with_medical_then_pcc():
+    assert TOTAL_STAGES == 12 and len(STAGES) == 12
+    assert [stage.no for stage in STAGES] == list(range(1, 13))
+    assert [stage.key for stage in STAGES] == ["prescreening", "forwarded", "interview_scheduling", "interview_result", "offer_letter", "medical",
+                                              "pcc", "passport", "advance", "visa_arrival", "visa_stamping", "air_ticket"]
+    assert [stage.title for stage in STAGES][5:8] == ["Medical", "PCC", "Passport"]
+    assert [stage.task_title for stage in STAGES][5:9] == ["Complete the medical", "Collect the police clearance (PCC)", "Collect original passport", "Collect the advance"]
+    assert len({stage.task_title for stage in STAGES}) == 12
+    assert stage_by_no(6).repeatable and not stage_by_no(7).repeatable
+    with pytest.raises(ValueError):
+        stage_by_no(13)
+
+
+def test_medical_takes_only_medical_fields_and_pcc_only_pcc_fields():
+    assert validate_payload(6, {"applied": "yes", "appliedDate": "2026-10-21", "result": "fit"}) == {"applied": "yes", "appliedDate": "2026-10-21", "result": "fit"}
+    for pcc_only in ({"pccStatus": "received"}, {"pccAppliedDate": "2026-10-21"}, {"file": {"id": "x"}}):
+        assert not stage_by_no(6).evaluate({"result": "fit", **pcc_only}).can_complete
+    for medical_only in ({"result": "fit"}, {"applied": "yes"}, {"retestDate": "2026-10-21"}):
+        assert not stage_by_no(7).evaluate(medical_only).can_complete
+    data = validate_payload(7, {"pccStatus": "received", "pccAppliedDate": "2026-10-01", "pccReceivedDate": "2026-10-20", "file": {"id": "pcc", "name": "pcc.pdf"}})
+    assert data == {"pccStatus": "received", "pccAppliedDate": "2026-10-01", "pccReceivedDate": "2026-10-20", "file": {"id": "pcc", "name": "pcc.pdf"}}
+
+
+def test_pcc_needs_only_feedback_and_names_its_outcome():
+    assert stage_by_no(7).evaluate({"feedback": "Applied at the police station"}).outcome == "Completed manually"
+    assert stage_by_no(7).evaluate({"pccStatus": "received"}).outcome == "Received"
+    pending = stage_by_no(7).evaluate({"pccStatus": "pending"})
+    assert pending.can_complete and pending.outcome == "PCC pending" and not pending.closes and not pending.repeats
+    assert validate_payload(7, {"feedback": "  ok  "}) == {"feedback": "ok"}

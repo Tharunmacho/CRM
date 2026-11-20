@@ -17,6 +17,7 @@ from app.db.models import (
     CandidateStatus, Client, Company, Designation, Order, OrderStatus, Role, Source,
     Task, TaskKind, User,
 )
+from app.domain.stages import stage_by_no
 from test_database_naming import _migrate, schema_database
 
 with patch("app.core.config.get_settings", return_value=SimpleNamespace(
@@ -107,7 +108,7 @@ def attach_required_documents(env, candidate_id):
 
 
 def payload(env, app_id, stage):
-    if stage == 11:  # the deployment gate: the documents required by the end of the process must be on file
+    if stage == 12:  # the deployment gate: the documents required by the end of the process must be on file
         with env.sessions() as db:
             attach_required_documents(env, db.get(Application, app_id).candidate_id)
     values = {
@@ -115,14 +116,15 @@ def payload(env, app_id, stage):
         3: {"scheduled": "yes", "date": "2026-11-02", "time": "09:30", "mode": "online"},
         4: {"result": "selected", "remarks": "Client approved"},
         5: {"result": "agreed"}, 6: {"applied": "yes", "result": "fit"},
-        7: {"collected": "yes", "heldBy": {"id": "staff", "name": "spoofed"}},
-        8: {"collected": "yes", "amount": "1500.25", "amountCurrency": "INR", "mode": "upi"},
-        9: {"arrived": "yes", "googleReview": False}, 10: {"done": "yes"},
-        11: {"travelDate": "2026-11-15"},
+        7: {"pccStatus": "received", "pccReceivedDate": "2026-11-05"},
+        8: {"collected": "yes", "heldBy": {"id": "staff", "name": "spoofed"}},
+        9: {"collected": "yes", "amount": "1500.25", "amountCurrency": "INR", "mode": "upi"},
+        10: {"arrived": "yes", "googleReview": False}, 11: {"done": "yes"},
+        12: {"travelDate": "2026-11-15"},
     }[stage]
-    if stage in (5, 10, 11):
+    if stage in (5, 7, 11, 12):
         values["file"] = attachment(env, app_id, stage)
-    elif stage == 8:
+    elif stage == 9:
         values["receipt"] = attachment(env, app_id, stage, "receipt")
     return {"feedback": f"Stage {stage} reviewed by the recruiter.", **values}
 
@@ -132,41 +134,44 @@ def reach(env, app_id, stage):
         complete(env, app_id, payload(env, app_id, number))
 
 
-def test_full_eleven_stage_path_has_one_task_and_keeps_evidence(workflow):
+def test_full_twelve_stage_path_has_one_task_and_keeps_evidence(workflow):
     env = workflow
     app_id = mapped(env)
     with env.sessions() as db:
         db.get(Order, "order").openings = 1
         db.commit()
-    for stage in range(1, 12):
+    for stage in range(1, 13):
         result = complete(env, app_id, payload(env, app_id, stage))
         with env.sessions() as db:
             open_tasks = list(db.scalars(select(Task).where(Task.application_id == app_id,
                                 Task.completed_at.is_(None), Task.cancelled_at.is_(None))))
-            assert len(open_tasks) == (0 if stage == 11 else 1)
+            assert len(open_tasks) == (0 if stage == 12 else 1)
             if open_tasks:
                 assert open_tasks[0].stage == stage + 1
+                assert open_tasks[0].title == stage_by_no(stage + 1).task_title
                 assert open_tasks[0].due_at - open_tasks[0].created_at == timedelta(hours=48)
     assert result["status"] == "deployed"
     with env.sessions() as db:
         assert db.get(Candidate, "candidate").status == CandidateStatus.deployed
         assert db.get(Order, "order").status == OrderStatus.filled
         history = list(db.scalars(select(ApplicationStage).where(ApplicationStage.application_id == app_id).order_by(ApplicationStage.stage)))
-        assert len(history) == 11
+        assert len(history) == 12 and [row.stage for row in history] == list(range(1, 13))
         assert all(row.owner_id == "staff" and row.completed_by == "staff" for row in history)
         assert history[4].data["file"]["name"] == "synthetic.pdf"
-        assert history[6].data["heldBy"] == {"id": "staff", "name": "staff"}
-        assert history[7].amount_currency == "INR"
-        assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.entity_id == app_id)) == 23
+        assert history[5].outcome == "Fit" and history[6].outcome == "Received" and history[6].data["file"]["name"] == "synthetic.pdf"
+        assert "pccStatus" not in history[5].data and "result" not in history[6].data      # Medical and PCC keep their own answers
+        assert history[7].data["heldBy"] == {"id": "staff", "name": "staff"}
+        assert history[8].amount_currency == "INR" and history[8].amount == 1500.25
+        assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.entity_id == app_id)) == 25
 
 
 def test_final_stage_uses_candidate_air_ticket_but_never_deploys_without_travel_date(workflow):
     env = workflow
     app_id = mapped(env)
-    reach(env, app_id, 11)
+    reach(env, app_id, 12)
     # The ticket was uploaded once in the candidate's Documents section, not
     # re-uploaded in a stage modal.  The final stage may use that exact file.
-    ticket = attachment(env, app_id, 11, entity_type="candidate", entity_id="candidate", slot="air_ticket")
+    ticket = attachment(env, app_id, 12, entity_type="candidate", entity_id="candidate", slot="air_ticket")
     blocked = save(env, app_id, {
         "feedback": "Ticket received; confirming the departure date.",
         "file": ticket,
@@ -232,7 +237,8 @@ def test_repeated_medical_results_preserve_attempts_and_follow_up_tasks(workflow
     with env.sessions() as db:
         attempts = list(db.scalars(select(ApplicationStage).where(ApplicationStage.application_id == app_id, ApplicationStage.stage == 6).order_by(ApplicationStage.attempt)))
         assert [row.outcome for row in attempts] == ["Unfit: reapplying", "Unfit: reapplying", "Fit"]
-        assert db.get(Application, app_id).current_stage == 7
+        assert db.get(Application, app_id).current_stage == 7          # the PCC, the stage after the medical
+        assert db.scalar(select(Task.title).where(Task.application_id == app_id, Task.completed_at.is_(None), Task.cancelled_at.is_(None))) == "Collect the police clearance (PCC)"
 
 
 def test_strict_values_and_real_document_ownership_before_advancing(workflow):
@@ -264,8 +270,8 @@ def test_owner_guard_and_admin_reopen_restores_stage_and_retains_superseded_hist
     original_version = version(env, app_id)
     env.actor = SimpleNamespace(id="other", role=Role.staff)
     assert save(env, app_id, {"result": "selected", "remarks": "not owned"}, lock=original_version).status_code == 403
-    env.actor = SimpleNamespace(id="manager", role=Role.manager)
-    body = {"stage": 2, "reason": "Correct the forwarding date", "lock_version": version(env, app_id)}
+    env.actor = SimpleNamespace(id="other", role=Role.staff)   # reopening is admin-level (Admin or MD); a recruiter cannot, not even their own
+    body = {"stage": 2, "reason": "Correct the forwarding date", "lock_version": original_version}
     assert env.client.post(f"/api/applications/{app_id}/reopen", json=body).status_code == 403
     env.actor = SimpleNamespace(id="admin", role=Role.admin)
     assert env.client.post(f"/api/applications/{app_id}/reopen", json={**body, "reason": "  "}).status_code == 422
@@ -352,8 +358,8 @@ def test_concurrent_final_deployments_fill_order_and_reopen_reverses_count(workf
     env = workflow
     ids = [mapped(env, candidate=key) for key in ("candidate", "second-candidate")]
     for app_id in ids:
-        reach(env, app_id, 11)
-        save(env, app_id, payload(env, app_id, 11))
+        reach(env, app_id, 12)
+        save(env, app_id, payload(env, app_id, 12))
     locks = [version(env, app_id) for app_id in ids]
     def finish(index):
         with env.sessions() as db:
@@ -363,7 +369,7 @@ def test_concurrent_final_deployments_fill_order_and_reopen_reverses_count(workf
         assert db.get(Order, "order").status == OrderStatus.filled
     env.actor = SimpleNamespace(id="admin", role=Role.admin)
     response = env.client.post(f"/api/applications/{ids[0]}/reopen", json={
-        "stage": 11, "reason": "Corrected ticket needed", "lock_version": version(env, ids[0]),
+        "stage": 12, "reason": "Corrected ticket needed", "lock_version": version(env, ids[0]),
     })
     assert response.status_code == 200, response.text
     with env.sessions() as db:
@@ -376,8 +382,8 @@ def test_concurrent_deployments_cannot_exceed_remaining_opening(workflow):
     env = workflow
     ids = [mapped(env, candidate=key) for key in ("candidate", "second-candidate")]
     for app_id in ids:
-        reach(env, app_id, 11)
-        save(env, app_id, payload(env, app_id, 11))
+        reach(env, app_id, 12)
+        save(env, app_id, payload(env, app_id, 12))
     with env.sessions() as db:
         db.get(Order, "order").openings = 1
         db.commit()
@@ -392,13 +398,13 @@ def test_concurrent_deployments_cannot_exceed_remaining_opening(workflow):
         deployed = db.scalars(select(Application).where(Application.status == ApplicationStatus.deployed)).all()
         assert len(deployed) == 1
         waiting = db.scalar(select(Application).where(Application.status == ApplicationStatus.active))
-        assert waiting.current_stage == 11 and waiting.draft.get("file")
+        assert waiting.current_stage == 12 and waiting.draft.get("file")
         assert waiting.lock_version == locks[ids.index(waiting.id)]
         assert db.get(Candidate, waiting.candidate_id).status == CandidateStatus.in_process
         assert db.scalar(select(Task.id).where(Task.application_id == waiting.id,
             Task.completed_at.is_(None), Task.cancelled_at.is_(None)))
         assert not db.scalar(select(ApplicationStage.id).where(ApplicationStage.application_id == waiting.id,
-            ApplicationStage.stage == 11))
+            ApplicationStage.stage == 12))
         assert db.get(Order, "order").status == OrderStatus.filled
 
     # Explicitly increasing openings makes the retained stage retryable.
@@ -498,3 +504,59 @@ def test_reopenings_endpoint_shows_who_reopened_and_when(workflow):
         assert all(row["reopenedAt"].startswith(audit.at.isoformat()[:19]) for row in body)
     env.actor = SimpleNamespace(id="other", role=Role.staff)
     assert env.client.get(f"/api/applications/{app_id}/reopenings").status_code == 403
+
+
+# ---------------------------------------------------------------- stage 7: PCC (split out of the medical by migration 0048)
+
+def test_pcc_is_its_own_stage_between_the_medical_and_the_passport(workflow):
+    env = workflow
+    app_id = mapped(env)
+    reach(env, app_id, 6)
+    with env.sessions() as db:
+        assert db.get(Application, app_id).current_stage == 6
+    medical = complete(env, app_id, {"applied": "yes", "result": "fit"})
+    assert medical["currentStage"] == 7
+    with env.sessions() as db:
+        task = db.get(Task, medical["nextTaskId"])
+        assert (task.stage, task.title, task.kind) == (7, "Collect the police clearance (PCC)", TaskKind.stage)
+    # The PCC form only takes PCC answers: a medical result or a passport holder is refused at this stage.
+    assert save(env, app_id, {"result": "fit"}).status_code == 422
+    assert save(env, app_id, {"heldBy": {"id": "staff", "name": "staff"}}).status_code == 422
+    pending = complete(env, app_id, {"pccStatus": "pending", "pccAppliedDate": "2026-11-03"})
+    assert pending["currentStage"] == 8 and pending["status"] == "active"
+    with env.sessions() as db:
+        record = db.scalar(select(ApplicationStage).where(ApplicationStage.application_id == app_id, ApplicationStage.stage == 7))
+        assert record.outcome == "PCC pending" and record.data["pccAppliedDate"] == "2026-11-03"
+        assert db.get(Task, pending["nextTaskId"]).title == "Collect original passport"
+
+
+def test_pcc_files_belong_to_the_pcc_stage_or_the_candidates_pcc_document(workflow):
+    env = workflow
+    app_id = mapped(env)
+    reach(env, app_id, 7)
+    wrong_stage = attachment(env, app_id, 8, "file")
+    assert save(env, app_id, {"pccStatus": "received", "file": wrong_stage}).status_code == 422
+    own = attachment(env, app_id, 7)
+    assert save(env, app_id, {"pccStatus": "received", "file": own}).status_code == 200
+    from_profile = attachment(env, app_id, 7, entity_type="candidate", entity_id="candidate", slot="pcc", key="candidate-pcc.pdf")
+    assert save(env, app_id, {"pccStatus": "received", "file": from_profile}).status_code == 200
+    not_a_pcc = attachment(env, app_id, 7, entity_type="candidate", entity_id="candidate", slot="visa", key="not-a-pcc.pdf")
+    assert save(env, app_id, {"pccStatus": "received", "file": not_a_pcc}).status_code == 422
+    done = complete(env, app_id, {"pccStatus": "received", "file": own})
+    assert done["currentStage"] == 8
+    with env.sessions() as db:
+        record = db.scalar(select(ApplicationStage).where(ApplicationStage.application_id == app_id, ApplicationStage.stage == 7))
+        assert record.outcome == "Received" and record.data["file"]["id"] == own["id"]
+
+
+def test_the_passport_stage_is_stage_eight_with_its_own_holder_and_copy(workflow):
+    env = workflow
+    app_id = mapped(env)
+    reach(env, app_id, 8)
+    with env.sessions() as db:
+        assert db.get(Application, app_id).current_stage == 8
+    assert save(env, app_id, {"collected": "yes", "heldBy": {"id": "staff", "name": "spoofed"}}).status_code == 200
+    done = complete(env, app_id, {"collected": "yes", "heldBy": {"id": "staff", "name": "spoofed"}})
+    assert done["currentStage"] == 9
+    with env.sessions() as db:
+        assert db.scalar(select(ApplicationStage.data).where(ApplicationStage.application_id == app_id, ApplicationStage.stage == 8))["heldBy"] == {"id": "staff", "name": "staff"}

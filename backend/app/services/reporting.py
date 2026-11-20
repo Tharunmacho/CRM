@@ -19,7 +19,7 @@ from sqlalchemy import JSON, func, or_, select
 from app.core.config import get_settings
 from app.core.roles import is_admin_level
 from app.db import models as m
-from app.domain.stages import STAGES as WORKFLOW_STAGES
+from app.domain.stages import ADVANCE_STAGE, STAGES as WORKFLOW_STAGES
 
 
 STAGES = [stage.title for stage in WORKFLOW_STAGES]
@@ -29,7 +29,8 @@ REASONS = {"prescreen_failed": "Failed the first screening", "not_interested": "
            "changed_job": "Moved to another job", "offer_declined": "Offer declined", "offer_not_received": "Offer not received",
            "stage_rejected": "Rejected", "stage_declined": "Candidate declined", "interview_not_possible": "Interview not possible",
            "passport_not_available": "Passport not available", "advance_not_paid": "Advance not paid", "visa_rejected": "Visa rejected",
-           "visa_stamping_refused": "Visa stamping refused", "not_travelling": "Not travelling"}
+           "visa_stamping_refused": "Visa stamping refused", "not_travelling": "Not travelling",
+           "pcc_not_cleared": "PCC not cleared"}
 SOURCE_LABELS = {"email": "Email", "whatsapp": "WhatsApp", "walk_in": "Walk-in",
                  "referral": "Referral", "other": "Other"}
 
@@ -137,7 +138,7 @@ def sees_team(user):
     return is_admin_level(user)
 
 
-OVERVIEW_STAGES = (4, 5, 9, 10, 11)  # stage 4 feeds "selected"; 5, 9, 10, 11 feed the pipeline overview cards
+OVERVIEW_STAGES = (4, 5, 10, 11, 12)  # stage 4 feeds "selected"; 5, 10, 11, 12 feed the pipeline overview cards
 
 
 def read_dashboard_data(db, user, staff_id=None, zone=None, now=None):
@@ -176,7 +177,7 @@ def read_dashboard_data(db, user, staff_id=None, zone=None, now=None):
                 m.Remark.author_id == m.Task.owner_id, m.Remark.created_at >= start, m.Remark.created_at < end)
         rows = query.subquery(name)
         collections.append(select(func.json_agg(func.row_to_json(rows.table_valued()), type_=JSON)).scalar_subquery().label(name))
-    # The effective interview result (stage 4) and the offer / visa / ticket receipts (5, 9, 10, 11) feed the
+    # The effective interview result (stage 4) and the offer / visa / ticket receipts (5, 10, 11, 12) feed the
     # dashboard's counts. Never transfer stage attachments, remarks, receipts or other stage payloads.
     clean = (m.ApplicationStage.reopened_reason.is_(None)) | (m.ApplicationStage.reopened_reason == "")
     stages = (select(m.ApplicationStage.application_id, m.ApplicationStage.stage, m.ApplicationStage.attempt,
@@ -212,7 +213,7 @@ def order_counts(applications):
 
     The PRD names the three numbers but does not define them, so: matched = applications still active on the
     order (not closed, not yet deployed); selected = active applications past stage 4; deployed = applications
-    that finished stage 11. Closed applications never count. The frontend keeps the same rule in
+    that finished stage 12. Closed applications never count. The frontend keeps the same rule in
     frontend/src/features/jobs/order-counts.ts, so the dashboard, reports, client page, order page and order
     cards all show identical numbers.
     """
@@ -223,7 +224,7 @@ def order_counts(applications):
 
 
 OVERVIEW_ITEM_LIMIT = 200  # rows listed per overview card; the counts are always the full numbers
-OFFER_STAGE, VISA_STAGE, STAMPING_STAGE, TICKET_STAGE = 5, 9, 10, 11
+OFFER_STAGE, VISA_STAGE, STAMPING_STAGE, TICKET_STAGE = 5, 10, 11, 12
 
 
 def _last_moves(data):
@@ -249,8 +250,8 @@ def pipeline_overview(data, apps, candidates, now):
     completed for STUCK_DAYS or more; one that never completed a stage is measured from when it was created), so
     both screens show the same people.
       offer      current = active at stage 5;                issued = stage 5 completed
-      visa       current = active at stage 9 or 10;          received = stage 9 completed, stamped = stage 10 completed
-      departure  current = active at stage 11 (ticket);      departed = deployed placements
+      visa       current = active at stage 10 or 11;         received = stage 10 completed, stamped = stage 11 completed
+      departure  current = active at stage 12 (ticket);      departed = deployed placements
       idle       count = active placements with no progress for STUCK_DAYS+ days; longestDays = the oldest wait
     `items` lists the placements behind each number, waiting ones first (longest wait first), capped at
     OVERVIEW_ITEM_LIMIT; `itemsTotal` is the uncapped list length.
@@ -483,7 +484,7 @@ def report_data(data, user, filters: Filters, zone=None, now=None):
             closed_at = terminal["completed_at"] if terminal else app["updated_at"]
             if inside(closed_at):
                 rejection_counts[(app["current_stage"], value(app.get("closure_reason")) or "unknown")] += 1
-        record = records.get(8)
+        record = records.get(ADVANCE_STAGE)
         if not record or not inside(record["completed_at"]) or not staff_matches(record.get("owner_id") or app_owner(app)):
             continue
         if (record.get("data") or {}).get("advanceStatus") == "pending":

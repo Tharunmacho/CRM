@@ -63,9 +63,9 @@ OUTCOME_COUNTS = {
     "forwarded": (2, "Forwarded"),
     "interviewsScheduled": (3, "Scheduled"),
     "selected": (4, "Selected"),
-    "visaReceived": (9, "Arrived"),
-    "visaStamped": (10, "Stamped"),
-    "deployed": (11, "Booked"),
+    "visaReceived": (10, "Arrived"),
+    "visaStamped": (11, "Stamped"),
+    "deployed": (12, "Booked"),
 }
 
 

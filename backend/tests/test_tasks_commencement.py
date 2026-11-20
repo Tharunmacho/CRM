@@ -79,7 +79,7 @@ def desk(schema_database, monkeypatch):
             if False else None
         db.flush()
         db.execute(text("UPDATE crm_candidates SET call_recorded_at = :at, call_called = true, call_interested = 'yes' WHERE id = 'c3'"), {"at": TUESDAY})
-        db.add(ApplicationStage(application_id="a-c2", stage=8, attempt=1, completed_by="admin", amount=10000, amount_currency="INR",
+        db.add(ApplicationStage(application_id="a-c2", stage=9, attempt=1, completed_by="admin", amount=10000, amount_currency="INR",
                                 completed_at=TUESDAY - timedelta(days=3),
                                 data={"advanceStatus": "collected", "amount": 10000, "amountCurrency": "INR", "serviceChargeTotal": 25000}))
         db.add(ApplicationStage(application_id="a-c5", stage=3, attempt=1, completed_by="asha", completed_at=TUESDAY + timedelta(hours=1), data={}))

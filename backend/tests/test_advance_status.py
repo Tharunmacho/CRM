@@ -1,4 +1,4 @@
-"""Stage 8 as the client's tracker sheet needs it: advance status, the amount, the optional total service charge, and the Advance cell text."""
+"""Stage 9 as the client's tracker sheet needs it: advance status, the amount, the optional total service charge, and the Advance cell text."""
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -76,22 +76,22 @@ def test_the_status_of_a_record_reads_old_records_as_before():
 
 # ------------------------------------------------------------------ the stage rules (pure)
 
-def test_stage_8_validates_status_amounts_and_total():
-    out = validate_payload(8, {"advanceStatus": "collected", "amount": "10000", "serviceChargeTotal": "50000.50", "amountCurrency": "USD"},
+def test_stage_9_validates_status_amounts_and_total():
+    out = validate_payload(9, {"advanceStatus": "collected", "amount": "10000", "serviceChargeTotal": "50000.50", "amountCurrency": "USD"},
                            StageOptions(currencies=frozenset({"INR", "USD"}), default_currency="INR"))
     assert out == {"advanceStatus": "collected", "collected": "yes", "amount": 10000.0, "serviceChargeTotal": 50000.5, "amountCurrency": "USD"}
     # Pending: the amount is the advance expected; the old yes/no answer follows the status.
-    pending = validate_payload(8, {"advanceStatus": "pending", "amount": 10000, "collected": "yes"})
+    pending = validate_payload(9, {"advanceStatus": "pending", "amount": 10000, "collected": "yes"})
     assert pending["collected"] == "no" and pending["amount"] == 10000.0 and pending["amountCurrency"] == "INR"
     # A record written before the status existed is left alone: no status is invented.
-    assert validate_payload(8, {"amount": "10.25"}) == {"amount": 10.25, "amountCurrency": "INR"}
-    assert validate_payload(8, {"collected": "yes", "amount": 5000}) == {"collected": "yes", "amount": 5000.0, "amountCurrency": "INR"}
+    assert validate_payload(9, {"amount": "10.25"}) == {"amount": 10.25, "amountCurrency": "INR"}
+    assert validate_payload(9, {"collected": "yes", "amount": 5000}) == {"collected": "yes", "amount": 5000.0, "amountCurrency": "INR"}
     # Both amounts are optional, and the total alone is fine.
-    assert validate_payload(8, {"advanceStatus": "pending"})["collected"] == "no"
-    assert validate_payload(8, {"advanceStatus": "pending", "serviceChargeTotal": 45000})["serviceChargeTotal"] == 45000.0
-    assert validate_payload(8, {"advanceStatus": "collected", "amount": 50000, "serviceChargeTotal": 50000})["amount"] == 50000.0
+    assert validate_payload(9, {"advanceStatus": "pending"})["collected"] == "no"
+    assert validate_payload(9, {"advanceStatus": "pending", "serviceChargeTotal": 45000})["serviceChargeTotal"] == 45000.0
+    assert validate_payload(9, {"advanceStatus": "collected", "amount": 50000, "serviceChargeTotal": 50000})["amount"] == 50000.0
     # Blank is unset.
-    assert "serviceChargeTotal" not in validate_payload(8, {"advanceStatus": "pending", "serviceChargeTotal": ""})
+    assert "serviceChargeTotal" not in validate_payload(9, {"advanceStatus": "pending", "serviceChargeTotal": ""})
 
 
 @pytest.mark.parametrize("data", [
@@ -102,20 +102,20 @@ def test_stage_8_validates_status_amounts_and_total():
     {"advanceStatus": "pending", "amount": 60000, "serviceChargeTotal": 50000},
     {"advanceStatus": "collected", "amount": 100, "amountCurrency": "XXX"},
 ])
-def test_stage_8_refuses_bad_amounts_and_a_total_below_the_advance(data):
+def test_stage_9_refuses_bad_amounts_and_a_total_below_the_advance(data):
     with pytest.raises(ValidationError):
-        validate_payload(8, data)
-    assert not stage_by_no(8).evaluate({"feedback": "Checked.", **data}).can_complete
+        validate_payload(9, data)
+    assert not stage_by_no(9).evaluate({"feedback": "Checked.", **data}).can_complete
 
 
 def test_the_total_below_the_advance_is_reported_against_its_own_field():
     with pytest.raises(ValidationError) as caught:
-        validate_payload(8, {"amount": 60000, "serviceChargeTotal": 50000})
+        validate_payload(9, {"amount": 60000, "serviceChargeTotal": 50000})
     assert [error["loc"] for error in caught.value.errors()] == [("serviceChargeTotal",)]
 
 
-def test_completing_stage_8_needs_nothing_new_and_names_the_outcome():
-    ok = lambda data: stage_by_no(8).evaluate({"feedback": "Checked.", **data})
+def test_completing_stage_9_needs_nothing_new_and_names_the_outcome():
+    ok = lambda data: stage_by_no(9).evaluate({"feedback": "Checked.", **data})
     assert ok({"collected": "yes", "amount": 20}).outcome == "Collected"          # an old flow
     assert ok({}).outcome == "Completed manually"                                  # an old flow with nothing
     assert ok({"collected": "no"}).outcome == "Completed manually"
@@ -128,7 +128,7 @@ def test_completing_stage_8_needs_nothing_new_and_names_the_outcome():
 
 # ------------------------------------------------------------------ the fact reader the Tasks screen uses (pure)
 
-def row(app, stage=8, *, attempt=1, amount=None, currency=None, data=None):
+def row(app, stage=9, *, attempt=1, amount=None, currency=None, data=None):
     return (app, stage, attempt, datetime(2026, 11, 3, 10, attempt, tzinfo=timezone.utc), amount, currency, data)
 
 
@@ -143,7 +143,7 @@ def test_stage_facts_carry_status_total_and_the_expected_advance():
         row("a7", amount=7000, currency="AED", data={"collected": "yes"}),
         row("a8", attempt=1, amount=999, currency="INR", data={"collected": "yes"}),
         row("a8", attempt=2, data={"advanceStatus": "pending", "amount": 2000}),                                # the latest attempt wins
-        row("a9", stage=9, data={"googleReview": True}),
+        row("a9", stage=10, data={"googleReview": True}),
     ])
     summary = {k: (v["advance"], v["status"], v["total"], v["expected"], v["currency"]) for k, v in facts.items()}
     assert summary == {
@@ -165,10 +165,10 @@ def test_payment_fields_keep_the_old_keys_and_add_the_new_ones():
         row("a1", amount=10000, currency="INR", data={"advanceStatus": "collected", "amount": 10000, "serviceChargeTotal": 50000}),
         row("a2", data={"advanceStatus": "pending", "amount": 10000, "amountCurrency": "AED"}),
     ])
-    one = payment_fields(SimpleNamespace(id="a1", current_stage=8), facts)
+    one = payment_fields(SimpleNamespace(id="a1", current_stage=9), facts)
     assert one == {"advanceAmount": 10000.0, "advanceCurrency": "INR", "googleReview": None,
                    "advanceStatus": "collected", "advanceExpected": None, "serviceChargeTotal": 50000.0}
-    two = payment_fields(SimpleNamespace(id="a2", current_stage=8), facts)
+    two = payment_fields(SimpleNamespace(id="a2", current_stage=9), facts)
     assert two["advanceAmount"] is None and two["advanceStatus"] == "pending" and two["advanceExpected"] == 10000.0
     assert two["advanceCurrency"] == "AED"
     none = payment_fields(SimpleNamespace(id="zz", current_stage=3), facts)
@@ -214,12 +214,12 @@ def test_the_import_sheet_accepts_a_status_and_a_total_service_charge():
     assert "Advance status" in sheet["recognised"] and "Total service charge" in sheet["recognised"]
     options = StageOptions(currencies=frozenset({"INR"}), default_currency="INR")
     asha, bina, cara = (bulk.stage_inputs(r, {}, options) for r in sheet["rows"])
-    assert asha[0][8] == {"collected": "yes", "advanceStatus": "collected", "amount": "10000", "serviceChargeTotal": "50000"}   # collected by default
-    assert bina[0][8] == {"collected": "no", "advanceStatus": "pending", "amount": "10000"}                                   # amount = expected
-    assert cara[0][8] == {"collected": "yes", "advanceStatus": "collected"}
+    assert asha[0][9] == {"collected": "yes", "advanceStatus": "collected", "amount": "10000", "serviceChargeTotal": "50000"}   # collected by default
+    assert bina[0][9] == {"collected": "no", "advanceStatus": "pending", "amount": "10000"}                                   # amount = expected
+    assert cara[0][9] == {"collected": "yes", "advanceStatus": "collected"}
     assert not asha[1] and not bina[1] and not cara[1]
     for built in (asha, bina, cara):
-        assert stage_by_no(8).evaluate(built[0][8], options).can_complete
+        assert stage_by_no(9).evaluate(built[0][9], options).can_complete
 
 
 @pytest.mark.parametrize("header", ["Total service charge", "Service charge", "total_service_charge", "Service fee"])
@@ -233,11 +233,11 @@ def test_the_import_reports_a_total_below_the_advance_and_an_unreadable_status()
     _, problems = bulk.stage_inputs({"advance_amount": "60000", "service_charge_total": "50000"}, {}, options)
     assert [p["level"] for p in problems] == ["error"] and "Total service charge" in problems[0]["message"]
     stages, problems = bulk.stage_inputs({"advance_amount": "60000", "advance_status": "maybe"}, {}, options)
-    assert [p["level"] for p in problems] == ["warning"] and stages[8]["advanceStatus"] == "collected"
+    assert [p["level"] for p in problems] == ["warning"] and stages[9]["advanceStatus"] == "collected"
     _, problems = bulk.stage_inputs({"advance_amount": "60000", "service_charge_total": "lots"}, {}, options)
     assert [p["level"] for p in problems] == ["error"]
     # No amount and no status: the stage reads as it always did.
-    assert bulk.stage_inputs({}, {}, options)[0][8] == {"collected": "yes"}
+    assert bulk.stage_inputs({}, {}, options)[0][9] == {"collected": "yes"}
 
 
 @pytest.mark.parametrize(("text", "status"), [("Pending", "pending"), ("not paid", "pending"), ("Due", "pending"), ("Collected", "collected"),
@@ -254,7 +254,7 @@ def complete_8(env, app_id, data):
 
 def stage_row(env, app_id, attempt=None):
     with env.sessions() as db:
-        query = select(ApplicationStage).where(ApplicationStage.application_id == app_id, ApplicationStage.stage == 8).order_by(ApplicationStage.attempt)
+        query = select(ApplicationStage).where(ApplicationStage.application_id == app_id, ApplicationStage.stage == 9).order_by(ApplicationStage.attempt)
         rows = list(db.scalars(query))
         return rows[-1] if attempt is None else rows[attempt - 1]
 
@@ -262,7 +262,7 @@ def stage_row(env, app_id, attempt=None):
 def test_a_collected_advance_with_a_total_is_saved_in_the_stage_record(workflow):
     env = workflow
     app_id = mapped(env)
-    reach(env, app_id, 8)
+    reach(env, app_id, 9)
     complete_8(env, app_id, {"advanceStatus": "collected", "amount": "10000", "serviceChargeTotal": "50000", "mode": "upi"})
     row = stage_row(env, app_id)
     assert row.outcome == "Collected" and float(row.amount) == 10000.0 and row.amount_currency == "INR"
@@ -273,13 +273,13 @@ def test_a_collected_advance_with_a_total_is_saved_in_the_stage_record(workflow)
 def test_a_pending_advance_moves_on_and_never_counts_as_collected_money(workflow):
     env = workflow
     app_id = mapped(env)
-    reach(env, app_id, 8)
+    reach(env, app_id, 9)
     result = complete_8(env, app_id, {"advanceStatus": "pending", "amount": "10000", "serviceChargeTotal": "45000"})
-    assert result["currentStage"] == 9
+    assert result["currentStage"] == 10
     row = stage_row(env, app_id)
     assert row.outcome == "Advance pending" and row.amount is None            # the report column holds collected money only
     assert row.data["amount"] == 10000.0 and row.data["serviceChargeTotal"] == 45000.0 and row.data["collected"] == "no"
-    facts = stage_facts([(row.application_id, 8, row.attempt, row.completed_at, row.amount, row.amount_currency, row.data)])
+    facts = stage_facts([(row.application_id, 9, row.attempt, row.completed_at, row.amount, row.amount_currency, row.data)])
     assert advance_cell(facts[app_id], "INR") == "Pending/45k"
     assert facts[app_id]["advance"] is None and facts[app_id]["expected"] == 10000.0
 
@@ -287,28 +287,28 @@ def test_a_pending_advance_moves_on_and_never_counts_as_collected_money(workflow
 def test_a_pending_advance_needs_no_amount_at_all(workflow):
     env = workflow
     app_id = mapped(env)
-    reach(env, app_id, 8)
+    reach(env, app_id, 9)
     complete_8(env, app_id, {"advanceStatus": "pending"})
     row = stage_row(env, app_id)
     assert row.outcome == "Advance pending" and row.amount is None
 
 
-def test_an_old_amount_only_stage_8_is_still_valid_and_reads_as_collected(workflow):
+def test_an_old_amount_only_stage_9_is_still_valid_and_reads_as_collected(workflow):
     env = workflow
     app_id = mapped(env)
-    reach(env, app_id, 8)
+    reach(env, app_id, 9)
     complete_8(env, app_id, {"collected": "yes", "amount": "1500.25", "mode": "upi"})
     row = stage_row(env, app_id)
     assert row.outcome == "Collected" and float(row.amount) == 1500.25
     assert "advanceStatus" not in row.data and "serviceChargeTotal" not in row.data
-    facts = stage_facts([(row.application_id, 8, row.attempt, row.completed_at, row.amount, row.amount_currency, row.data)])
+    facts = stage_facts([(row.application_id, 9, row.attempt, row.completed_at, row.amount, row.amount_currency, row.data)])
     assert facts[app_id]["status"] == "collected" and advance_cell(facts[app_id], "INR") == "1500.25 Collected"
 
 
 def test_the_api_refuses_a_total_below_the_advance_when_saving_and_completing(workflow):
     env = workflow
     app_id = mapped(env)
-    reach(env, app_id, 8)
+    reach(env, app_id, 9)
     bad = {"advanceStatus": "collected", "amount": 60000, "serviceChargeTotal": 50000}
     refused = save(env, app_id, bad)
     assert refused.status_code == 422
@@ -321,14 +321,14 @@ def test_the_api_refuses_a_total_below_the_advance_when_saving_and_completing(wo
 def test_a_draft_keeps_the_status_and_the_total_and_a_reopened_stage_returns_them(workflow):
     env = workflow
     app_id = mapped(env)
-    reach(env, app_id, 8)
+    reach(env, app_id, 9)
     draft = {"advanceStatus": "pending", "amount": 10000, "serviceChargeTotal": 45000}
     assert save(env, app_id, draft).status_code == 200
     saved = env.client.get(f"/api/applications/{app_id}/draft").json()["draft"]
     assert saved["advanceStatus"] == "pending" and saved["serviceChargeTotal"] == 45000.0 and saved["collected"] == "no"
     complete_8(env, app_id, draft)
     env.actor = SimpleNamespace(id="admin", role=Role.admin)
-    reopened = env.client.post(f"/api/applications/{app_id}/reopen", json={"stage": 8, "reason": "The candidate paid", "lock_version": version(env, app_id)})
+    reopened = env.client.post(f"/api/applications/{app_id}/reopen", json={"stage": 9, "reason": "The candidate paid", "lock_version": version(env, app_id)})
     assert reopened.status_code == 200, reopened.text
     back = env.client.get(f"/api/applications/{app_id}/draft").json()["draft"]
     assert back["advanceStatus"] == "pending" and back["serviceChargeTotal"] == 45000.0 and back["amount"] == 10000.0
@@ -338,5 +338,5 @@ def test_a_draft_keeps_the_status_and_the_total_and_a_reopened_stage_returns_the
     assert latest.attempt == 2 and latest.outcome == "Collected" and float(latest.amount) == 10000.0
     first = stage_row(env, app_id, attempt=1)
     assert first.data["advanceStatus"] == "pending" and first.reopened_reason == "The candidate paid"
-    facts = stage_facts([(r.application_id, 8, r.attempt, r.completed_at, r.amount, r.amount_currency, r.data) for r in (first, latest)])
+    facts = stage_facts([(r.application_id, 9, r.attempt, r.completed_at, r.amount, r.amount_currency, r.data) for r in (first, latest)])
     assert advance_cell(facts[app_id], "INR") == "10k collected/45k"

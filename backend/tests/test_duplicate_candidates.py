@@ -232,7 +232,7 @@ def deployed_tharun(env):
         db.add(m.Candidate(id="travelled", ref="CND-00139", care_id="CI-139", name="Tharun Pk Kumar", phone="9000000139", passport_no=person.passport_no,
                            status=m.CandidateStatus.deployed, source=m.Source.other, owner_id="staff"))
         db.flush()
-        db.add(m.Application(id="app-139", candidate_id="travelled", order_id="o1", owner_id="staff", current_stage=11, status=m.ApplicationStatus.deployed, lock_version=0, draft={}))
+        db.add(m.Application(id="app-139", candidate_id="travelled", order_id="o1", owner_id="staff", current_stage=12, status=m.ApplicationStatus.deployed, lock_version=0, draft={}))
         db.commit()
 
 
@@ -261,7 +261,7 @@ def test_add_documents_files_into_the_existing_candidate_without_touching_its_st
         candidate = db.get(Candidate, "travelled")
         assert candidate.status == m.CandidateStatus.deployed and candidate.owner_id == "staff" and candidate.name == "Tharun Pk Kumar"
         application = db.get(m.Application, "app-139")
-        assert application.status == m.ApplicationStatus.deployed and application.current_stage == 11
+        assert application.status == m.ApplicationStatus.deployed and application.current_stage == 12
         assert db.scalar(select(func.count()).select_from(m.ApplicationStage).where(m.ApplicationStage.application_id == "app-139")) == 0
         held = {row.slot: row for row in db.scalars(select(Attachment).where(Attachment.entity_id == "travelled"))}
         assert held["passport"].file_name == "Tharun_Pk_Kumar-Passport.pdf" and held["passport"].version == 1

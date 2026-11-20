@@ -19,7 +19,7 @@ const ORDER = ['application_form', 'resume', 'passport', 'aadhaar', 'medical', '
 const EMPTY_ORDER = ORDER.filter(key => key !== 'application_form')
 
 test('the shared list keeps eleven required documents and optional application/Aadhaar evidence in order', () => {
-  assert.deepEqual(slots.DOCUMENT_SLOTS.filter(entry => slots.documentExpected(entry, 11)).map(entry => entry.slot), ['resume', 'passport', 'medical', 'signed_offer', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice'])
+  assert.deepEqual(slots.DOCUMENT_SLOTS.filter(entry => slots.documentExpected(entry, 12)).map(entry => entry.slot), ['resume', 'passport', 'medical', 'signed_offer', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice'])
   assert.deepEqual(slots.DOCUMENT_SLOT_KEYS, ORDER)
   assert.equal(slots.documentLabel('photo'), 'Photo')
   assert.equal(slots.documentLabel('passport'), 'Passport')
@@ -38,13 +38,18 @@ test('the expected-by-stage rule follows the contract', () => {
   // Always-expected documents count even with no application; optional ones never do without a stage.
   assert.equal(slots.documentExpected(slots.documentSlot('application_form'), null), false)
   assert.equal(slots.documentExpected(slots.documentSlot('photo'), null), false)
-  assert.equal(slots.documentExpected(slots.documentSlot('emigration'), 9), false)
-  assert.equal(slots.documentExpected(slots.documentSlot('emigration'), 10), true)
-  for (const key of ['undertaking_letter', 'insurance', 'invoice']) {
-    assert.equal(slots.documentExpected(slots.documentSlot(key), 10), false)
-    assert.equal(slots.documentExpected(slots.documentSlot(key), 11), true)
+  assert.equal(slots.documentExpected(slots.documentSlot('medical'), 6), true)
+  assert.equal(slots.documentExpected(slots.documentSlot('pcc'), 6), false)       // PCC is expected from its own stage, 7
+  assert.equal(slots.documentExpected(slots.documentSlot('pcc'), 7), true)
+  assert.equal(slots.documentExpected(slots.documentSlot('visa'), 9), false)
+  assert.equal(slots.documentExpected(slots.documentSlot('visa'), 10), true)
+  assert.equal(slots.documentExpected(slots.documentSlot('emigration'), 10), false)
+  assert.equal(slots.documentExpected(slots.documentSlot('emigration'), 11), true)
+  for (const key of ['air_ticket', 'undertaking_letter', 'insurance', 'invoice']) {
+    assert.equal(slots.documentExpected(slots.documentSlot(key), 11), false)
+    assert.equal(slots.documentExpected(slots.documentSlot(key), 12), true)
   }
-  assert.equal(slots.documentExpected(slots.documentSlot('other'), 11), false)
+  assert.equal(slots.documentExpected(slots.documentSlot('other'), 12), false)
 })
 
 test('an empty candidate still lists every slot, in order, labelled from the shared list', () => {

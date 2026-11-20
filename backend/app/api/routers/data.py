@@ -2,7 +2,7 @@
 Read and write endpoints for the collections the front end holds.
 
 One bootstrap call returns everything the store needs, because the app renders a whole
-desk at once — eleven stages, task lists, order progress — and a page that fired ten
+desk at once — twelve stages, task lists, order progress — and a page that fired ten
 requests on mount would simply be slower for no benefit at this size. When the candidate
 table outgrows a single payload, this is the seam to paginate behind.
 """

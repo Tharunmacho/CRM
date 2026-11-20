@@ -29,7 +29,7 @@ Unmap/complete/reopen use consistent locks and expected versions. An old applica
 
 ## Recovery and handoffs
 
-Retry failed search explicitly. If mapping committed but directory refresh failed, reload results rather than map the same person again. On a concurrent conflict, inspect current application state. The next workflow is [stages 1–5](14-stages-one-to-five.md), then [stages 6–11](15-stages-six-to-eleven.md).
+Retry failed search explicitly. If mapping committed but directory refresh failed, reload results rather than map the same person again. On a concurrent conflict, inspect current application state. The next workflow is [stages 1–5](14-stages-one-to-five.md), then [stages 6–11](15-stages-six-to-twelve.md).
 
 ## Acceptance checklist
 

@@ -16,9 +16,9 @@ const FILTERS: { key: CandidateFilter; label: string }[] = [
   { key: 'moved', label: 'Moved this period' }, { key: 'closed', label: 'Closed' }, { key: 'deployed', label: 'Deployed' },
 ]
 
-/** The eleven stages as a row of marks: filled up to the furthest stage reached, the current one outlined. */
+/** The twelve stages as a row of marks: filled up to the furthest stage reached, the current one outlined. */
 function Track({ item, labels }: { item: CandidateRow; labels: string[] }) {
-  return <ol className={`sw-track is-${item.status}`} aria-label={`Reached stage ${item.reached} of 11, ${item.stageLabel}`}>
+  return <ol className={`sw-track is-${item.status}`} aria-label={`Reached stage ${item.reached} of 12, ${item.stageLabel}`}>
     {labels.map((label, index) => {
       const stage = index + 1
       const state = item.status === 'deployed' || stage < item.reached ? 'done' : stage === item.reached ? (item.status === 'closed' ? 'closed' : 'now') : 'todo'
@@ -116,7 +116,7 @@ export function StaffDrawer({ row, report, onClose }: { row: StaffRow; report: S
         {candidates && <>
           <p className="sw-note">{candidates.total > candidates.shown ? `Showing ${candidates.shown} of ${candidates.total}: in-progress candidates first, then deployed and closed.` : `${candidates.total} candidate${candidates.total === 1 ? '' : 's'} placed on orders.`}</p>
           {shown.length === 0 ? <p className="sw-empty">No candidates match this filter.</p> : <div className="sw-scroll"><table className="sw-table sw-candidates">
-            <thead><tr><th>Candidate</th><th>Order</th><th>Progress through the 11 stages</th><th>Now</th><th className="num">Days there</th><th className="num">Moved</th></tr></thead>
+            <thead><tr><th>Candidate</th><th>Order</th><th>Progress through the 12 stages</th><th>Now</th><th className="num">Days there</th><th className="num">Moved</th></tr></thead>
             <tbody>{shown.map(item => <tr key={item.applicationId} className={item.status === 'active' && (item.daysInStage ?? 0) >= report.thresholds.stuckDays ? 'is-flag' : undefined}>
               <td><button type="button" className="sw-link" onClick={() => navigate(`/candidates/${item.candidateId}`)}>{item.candidate}<ExternalLink size={12} aria-hidden="true" /></button><small>{primaryId(item)}</small></td>
               <td>{item.order}<small>{item.designation} - {item.client}</small></td>

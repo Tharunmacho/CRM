@@ -15,7 +15,7 @@ from sqlalchemy import select, text
 from app.db.models import (Application, ApplicationStage, Attachment, AuditEntry, DocumentExtractionJob, EmailIngestionJob,
                            MailAccount, MailAttachment, MailDraftAttachment, MailSendAttempt,
                            MultiPersonIntake, WhatsAppMessage, WhatsAppSendAttempt)
-from app.domain.stages import FILE_FIELDS
+from app.domain.stages import FILE_FIELDS, PASSPORT_STAGE
 from app.services.document_storage import put_bytes, read_bytes, storage_key
 from app.services.instance_guard import instance_name
 from app.services.mail_storage import storage_identity
@@ -50,7 +50,7 @@ def legacy_application_documents(db):
             owned = [item for item in attachments.get(raw, ()) if (
                 item.entity_type == "application" and item.entity_id == application.id
                 and item.slot in {field, f"stage_{stage}_{field}"}
-            ) or (stage == 7 and field == "copy" and item.entity_type == "candidate"
+            ) or (stage == PASSPORT_STAGE and field == "copy" and item.entity_type == "candidate"
                   and item.entity_id == application.candidate_id and item.slot == "passport")]
             if len(owned) > 1:
                 raise ValueError(f"Ambiguous legacy application document reference: {application.id}, stage {stage}, {field}; resolve it before migration")

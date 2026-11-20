@@ -30,7 +30,11 @@ import { DatePicker } from '@/shared/ui/date-picker'
 import { ApiError, api } from '@/shared/api/client'
 import { taskClockStart } from '@/shared/lib/task-time'
 import {
+  ADVANCE_STAGE,
+  PASSPORT_STAGE,
+  PCC_STAGE,
   STAGES,
+  TOTAL_STAGES,
   closureLabels,
   fieldVisible,
   stageByNo,
@@ -348,7 +352,7 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
   const statusTone = app.status === 'closed' ? 'stamp' : app.status === 'deployed' ? 'green' : 'navy'
   const statusLabel = app.status === 'active' ? 'Active' : app.status === 'deployed' ? 'Deployed' : 'Closed'
   const progressLead = app.status === 'active' ? `Stage ${app.currentStage} of ${STAGES.length} · ${stageByNo(app.currentStage).title}` : app.status === 'deployed' ? 'Deployed' : `Closed at stage ${app.currentStage}${app.closureReason ? ` · ${closureLabels[app.closureReason]}` : ''}`
-  const progressText = app.status === 'active' ? 'Write feedback and choose Save and move to advance manually. Documents are optional for stage movement.' : app.status === 'deployed' ? 'All 11 stages are done. Open any stage to read its saved feedback.' : 'This order is closed for this candidate. Saved feedback, results and documents are below.'
+  const progressText = app.status === 'active' ? 'Write feedback and choose Save and move to advance manually. Documents are optional for stage movement.' : app.status === 'deployed' ? 'All 12 stages are done. Open any stage to read its saved feedback.' : 'This order is closed for this candidate. Saved feedback, results and documents are below.'
   return (
     <>
       <header className="sm-head">
@@ -494,8 +498,8 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
   const by = store.user(record.completedBy)
   const negative = NEGATIVE_OUTCOMES.includes(record.outcome)
   // An advance saved before it had a status reads as Collected when it holds an amount; the same words the tracker sheet uses.
-  const data = record.stage === 8 ? withAdvanceStatus(record.data) : record.data
-  const advanceLine = record.stage === 8 ? advanceSummary(data, store.settings.defaultAdvanceCurrency) : null
+  const data = record.stage === ADVANCE_STAGE ? withAdvanceStatus(record.data) : record.data
+  const advanceLine = record.stage === ADVANCE_STAGE ? advanceSummary(data, store.settings.defaultAdvanceCurrency) : null
 
   return (
     <section>
@@ -617,22 +621,27 @@ function CurrentStage({
   const candidate = store.candidate(app.candidateId)
   const profilePassport = newestFileVersions(candidate?.documents.find((document) => document.key === 'passport')?.versions ?? [])[0]
   const profileAirTicket = newestFileVersions(candidate?.documents.find((document) => document.key === 'air_ticket')?.versions ?? [])[0]
+  const profilePcc = newestFileVersions(candidate?.documents.find((document) => document.key === 'pcc')?.versions ?? [])[0]
   const profilePassportId = profilePassport?.id
   const profileAirTicketId = profileAirTicket?.id
-  // Stage 7 starts from the passport copy already on the profile; the recruiter may replace it.
-  // Stage 11 likewise starts from the Air ticket already saved in the
+  const profilePccId = profilePcc?.id
+  // Stage 7 (PCC) starts from the PCC already on the profile and stage 8 (Passport) from the passport copy there; the recruiter may
+  // replace either. Stage 12 likewise starts from the Air ticket already saved in the
   // candidate's Documents section. It is the same attachment, not a second
   // upload, and the server still requires a travel date before deployment.
   const withCandidateDocuments = (draft: Record<string, unknown>) => {
     let prepared = draft
-    if (app.currentStage === 7 && !prepared.copy && profilePassport) {
+    if (app.currentStage === PCC_STAGE && !prepared.file && profilePcc) {
+      prepared = { ...prepared, pccStatus: prepared.pccStatus ?? 'received', file: { id: profilePcc.id, name: profilePcc.name, sizeKb: profilePcc.sizeKb, url: profilePcc.url, version: profilePcc.version } }
+    }
+    if (app.currentStage === PASSPORT_STAGE && !prepared.copy && profilePassport) {
       prepared = { ...prepared, copy: { id: profilePassport.id, name: profilePassport.name, sizeKb: profilePassport.sizeKb, url: profilePassport.url, version: profilePassport.version } }
     }
-    if (app.currentStage === 11 && !prepared.file && profileAirTicket) {
+    if (app.currentStage === TOTAL_STAGES && !prepared.file && profileAirTicket) {
       prepared = { ...prepared, file: { id: profileAirTicket.id, name: profileAirTicket.name, sizeKb: profileAirTicket.sizeKb, url: profileAirTicket.url, version: profileAirTicket.version } }
     }
-    // A stage-8 draft saved before the advance had a status shows it as Collected / Pending in the form.
-    if (app.currentStage === 8) prepared = withAdvanceStatus(prepared)
+    // A stage-9 draft saved before the advance had a status shows it as Collected / Pending in the form.
+    if (app.currentStage === ADVANCE_STAGE) prepared = withAdvanceStatus(prepared)
     return prepared
   }
   const [data, setData] = useState<Record<string, unknown>>(() => withCandidateDocuments(app.draft ?? {}))
@@ -657,7 +666,7 @@ function CurrentStage({
 
   useEffect(() => {
     if (!dirty) { setData(withCandidateDocuments(app.draft ?? {})); setLockVersion(app.lockVersion ?? 0) }
-  }, [app.lockVersion, app.currentStage, profilePassportId, profileAirTicketId])
+  }, [app.lockVersion, app.currentStage, profilePassportId, profileAirTicketId, profilePccId])
 
   const task = store.tasks.find(
     (t) => t.applicationId === app.id && t.stage === app.currentStage && !t.completedAt && !t.cancelledAt,
@@ -1133,7 +1142,7 @@ function DeployedRow() {
       <span className="sm-end-icon" aria-hidden="true"><Trophy className="h-5 w-5" /></span>
       <div>
         <b>Deployed</b>
-        <p>All 11 stages are done. The order's deployed count went up by one. When deployed equals openings, the order becomes Filled.</p>
+        <p>All 12 stages are done. The order's deployed count went up by one. When deployed equals openings, the order becomes Filled.</p>
       </div>
     </section>
   )

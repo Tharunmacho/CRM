@@ -208,7 +208,7 @@ An application unlocks the stage modal. The current stage is editable; completed
 
 Only stages **1, 2, 4 and 6** close an application for a negative outcome. Page 8's diagram caption says “3 exits,” but its diagram, prose and stage table specify four; use the explicit four-stage rule. Do not silently promote every recorded field into a required completion field: existing stricter validators must be reconciled with the table in Phase 3.
 
-Closing an application cancels its remaining open tasks and releases the active mapping. Candidate history and files stay available. Stage 11 sets the application/candidate to Deployed and fills the order once deployed equals openings. Reopening must retain immutable prior attempts and define how later work and deployed totals are reversed before implementation. Reopening an old application must also respect any newer active mapping; it cannot bypass the one-active-application constraint.
+Closing an application cancels its remaining open tasks and releases the active mapping. Candidate history and files stay available. Stage 12 sets the application/candidate to Deployed and fills the order once deployed equals openings. Reopening must retain immutable prior attempts and define how later work and deployed totals are reversed before implementation. Reopening an old application must also respect any newer active mapping; it cannot bypass the one-active-application constraint.
 
 ### Tasks, daily remarks and notifications — PRD pp. 5, 11–12
 
@@ -290,4 +290,4 @@ These decisions do not block repository organization. Resolve each before implem
 | OCR confidence | PRD p. 7 says low confidence without a numeric threshold | Configure a reviewed threshold against actual Veriis output; keep missing-name/phone as explicit review reasons. |
 | Order capacity | PRD p. 10 fills when deployed equals openings; remapping deployed candidates/overfilling is not specified | Define handling of additional mapped candidates and deployment beyond openings while retaining historical placements. |
 
-Optional acknowledgement messages are the only intake feature explicitly marked optional in the PRD (p. 7). Inbox, WhatsApp ingestion, queue processing, assignment, all 11 stages, tasks and escalation remain part of v1 even when delivered in separate phases.
+Optional acknowledgement messages are the only intake feature explicitly marked optional in the PRD (p. 7). Inbox, WhatsApp ingestion, queue processing, assignment, all 12 stages, tasks and escalation remain part of v1 even when delivered in separate phases.

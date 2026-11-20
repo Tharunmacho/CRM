@@ -21,7 +21,7 @@ from app.db.models import (
     Candidate, CandidateStatus, ClosureReason, Order, OrderStatus, Role, Task, TaskKind, User,
 )
 from app.domain.orders import reopen_blocker
-from app.domain.stages import FILE_FIELDS, TOTAL_STAGES, blocked_message, stage_by_no, validate_payload
+from app.domain.stages import ADVANCE_STAGE, FILE_FIELDS, PASSPORT_STAGE, PCC_STAGE, TOTAL_STAGES, blocked_message, stage_by_no, validate_payload
 from app.services import agency_settings
 from app.services import document_storage
 from app.services.traveller_id import assign_traveller_id
@@ -208,8 +208,8 @@ def _sync_order(db: Session, order: Order):
 
 
 def _stage_options(db: Session, stage: int):
-    """Reference data a stage checks its values against; only the advance (stage 8) has any: the active currencies."""
-    return agency_settings.stage_options(db) if stage == 8 else None
+    """Reference data a stage checks its values against; only the advance (stage 9) has any: the active currencies."""
+    return agency_settings.stage_options(db) if stage == ADVANCE_STAGE else None
 
 
 def _normalized_data(db: Session, app: Application, payload: dict, *, require_bytes=False):
@@ -229,13 +229,16 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
         owned = attachment is not None and (
             (attachment.entity_type == "application" and attachment.entity_id == app.id
              and attachment.slot in {expected, field})
-            or (app.current_stage == 7 and field == "copy" and attachment.entity_type == "candidate"
+            or (app.current_stage == PASSPORT_STAGE and field == "copy" and attachment.entity_type == "candidate"
                 and attachment.entity_id == app.candidate_id and attachment.slot == "passport")
             # The candidate-document checklist is the canonical home for a
-            # ticket.  Stage 11 may reference that exact stored file rather
+            # ticket.  Stage 12 may reference that exact stored file rather
             # than making staff upload a second copy merely to deploy.
             or (app.current_stage == TOTAL_STAGES and field == "file" and attachment.entity_type == "candidate"
                 and attachment.entity_id == app.candidate_id and attachment.slot == "air_ticket")
+            # The same for the police clearance certificate: the candidate's PCC document is the canonical copy.
+            or (app.current_stage == PCC_STAGE and field == "file" and attachment.entity_type == "candidate"
+                and attachment.entity_id == app.candidate_id and attachment.slot == "pcc")
         )
         if not owned:
             raise HTTPException(422, {"message": f"Choose an uploaded {field} belonging to this application and stage.", "missing": [field]})
@@ -263,7 +266,7 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
         data[field] = {"id": attachment.id, "name": attachment.file_name,
                        "url": f"/api/files/{attachment.id}", "sizeKb": attachment.size_kb,
                        "version": attachment.version}
-    if app.current_stage == 7 and data.get("heldBy"):
+    if app.current_stage == PASSPORT_STAGE and data.get("heldBy"):
         raw = data["heldBy"]
         identifier = raw.get("id") if isinstance(raw, dict) else None
         keeper = db.get(User, identifier) if identifier else None
@@ -480,8 +483,8 @@ def complete_stage(application_id: str, body: CompleteIn,
             owner_id=candidate.owner_id or app.owner_id,
             # The amount column feeds the Advance collections report: only money that was collected goes there. A pending
             # advance keeps its expected amount in the record's data only.
-            amount=data.get("amount") if app.current_stage == 8 and data.get("advanceStatus") != "pending" else None,
-            amount_currency=data.get("amountCurrency") if app.current_stage == 8 else None,
+            amount=data.get("amount") if app.current_stage == ADVANCE_STAGE and data.get("advanceStatus") != "pending" else None,
+            amount_currency=data.get("amountCurrency") if app.current_stage == ADVANCE_STAGE else None,
         ))
         # The candidate ticks off the recruiter's Daily work list from this stage record itself ("done today"); nothing else to write.
         for task in _open_tasks(db, app):
@@ -516,7 +519,7 @@ def complete_stage(application_id: str, body: CompleteIn,
             assign_traveller_id(db, candidate)
         else:
             app.current_stage += 1
-            if app.current_stage == 7:
+            if app.current_stage == PASSPORT_STAGE:
                 passport = db.scalar(select(Attachment).where(
                     Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
                     Attachment.slot == "passport",

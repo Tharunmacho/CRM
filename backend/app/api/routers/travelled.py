@@ -25,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.deps import current_user
+from app.domain.stages import TOTAL_STAGES
 from app.db.models import (
     Application, ApplicationStage, Attachment, ApplicationStatus, Candidate, Client, Company, Designation, Order, User,
 )
@@ -161,7 +162,7 @@ def _read_rows(db: Session, user: User) -> list[dict]:
         ApplicationStage.application_id.label("application_id"), ApplicationStage.data.label("data"),
         ApplicationStage.reopened_reason.label("reopened_reason"),
         func.row_number().over(partition_by=ApplicationStage.application_id, order_by=ApplicationStage.attempt.desc()).label("rank"),
-    ).where(ApplicationStage.stage == 11).subquery()
+    ).where(ApplicationStage.stage == TOTAL_STAGES).subquery()
     ticket = select(ranked.c.application_id, ranked.c.data).where(
         ranked.c.rank == 1, ranked.c.reopened_reason.is_(None)).subquery()
     travel = ticket.c.data["travelDate"].as_string()

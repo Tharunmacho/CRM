@@ -1,5 +1,5 @@
 /**
- * What stage 8 (the advance) says, in words. Mirrors backend/app/services/advance_text.py.
+ * What stage 9 (the advance) says, in words. Mirrors backend/app/services/advance_text.py.
  *
  * The stage record keeps `advanceStatus` ('collected' | 'pending'), `amount` (the advance collected, or the advance expected
  * while pending), `amountCurrency` and `serviceChargeTotal` (optional). Records saved before the status existed have none:
@@ -14,7 +14,7 @@ const positive = (value: unknown): number | null => {
   return Number.isFinite(number) && number > 0 ? number : null
 }
 
-/** The advance status of a stage-8 record's values, or null when it holds nothing (or ended with a stopping exit). */
+/** The advance status of a stage-9 record's values, or null when it holds nothing (or ended with a stopping exit). */
 export function advanceStatusOf(data: Record<string, unknown> | null | undefined): AdvanceStatus | null {
   const d = data ?? {}
   if (d.stop) return null

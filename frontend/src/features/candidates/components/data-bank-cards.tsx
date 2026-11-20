@@ -9,7 +9,7 @@ interface Props {
   onOpen: (candidate: Candidate) => void
   onReassign: (candidate: Candidate) => void
   onEdit: (candidate: Candidate) => void
-  /** Opens the 11-stage modal from the stage indicator. */
+  /** Opens the 12-stage modal from the stage indicator. */
   onOpenStage?: (applicationId: string) => void
 }
 

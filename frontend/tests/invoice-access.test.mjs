@@ -75,27 +75,27 @@ const payload = (withInvoice) => {
   const keys = DOCUMENT_SLOT_KEYS.filter((key) => withInvoice || key !== 'invoice')
   return {
     candidate: { id: 'c1', ref: 'CND-1', name: 'Asha Rao', canEdit: true },
-    application: { id: 'a1', orderId: 'o1', orderRef: 'ORD-1', status: 'active', currentStage: 11, position: 'Welder', country: 'UAE' },
+    application: { id: 'a1', orderId: 'o1', orderRef: 'ORD-1', status: 'active', currentStage: 12, position: 'Welder', country: 'UAE' },
     personal: { candidateName: 'Asha Rao' }, passport: {}, education: [], experience: { history: [] }, recruitment: {},
     tracking: { summary: {}, rows: [] },
     documentOrder: keys,
-    documents: Object.fromEntries(keys.map((key) => [key, { ...slot(key), required: key === 'resume', requiredFromStage: key === 'invoice' ? 11 : null }])),
+    documents: Object.fromEntries(keys.map((key) => [key, { ...slot(key), required: key === 'resume', requiredFromStage: key === 'invoice' ? 12 : null }])),
   }
 }
 
-test('a form payload without the invoice slot yields no Invoice document, checklist item or stage-11 row', () => {
+test('a form payload without the invoice slot yields no Invoice document, checklist item or stage-12 row', () => {
   const form = model.normalizeForm(payload(false))
   assert.equal('invoice' in form.documents, false)
   assert.equal(form.documentOrder.includes('invoice'), false)
-  const later = stages.stageRows({ ...form, tracking: { summary: { currentStage: 11 }, rows: [] } }, true)[10].documents.map((item) => item.slot)
+  const later = stages.stageRows({ ...form, tracking: { summary: { currentStage: 12 }, rows: [] } }, true)[11].documents.map((item) => item.slot)
   assert.deepEqual(later, ['air_ticket', 'undertaking_letter', 'insurance'])
   const missing = model.completenessOf(model.toDraft(form), form.documents).missing.map((item) => item.key)
   assert.equal(missing.includes('documents.invoice'), false)
 })
 
-test('the admin still gets the Invoice document and its place at stage 11', () => {
+test('the admin still gets the Invoice document and its place at stage 12', () => {
   const form = model.normalizeForm(payload(true))
   assert.equal('invoice' in form.documents, true)
-  const later = stages.stageRows({ ...form, tracking: { summary: { currentStage: 11 }, rows: [] } }, true)[10].documents.map((item) => item.slot)
+  const later = stages.stageRows({ ...form, tracking: { summary: { currentStage: 12 }, rows: [] } }, true)[11].documents.map((item) => item.slot)
   assert.deepEqual(later, ['air_ticket', 'undertaking_letter', 'insurance', 'invoice'])
 })

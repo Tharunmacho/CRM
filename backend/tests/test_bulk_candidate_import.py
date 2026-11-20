@@ -150,13 +150,13 @@ def test_someone_who_has_flown_is_recorded_as_travelled_even_without_the_offer_c
     files = [("Resume.pdf", ["resume"]), ("Passport.pdf", ["passport"]), ("Medical.pdf", ["medical"]), ("Visa.pdf", ["visa"]),
              ("Air ticket.pdf", ["air_ticket"])]
     result = _historical_import(env, "Ravi", files, {"order": "ORD-2", "travel_date": "09/05/2026", "airline": "Air Arabia G9472", "pnr": "6ZA8JH"})
-    assert (result["action"], result["completedThrough"]) == ("deploy", 11)
+    assert (result["action"], result["completedThrough"]) == ("deploy", 12)
     assert result["careId"] == "CI-001"
     application, stages = _stage_rows(env, result["candidateId"])
-    assert application.status == ApplicationStatus.deployed and [s.stage for s in stages] == list(range(1, 12))
-    assert stages[10].data["travelDate"] == "2026-05-09" and stages[10].data["pnr"] == "6ZA8JH"
-    assert "file" not in stages[4].data and "receipt" not in stages[7].data and "file" not in stages[9].data   # nothing invented for the missing papers
-    assert "amount" not in stages[7].data
+    assert application.status == ApplicationStatus.deployed and [s.stage for s in stages] == list(range(1, 13))
+    assert stages[11].data["travelDate"] == "2026-05-09" and stages[11].data["pnr"] == "6ZA8JH"
+    assert "file" not in stages[4].data and "receipt" not in stages[8].data and "file" not in stages[10].data   # nothing invented for the missing papers
+    assert "amount" not in stages[8].data
     assert '"id": "history"' not in json.dumps([s.data for s in stages])                                       # the stand-in is never stored
     with env.sessions() as db:   # travelled: the first Traveller ID of the continuous series, separate from the Care India ID
         candidate = db.get(Candidate, result["candidateId"])
@@ -166,37 +166,37 @@ def test_someone_who_has_flown_is_recorded_as_travelled_even_without_the_offer_c
 def test_someone_the_office_says_has_flown_but_has_no_ticket_is_travelled_with_the_date_left_blank(env):
     files = [("Resume.pdf", ["resume"]), ("Passport.pdf", ["passport"]), ("Medical.pdf", ["medical"]), ("Visa stamping.pdf", ["visa_stamping"])]
     ordinary = _historical_import(env, "Sita", files, {"order": "ORD-1"})
-    assert ordinary["action"] == "in_progress" and ordinary["currentStage"] == 11     # without the office's word, no ticket means not yet flown
+    assert ordinary["action"] == "in_progress" and ordinary["currentStage"] == 12     # without the office's word, no ticket means not yet flown
     with env.sessions() as db:
         assert db.get(Candidate, ordinary["candidateId"]).traveller_id is None        # not travelled: no Traveller ID
     flown = _historical_import(env, "Gopal", files, {"order": "ORD-2"}, travel_confirmed=True)
-    assert (flown["action"], flown["completedThrough"]) == ("deploy", 11)
+    assert (flown["action"], flown["completedThrough"]) == ("deploy", 12)
     application, stages = _stage_rows(env, flown["candidateId"])
     assert application.status == ApplicationStatus.deployed
-    assert "travelDate" not in stages[10].data and "file" not in stages[10].data and '"id": "history"' not in json.dumps([s.data for s in stages])
+    assert "travelDate" not in stages[11].data and "file" not in stages[11].data and '"id": "history"' not in json.dumps([s.data for s in stages])
     with env.sessions() as db:   # no travel date on file: still numbered, as the next traveller
         assert db.get(Candidate, flown["candidateId"]).traveller_id == "CI-T-001"
 
 
-def test_a_complete_folder_becomes_a_deployed_candidate_with_all_eleven_stages(env):
+def test_a_complete_folder_becomes_a_deployed_candidate_with_all_twelve_stages(env):
     result = send(env, "Rahul Kumar", ALL_DOCUMENTS, FULL_ROW)
-    assert result["action"] == "deploy" and result["completedThrough"] == 11
+    assert result["action"] == "deploy" and result["completedThrough"] == 12
     with env.sessions() as db:
         candidate = db.get(Candidate, result["candidateId"])
         assert (candidate.name, candidate.status, candidate.owner_id) == ("Rahul Kumar", CandidateStatus.deployed, "staff")
         assert candidate.traveller_id == "CI-T-001"   # numbering follows the order people become travellers, not the travel date
         assert candidate.designations == ["Welder"]
         application = db.scalar(select(Application).where(Application.candidate_id == candidate.id))
-        assert application.status == ApplicationStatus.deployed and application.current_stage == 11
+        assert application.status == ApplicationStatus.deployed and application.current_stage == 12
         stages = list(db.scalars(select(ApplicationStage).where(ApplicationStage.application_id == application.id).order_by(ApplicationStage.stage)))
-        assert [s.stage for s in stages] == list(range(1, 12))
+        assert [s.stage for s in stages] == list(range(1, 13))
         assert [s.outcome for s in stages][:6] == ["Passed", "Forwarded", "Scheduled", "Selected", "Agreed", "Fit"]
-        assert (float(stages[7].amount), stages[7].amount_currency) == (15000.0, "INR")
+        assert (float(stages[8].amount), stages[8].amount_currency) == (15000.0, "INR")
         assert stages[2].data["date"] == "2026-01-10"
         assert [s.completed_at for s in stages] == sorted(s.completed_at for s in stages)   # the history reads in order
         # the stage evidence points at the same files the profile shows
         slots = {a.slot for a in db.scalars(select(Attachment).where(Attachment.entity_type == "application", Attachment.entity_id == application.id))}
-        assert slots == {"stage_5_file", "stage_8_receipt", "stage_9_file", "stage_10_file", "stage_11_file"}
+        assert slots == {"stage_5_file", "stage_7_file", "stage_9_receipt", "stage_10_file", "stage_11_file", "stage_12_file"}
         documents = {a.slot for a in db.scalars(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id))}
         assert documents == {"application_form", "resume", "passport", "photo", "education_certificate", "signed_offer", "medical", "pcc", "visa",
                              "google_review", "visa_stamping", "emigration", "air_ticket", "undertaking_letter", "insurance", "invoice"}
@@ -208,14 +208,14 @@ def test_a_complete_folder_becomes_a_deployed_candidate_with_all_eleven_stages(e
 def test_missing_documents_leave_the_last_stage_open_instead_of_blocking(env):
     names = [n for n in ALL_DOCUMENTS if n not in ("PCC.pdf", "Emigration.pdf")]
     result = send(env, "Anil", names, {**FULL_ROW, "phone": "9876500001"})
-    assert (result["action"], result["completedThrough"], result["currentStage"]) == ("in_progress", 10, 11)
+    assert (result["action"], result["completedThrough"], result["currentStage"]) == ("in_progress", 11, 12)
     assert any("PCC" in issue["message"] for issue in result["issues"])
     with env.sessions() as db:
         application = db.scalar(select(Application).where(Application.candidate_id == result["candidateId"]))
-        assert application.status == ApplicationStatus.active and application.current_stage == 11
+        assert application.status == ApplicationStatus.active and application.current_stage == 12
         assert application.draft["file"]["name"] == "Anil-Air_ticket.pdf"      # stored as "<Name>-<Document>", not under the original file name
         task = db.scalar(select(Task).where(Task.application_id == application.id, Task.completed_at.is_(None)))
-        assert task is not None and task.stage == 11
+        assert task is not None and task.stage == 12
 
 
 def test_only_what_the_folder_proves_is_recorded_and_the_rest_is_done_on_the_stage_screen(env):
@@ -233,6 +233,23 @@ def test_only_what_the_folder_proves_is_recorded_and_the_rest_is_done_on_the_sta
     done = env.client.post(f"/api/applications/{application_id}/complete", json={"lock_version": 0, "data": {"applied": "yes", "result": "fit", "feedback": "Medical done; fit."}})
     assert done.status_code == 200, done.text
     assert done.json()["currentStage"] == 7
+
+
+def test_a_pcc_in_the_folder_proves_stage_7_and_a_passport_date_without_one_records_it_as_done_manually(env):
+    # Stage 7 is the police clearance: a PCC file is its evidence (status Received, the file kept under stage_7_file) ...
+    result = send(env, "Dev", ["Resume.pdf", "Passport.pdf", "Medical.pdf", "PCC.pdf"], {"phone": "9876500090", "order": "ORD-1", "interview_date": "10/01/2026"})
+    assert (result["action"], result["completedThrough"], result["currentStage"]) == ("in_progress", 7, 8)
+    application, stages = _stage_rows(env, result["candidateId"])
+    assert [s.stage for s in stages] == list(range(1, 8)) and application.current_stage == 8
+    assert stages[6].outcome == "Received" and stages[6].data["pccStatus"] == "received" and stages[6].data["file"]["name"] == "Dev-Police_clearance_certificate_PCC.pdf"
+    assert "pccStatus" not in stages[5].data and "result" not in stages[6].data
+    assert any(a.slot == "stage_7_file" for a in stored(env, Attachment, Attachment.entity_type == "application", Attachment.entity_id == application.id))
+    # ... and with no PCC file but a later stage proven, stage 7 is recorded like any empty stage: done manually, with no data.
+    later = send(env, "Eka", ["Resume.pdf", "Passport.pdf", "Medical.pdf"], {"phone": "9876500091", "order": "ORD-1", "interview_date": "10/01/2026",
+                                                                          "passport_collected_date": "05/02/2026"})
+    _, rows = _stage_rows(env, later["candidateId"])
+    assert [s.stage for s in rows] == list(range(1, 9)) and rows[6].outcome == "Completed manually" and rows[6].data == {}
+    assert rows[7].outcome == "Collected"
 
 
 def test_a_folder_with_no_proof_of_any_stage_starts_at_prescreening(env):
@@ -258,7 +275,7 @@ def test_the_last_opening_is_not_over_filled(env):
     first = send(env, "Farid", ALL_DOCUMENTS, {**FULL_ROW, "phone": "9876500006", "order": "ORD-2"})
     assert first["action"] == "deploy"
     second = send(env, "Gita", ALL_DOCUMENTS, {**FULL_ROW, "phone": "9876500007", "order": "ORD-2"})
-    assert (second["action"], second["currentStage"]) == ("in_progress", 11)
+    assert (second["action"], second["currentStage"]) == ("in_progress", 12)
     with env.sessions() as db:
         assert db.get(Order, "o2").status == OrderStatus.filled
         assert db.scalar(select(func.count()).select_from(Application).where(Application.order_id == "o2", Application.status == ApplicationStatus.deployed)) == 1
@@ -321,20 +338,20 @@ def test_the_downloadable_sheet_reads_back(env):
 
 def test_the_folder_alone_is_enough_no_sheet_no_phone(env):
     """Documents and a job order are all the screen asks for; the reading of the resume and passport fills in the rest."""
-    # A travel date is the one thing a folder cannot give: the ticket alone no longer deploys (stage 11 needs the ticket and its date).
+    # A travel date is the one thing a folder cannot give: the ticket alone no longer deploys (stage 12 needs the ticket and its date).
     without_date = send(env, "Mohan Das", ALL_DOCUMENTS, None, default_order="ORD-1", recruiter=None)
-    assert (without_date["action"], without_date["completedThrough"], without_date["currentStage"]) == ("in_progress", 10, 11)
+    assert (without_date["action"], without_date["completedThrough"], without_date["currentStage"]) == ("in_progress", 11, 12)
     assert any("Travel date" in i["message"] for i in without_date["issues"])
     result = send(env, "Mohan Raj", ALL_DOCUMENTS, {"travel_date": "20/03/2026"}, default_order="ORD-1", recruiter=None)
-    assert (result["action"], result["completedThrough"]) == ("deploy", 11)
+    assert (result["action"], result["completedThrough"]) == ("deploy", 12)
     assert any("interview date" in i["message"] for i in result["issues"])
     with env.sessions() as db:
         candidate = db.get(Candidate, result["candidateId"])
         assert candidate.phone == "" and candidate.needs_review and candidate.status == CandidateStatus.deployed
         assert candidate.owner_id == "admin"                      # nobody was named: the person importing owns it
         stages = {s.stage: s for s in db.scalars(select(ApplicationStage).join(Application).where(Application.candidate_id == candidate.id))}
-        assert len(stages) == 11 and "date" not in stages[3].data and stages[8].amount is None
-        assert stages[8].data["receipt"]["name"] == "Mohan_Raj-Advance_receipt_stage_8.pdf"
+        assert len(stages) == 12 and "date" not in stages[3].data and stages[9].amount is None
+        assert stages[9].data["receipt"]["name"] == "Mohan_Raj-Advance_receipt_stage_9.pdf"
     # ... and the same person is not imported twice.
     again = send(env, "mohan raj", ["Resume.pdf"], None, default_order="ORD-1")
     assert again["action"] == "skip" and "Already in the CRM" in again["issues"][0]["message"]
@@ -854,8 +871,8 @@ def test_imported_documents_are_stored_as_the_folder_name_and_the_document_not_t
     assert not any(word in name.lower() for name in names.values() for word in ("copy", "steel", "fixer", "pp", "aadhar.", "offer letter"))
     # the application's stage copies are named the same way
     assert {slot: name for (owner, slot, _), name in names.items() if owner == "application"} == {
-        "stage_5_file": OLD_PREFIX + "Signed_offer.pdf", "stage_9_file": OLD_PREFIX + "Visa.pdf",
-        "stage_11_file": OLD_PREFIX + "Air_ticket.pdf", "stage_8_receipt": OLD_PREFIX + "Advance_receipt_stage_8.pdf"}
+        "stage_5_file": OLD_PREFIX + "Signed_offer.pdf", "stage_10_file": OLD_PREFIX + "Visa.pdf",
+        "stage_12_file": OLD_PREFIX + "Air_ticket.pdf", "stage_9_receipt": OLD_PREFIX + "Advance_receipt_stage_9.pdf"}
 
 
 def test_the_original_file_name_is_kept_in_the_upload_audit_entry(env):
@@ -938,7 +955,7 @@ def test_the_file_references_kept_in_the_stages_follow_the_renamed_files(env, mo
     candidate_id = result["candidateId"]
     before = _file_references(env, candidate_id)
     wheres = {where for where, _ in before}
-    assert {"stage 5", "stage 8", "stage 9", "draft"} <= wheres, wheres            # finished stages that hold a file, and the open stage's draft
+    assert {"stage 5", "stage 9", "stage 10", "draft"} <= wheres, wheres            # finished stages that hold a file, and the open stage's draft
     assert all(ref["name"].startswith(OLD_PREFIX) for ref in before.values())
     with env.sessions() as db:
         stored_names = {a.id: a.file_name for a in db.scalars(select(Attachment).where(Attachment.id.in_({r["id"] for r in before.values()})))}

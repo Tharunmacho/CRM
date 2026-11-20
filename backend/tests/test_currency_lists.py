@@ -16,13 +16,13 @@ def test_fallback_list_includes_every_previously_stored_advance_currency():
 
 
 @pytest.mark.parametrize("code", CURRENCY_CODES)
-def test_stage_eight_accepts_every_fallback_currency(code):
-    assert validate_payload(8, {"amount": "10", "amountCurrency": code})["amountCurrency"] == code
+def test_stage_nine_accepts_every_fallback_currency(code):
+    assert validate_payload(9, {"amount": "10", "amountCurrency": code})["amountCurrency"] == code
 
 
-def test_stage_eight_still_rejects_a_currency_nobody_offers():
+def test_stage_nine_still_rejects_a_currency_nobody_offers():
     with pytest.raises(Exception):
-        validate_payload(8, {"amount": "10", "amountCurrency": "XXX"})
+        validate_payload(9, {"amount": "10", "amountCurrency": "XXX"})
 
 
 def test_new_candidate_nationality_is_left_empty_unless_provided():

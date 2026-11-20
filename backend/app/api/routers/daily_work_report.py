@@ -31,7 +31,7 @@ previousUntil are null, period.partial false, period.allTime true), series by we
     time of the previous period, up to period.previousUntil ISO), staff[].leads {assigned, contacted, interested, notInterested,
     noAnswer, wrongNumber, callback, notContacted}, staff[].tasks {done, pending, overdue} (not in /mine),
     "leadSheet": {totalLeads, assigned, unassigned, contacted, notContacted, byStatus: [{key,label,count}]},
-    "tasks": {total, done, pending, overdue}, "stages": {totals: [{no 0..11, key, label, count}], perStaff: [{id, counts: {"0".."11"}, total}]}.
+    "tasks": {total, done, pending, overdue}, "stages": {totals: [{no 0..12, key, label, count}], perStaff: [{id, counts: {"0".."12"}, total}]}.
 
     PERIOD-AWARE LEADS (additive; the all-time numbers stay): staff[].leads gains assignedInPeriod (leads handed to the recruiter in the
     period: COALESCE(assigned_at, created_at) in the range, agency time), notContactedInPeriod (of those, no call/status by the
@@ -48,7 +48,7 @@ previousUntil are null, period.partial false, period.allTime true), series by we
     newest first, one row per (person, date) with the latest snapshot; a recruiter reads only their own.
 
 (2) GET /api/reports/daily-work/drilldown?metric=<key>&from=&to=&staff=&client=&page=0&page_size=25   (page_size 1-100)
-    metric also accepts leadsAssigned, tasksDone, tasksPending, tasksOverdue and stage:<0-11> (candidates now at that stage).
+    metric also accepts leadsAssigned, tasksDone, tasksPending, tasksOverdue and stage:<0-12> (candidates now at that stage).
     {"metric","label","total","page","pageSize","rows": [{"at": ISO, "staffName", "kind": "candidate"|"lead", "candidateId"|null,
       "leadId"|null, "careId"|null, "name", "client"|null, "job"|null, "detail"}]}   newest first; never a phone/passport/ID number.
 

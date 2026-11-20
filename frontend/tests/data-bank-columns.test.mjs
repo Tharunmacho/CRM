@@ -41,7 +41,7 @@ const placementJs = ts.transpileModule(placementSource, {
 const placement = {}
 new Function('exports', 'React', 'bankApplication', 'bankFormApplication', 'stageByNo', 'StageChip', 'Dash', placementJs)(
   placement, React, assignment.bankApplication, assignment.bankFormApplication,
-  stage => ({ title: stage === 11 ? 'Deployed' : `Stage ${stage}` }),
+  stage => ({ title: stage === 12 ? 'Deployed' : `Stage ${stage}` }),
   ({ stage }) => React.createElement('span', { 'data-stage': stage }, `Stage ${stage}`),
   () => React.createElement('span', { 'aria-label': 'None' }, 'None'),
 )
@@ -54,15 +54,15 @@ const placementStore = applications => ({
 
 test('deployed stage, order fields and form navigation agree in Data Bank', () => {
   const candidate = { id: 'candidate-deployed' }
-  const deployed = { id: 'deployment', orderId: 'assigned', currentStage: 11, status: 'deployed', createdAt: '2026-10-01T00:00:00Z' }
+  const deployed = { id: 'deployment', orderId: 'assigned', currentStage: 12, status: 'deployed', createdAt: '2026-10-01T00:00:00Z' }
   const store = placementStore([deployed])
   assert.deepEqual(placement.bankContext(store).application(candidate.id), { stage: 'Deployed', order: 'REF-assigned' })
   assert.equal(placement.formOrderId(store, candidate.id), 'assigned')
   const opened = []
   const cell = placement.StageCell({ candidate, store, onOpenStage: id => opened.push(id) })
   const html = renderToStaticMarkup(cell)
-  assert.match(html, /data-stage="11"/)
-  assert.match(html, /See the 11 stages for Job assigned/)
+  assert.match(html, /data-stage="12"/)
+  assert.match(html, /See the 12 stages for Job assigned/)
   cell.props.onClick({ stopPropagation() {} })
   assert.deepEqual(opened, ['deployment'])
 })

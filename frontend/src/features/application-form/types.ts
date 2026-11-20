@@ -85,7 +85,7 @@ export interface TrackingRow {
   label: string
   /** The CRM's own stage title, when it differs. */
   systemLabel: string
-  /** The real stage number 1..11, or 0 for a row the CRM has no stage for (PCC, Invoice Generated). */
+  /** The real stage number 1..12, or 0 for a row the CRM has no stage for (Invoice Generated). */
   stage: number
   /** A CRM stage the paper form does not list. */
   extra: boolean

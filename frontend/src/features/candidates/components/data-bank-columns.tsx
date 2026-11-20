@@ -249,13 +249,13 @@ export function AgentLine({ candidate, mark = plain }: CellProps) {
   return agent ? <span className="dbt-main dbt-agent" title={`Agency: ${agent}`}>{mark(agent)}</span> : <span className="db-muted" title="No agency recorded">–</span>
 }
 
-/** The compact 11-stage indicator; with `onOpenStage` it opens the stage modal. A dash while the candidate has no order. */
+/** The compact 12-stage indicator; with `onOpenStage` it opens the stage modal. A dash while the candidate has no order. */
 export function StageCell({ candidate, store, onOpenStage }: { candidate: Candidate; store: Store; onOpenStage?: (applicationId: string) => void }) {
   const app = bankApplication(store.applicationsFor(candidate.id))
   if (!app) return <Dash />
   if (!onOpenStage) return <StageChip stage={app.currentStage} />
   return (
-    <button type="button" className="dbt-stage" title={`See the 11 stages for ${store.orderLabel(app.orderId)}`}
+    <button type="button" className="dbt-stage" title={`See the 12 stages for ${store.orderLabel(app.orderId)}`}
       onClick={(event) => { event.stopPropagation(); onOpenStage(app.id) }}
       onKeyDown={(event) => event.stopPropagation()}>
       <StageChip stage={app.currentStage} />

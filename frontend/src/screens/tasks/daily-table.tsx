@@ -184,16 +184,16 @@ export function OrderRefCell({ item }: { item: Pick<DailyItem, 'orderRef'> }) {
   return <span className="dw-ref" title={item.orderRef}>{item.orderRef}</span>
 }
 
-/** AMOUNT: the advance the candidate paid (stage 8) as money; a dash while none is recorded. */
+/** AMOUNT: the advance the candidate paid (stage 9) as money; a dash while none is recorded. */
 export function AmountCell({ item }: { item: Pick<DailyItem, 'advanceAmount' | 'advanceCurrency'> }) {
   const label = advanceLabel(item)
   return label ? <span className="dw-amount tnum" title="Advance collected">{label}</span> : <span className="dw-none" title="No advance recorded yet">—</span>
 }
 
-/** GOOGLE REVIEW: Yes once obtained, Pending from stage 9 until it is, a dash before that. */
+/** GOOGLE REVIEW: Yes once obtained, Pending from stage 10 until it is, a dash before that. */
 export function ReviewCell({ item }: { item: Pick<DailyItem, 'googleReview'> }) {
   if (item.googleReview === 'obtained') return <span className="dw-review is-yes">Yes</span>
-  if (item.googleReview === 'pending') return <span className="dw-review is-pending" title="Stage 9 reached; Google review not obtained yet">Pending</span>
+  if (item.googleReview === 'pending') return <span className="dw-review is-pending" title="Stage 10 reached; Google review not obtained yet">Pending</span>
   return <span className="dw-none">—</span>
 }
 
