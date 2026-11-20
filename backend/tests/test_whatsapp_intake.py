@@ -123,7 +123,7 @@ def test_original_and_selected_documents_candidate_owner_and_replay(setup):
         candidate = db.get(Candidate, row.candidate_id)
         assert candidate.name == "Document Identity"
         assert candidate.care_id.startswith("CI-")
-        assert candidate.phone == "9000000002"  # Sender is separate provenance.
+        assert candidate.phone == "+919000000002"  # stored canonically (+91XXXXXXXXXX). Sender is separate provenance.
         assert candidate.whatsapp == "919999999999"
         assert candidate.father_name == "Document Parent" and candidate.marital_status == "Married"
         assert candidate.current_address == "42 Document Road, Chennai"
@@ -488,10 +488,14 @@ def test_admin_connect_disconnect_stops_receipts_and_queued_work_but_retains_fil
         with sessions() as db: yield db
     app.dependency_overrides[whatsapp.get_db] = database
     with sessions() as db, TestClient(app) as client:
-        for role in ("owner", "manager"):
+        for role in ("owner", "other"):      # recruiters (staff) are refused
             app.dependency_overrides[whatsapp.current_user] = lambda: db.get(User, role)
             assert client.post("/api/whatsapp/channels/connect").status_code == 403
             assert client.post("/api/whatsapp/channels/12345/disconnect").status_code == 403
+        # An MD (stored role "manager") is admin-level: the same access as an Admin.
+        app.dependency_overrides[whatsapp.current_user] = lambda: db.get(User, "manager")
+        assert client.post("/api/whatsapp/channels/connect").status_code == 200
+        assert client.post("/api/whatsapp/channels/12345/disconnect").json()["enabled"] is False
         app.dependency_overrides[whatsapp.current_user] = lambda: db.get(User, "admin")
         assert client.post("/api/whatsapp/channels/connect").json() == {"id": "12345", "enabled": True}
         first = receipt(sessions, settings)

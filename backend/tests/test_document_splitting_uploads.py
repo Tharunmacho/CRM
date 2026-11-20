@@ -132,7 +132,11 @@ def test_reading_is_queued_once_for_the_combined_original_across_piece_actions(d
     assert job.attachment_id == stored["source_bundle"].id and job.status == "pending"
     assert piece_ids == {stored["passport"].id, stored["aadhaar"].id}
     again = desk.client.post("/api/candidates/candidate/application-form/extract", json={"attachmentIds": [stored["aadhaar"].id]})
-    assert again.status_code == 200 and again.json()["queued"] == 0, again.text
+    # the route always answers 202; the piece's original is already queued, so this action only points at that job
+    assert again.status_code == 202, again.text
+    assert again.json()["queued"] == 0 and again.json()["existing"] == 1 and again.json()["jobIds"] == [job.id], again.text
+    with desk.sessions() as db:
+        assert len(list(db.scalars(select(DocumentExtractionJob).where(DocumentExtractionJob.candidate_id == "candidate")))) == 1
     # deferred (the screens' default): stored only, nothing is read until a person asks
     send(desk, composite_pdf(["passport", "aadhaar", "unrelated"]), slot="aadhaar", defer="true")
     with desk.sessions() as db:
@@ -156,7 +160,10 @@ def test_profile_queues_deferred_resume_and_degree_on_their_single_original(desk
         [job] = list(db.scalars(select(DocumentExtractionJob)))
         assert job.attachment_id == stored["source_bundle"].id and job.object_key == stored["source_bundle"].object_key
     response = desk.client.post("/api/candidates/candidate/application-form/extract", json={"attachmentIds": [stored["education_certificate"].id]})
-    assert response.status_code == 200 and response.json()["queued"] == 0, response.text
+    assert response.status_code == 202, response.text                       # the route always answers 202
+    assert response.json()["queued"] == 0 and response.json()["existing"] == 1, response.text
+    with desk.sessions() as db:
+        assert len(list(db.scalars(select(DocumentExtractionJob)))) == 1      # the single original is still the only job
 
 
 def test_the_same_combined_scan_again_adds_no_new_versions(desk):

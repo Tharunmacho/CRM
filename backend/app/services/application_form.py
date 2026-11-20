@@ -640,7 +640,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
             select(DocumentExtractionJob.id, DocumentExtractionJob.kind, DocumentExtractionJob.status,
                    DocumentExtractionJob.attempts, DocumentExtractionJob.last_error, DocumentExtractionJob.attachment_id,
                    DocumentExtractionJob.updated_at, DocumentExtractionJob.draft, DocumentExtractionJob.content_hash)
-            .where(DocumentExtractionJob.candidate_id == candidate_id, DocumentExtractionJob.kind.in_(READ_SLOTS))
+            .where(DocumentExtractionJob.candidate_id == candidate_id, DocumentExtractionJob.kind.in_((*READ_SLOTS, "source_bundle")))
             .order_by(DocumentExtractionJob.created_at.desc())).all())
 
     def read_stages(session):
@@ -1203,9 +1203,10 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
                                  f"{same_bytes.file_name}; not added again.")
             continue
         held = [row for row in versions if row.id != source.id]
-        if held and kind in (*splitting.MULTI_SLOTS, "resume"):
-            # The very same pages may already be filed in this slot (a passport cut from another scan of the same candidate): nothing
-            # new is stored, and the note says where they already are.
+        if held:
+            # The very same pages may already be filed in this slot (a passport cut from another scan of the same candidate, or an
+            # education / medical page the upload already cut from this very packet): nothing new is stored, and the note says where
+            # they already are.
             try:
                 piece = splitting.PlannedPiece([kind], read_bytes(settings, document["object_key"]), pages)
                 same = splitting._already_filed(piece, kind, held, settings)

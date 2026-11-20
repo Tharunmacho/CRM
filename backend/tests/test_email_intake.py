@@ -26,6 +26,7 @@ from app.db.models import (
 )
 from app.integrations.mail.base import InboundAttachment, InboundMessage, MailMessageError
 from app.integrations.mail.imap import MailConfig, MailAdapterError, mailbox_source_id, provider_message_id
+from app.services.document_reading import READ_PROOF
 from test_database_naming import _migrate, schema_database
 from auto_assign import round_robin_on  # noqa: F401  (fixture: these tests exercise the round-robin, which is opt-in)
 import pytest as _pytest
@@ -452,7 +453,13 @@ def test_candidate_evidence_assignment_task_and_notifications_commit_once(intake
         assert task.kind == TaskKind.initial_call and task.candidate_id == candidate.id and task.owner_id == "staff-a"
         # Only the new owner is told (one notice); admins get no copy of a routine assignment.
         assert {notice.user_id for notice in db.scalars(select(Notification))} == {"staff-a"}
-        assert row_count(db, Candidate) == row_count(db, Task) == row_count(db, AuditEntry) == 1
+        assert row_count(db, Candidate) == row_count(db, Task) == 1
+        # One commit audit entry, plus the one proof that the filed document was read (written once with the document, never again
+        # by the replay: running the job twice added neither).
+        audits = list(db.scalars(select(AuditEntry)))
+        assert [entry.action for entry in audits if entry.action != READ_PROOF] == ["Created candidate from email"]
+        proofs = [entry for entry in audits if entry.action == READ_PROOF]
+        assert len(audits) == 2 and len(proofs) == 1
         assert row_count(db, Attachment) == 2
         original = db.scalar(select(Attachment).where(Attachment.slot == "source_bundle"))
         assert original.object_key == db.get(MailAttachment, part_id).object_key

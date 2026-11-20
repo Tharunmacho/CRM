@@ -114,4 +114,7 @@ def start(db, candidate_id, user, attachment_ids):
         else:
             existing += 1
         job_ids.append(job.id)
-    return {"queued": queued, "existing": existing, "jobIds": job_ids}
+    message = None
+    if not queued and existing:   # said plainly: nothing was sent to the (paid) reader, these files were read before
+        message = "These documents were already read. Nothing was sent to the reader again."
+    return {"queued": queued, "existing": existing, "jobIds": job_ids, "message": message}

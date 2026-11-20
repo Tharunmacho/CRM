@@ -405,7 +405,8 @@ def form_result(output, person, monkeypatch, slot="passport"):
     monkeypatch.setattr("app.services.document_identity.identity_matches", lambda *args, **kwargs: [])
     monkeypatch.setattr(application_form, "_attach_read_documents", lambda *args, **kwargs: {})
     audit = []
-    db = Namespace(scalar=lambda *args: person, add=audit.append)
+    # The file's soft-delete lookup answers "not deleted" (None); every other lookup is the candidate.
+    db = Namespace(scalar=lambda statement, *args: None if "deleted_at" in str(statement) else person, add=audit.append)
     job = Namespace(id="job", candidate_id=person.id, owner_id="staff", status=output["status"], last_error=None,
                     draft={"applicationForm": {"slot": slot, "attachmentId": "file"}})
     application_form.apply_job_output(db, job, output)
