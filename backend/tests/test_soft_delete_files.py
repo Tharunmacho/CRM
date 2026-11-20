@@ -163,7 +163,7 @@ def test_removing_a_file_is_two_writes_announces_the_document_topics_and_never_h
 
 def test_migration_0054_adds_the_columns_idempotently_and_reverses(schema_database):
     engine = schema_database
-    _migrate(engine, "0052_speed_indexes_tasks")
+    _migrate(engine, "0053_remark_soft_delete")
     with engine.begin() as connection:
         connection.execute(text("INSERT INTO document_attachments (id,entity_type,entity_id,slot,version,file_name,object_key) "
                                 "VALUES ('a','candidate','c','medical',1,'m.pdf','k')"))
@@ -175,11 +175,11 @@ def test_migration_0054_adds_the_columns_idempotently_and_reverses(schema_databa
     assert all(feedback[name]["comment"] for name in ("deleted_at", "deleted_by", "edited_at"))
     with engine.begin() as connection:
         assert connection.scalar(text("SELECT deleted_at FROM document_attachments WHERE id='a'")) is None
-        connection.execute(text("UPDATE alembic_version SET version_num = '0052_speed_indexes_tasks'"))
+        connection.execute(text("UPDATE alembic_version SET version_num = '0053_remark_soft_delete'"))
     _migrate(engine, "head")   # a repeat over its own columns is harmless and keeps the rows
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT count(*) FROM document_attachments")) == 1
-    _migrate(engine, "0052_speed_indexes_tasks", downgrade=True)
+    _migrate(engine, "0053_remark_soft_delete", downgrade=True)
     assert "deleted_at" not in {c["name"] for c in inspect(engine).get_columns("document_attachments")}
     assert "edited_at" not in {c["name"] for c in inspect(engine).get_columns("crm_application_feedback")}
     _migrate(engine, "head")
