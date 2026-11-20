@@ -179,10 +179,10 @@ function AgencyCards({ rows, query, active, onEdit, onDelete }: { rows: AgencyRo
 /** The tables use the shared DataTable (the old directory's look and column alignment); on a phone it stacks into labelled rows. */
 function ClientTable({ rows, query, loading, onOpen, onEdit, onDelete }: { rows: ClientRow[]; query: string; loading: boolean; onOpen: (c: Client) => void; onEdit?: (c: Client) => void; onDelete?: (c: Client) => void }) {
   const columns: Column<ClientRow>[] = [
-    { key: 'agency', header: 'Company', width: '24%', render: (row) => <Identity name={row.agencyName || row.client.name} query={query} /> },
-    { key: 'contact', header: 'Contact person', width: '26%', align: 'left', render: (row) => <ContactCell name={row.client.name} phone={row.phone} email={row.email} query={query} /> },
-    { key: 'location', header: 'Location', width: '14%', align: 'left', render: (row) => <Location {...clientPlace(row)} query={query} /> },
-    { key: 'staff', header: 'Recruiter', width: '15%', align: 'left', render: (row) => <StaffStack staff={row.staff} query={query} /> },
+    { key: 'agency', header: 'Company', width: '24%', align: 'center', render: (row) => <Identity name={row.agencyName || row.client.name} query={query} /> },
+    { key: 'contact', header: 'Contact person', width: '26%', align: 'center', render: (row) => <ContactCell name={row.client.name} phone={row.phone} email={row.email} query={query} /> },
+    { key: 'location', header: 'Location', width: '14%', align: 'center', render: (row) => <Location {...clientPlace(row)} query={query} /> },
+    { key: 'staff', header: 'Recruiter', width: '15%', align: 'center', render: (row) => <StaffStack staff={row.staff} query={query} /> },
     {
       key: 'actions', header: 'Actions', actions: true,
       render: (row) => <span className="cs-row-actions">
@@ -192,7 +192,7 @@ function ClientTable({ rows, query, loading, onOpen, onEdit, onDelete }: { rows:
       </span>,
     },
   ]
-  return <Panel flush className="tb-blue ops-fit ops-clients"><DataTable compact loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.client.id} onRowClick={(row) => onOpen(row.client)} /></Panel>
+  return <Panel flush className="tb-blue ops-fit ops-clients"><DataTable compact stackBelow={1024} loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.client.id} onRowClick={(row) => onOpen(row.client)} /></Panel>
 }
 
 /**
@@ -202,20 +202,20 @@ function ClientTable({ rows, query, loading, onOpen, onEdit, onDelete }: { rows:
 function AgencyTable({ rows, query, pageKey = query, loading, active, onEdit, onDelete }: { rows: AgencyRow[]; query: string; pageKey?: string; loading: boolean; active?: ActiveControl; onEdit?: (a: ReferenceAgency) => void; onDelete?: (a: ReferenceAgency) => void }) {
   const empty = <span className="cl-quiet" aria-label="Not added">—</span>
   const columns: Column<AgencyRow>[] = [
-    { key: 'agency', header: 'Agency', width: '14%', render: ({ agency }) => <Identity avatar={false} name={agencyDisplayName(agency)} query={query} /> },
-    { key: 'contact', header: 'Contact', width: '16%', align: 'left', render: ({ agency }) => <ContactCell name={agency.name === agency.agencyName ? '' : agency.name} phone={agency.phone ?? ''} email={agency.email ?? ''} query={query} /> },
-    { key: 'location', header: 'Location', width: '11%', align: 'left', render: ({ agency }) => agency.place || agency.state || agency.address
+    { key: 'agency', header: 'Agency', width: '14%', align: 'center', render: ({ agency }) => <Identity avatar={false} name={agencyDisplayName(agency)} query={query} /> },
+    { key: 'contact', header: 'Contact', width: '16%', align: 'center', render: ({ agency }) => <ContactCell name={agency.name === agency.agencyName ? '' : agency.name} phone={agency.phone ?? ''} email={agency.email ?? ''} query={query} /> },
+    { key: 'location', header: 'Location', width: '11%', align: 'center', render: ({ agency }) => agency.place || agency.state || agency.address
       ? <Location primary={[agency.place, agency.state].filter(Boolean).join(', ')} secondary={agency.address} query={query} /> : empty },
-    { key: 'specialisation', header: 'Specialisation', width: '16%', align: 'left', render: ({ agency }) => <ChipList values={agency.specialisations} label="Specialisation" /> },
-    { key: 'country', header: 'Country', width: '9%', align: 'left', priority: 'low', render: ({ agency }) => <ChipList values={agency.preferredCountries} label="Preferred country" /> },
+    { key: 'specialisation', header: 'Specialisation', width: '16%', align: 'center', render: ({ agency }) => <ChipList values={agency.specialisations} label="Specialisation" /> },
+    { key: 'country', header: 'Country', width: '9%', align: 'center', priority: 'low', render: ({ agency }) => <ChipList values={agency.preferredCountries} label="Preferred country" /> },
     {
-      key: 'actions', header: 'Actions', actions: true, pin: 'none', align: 'left',
+      key: 'actions', header: 'Actions', actions: true, pin: 'none', align: 'center',
       render: ({ agency }) => <span className="cs-row-actions">
         {onEdit && <button type="button" className="cl-open" onClick={() => onEdit(agency)} aria-label={`Edit ${agencyDisplayName(agency)}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
         {onDelete && <button type="button" className="cs-icon-act is-danger" onClick={() => onDelete(agency)} aria-label={`Delete ${agencyDisplayName(agency)}`} title="Delete"><Trash2 size={14} aria-hidden="true" /></button>}
       </span>,
     },
-    { key: 'active', header: 'Active', width: '19%', align: 'left', pin: 'none', render: ({ agency }) => toggleOf(active, agency) },
+    { key: 'active', header: 'Active', width: '19%', align: 'center', pin: 'none', render: ({ agency }) => toggleOf(active, agency) },
   ]
   return <Panel flush className="cs-agency-table tb-blue ops-fit ops-agencies"><DataTable compact stackBelow={1024} loading={loading} resetPageKey={pageKey} rows={rows} columns={columns} rowKey={({ agency }) => agency.id} /></Panel>
 }

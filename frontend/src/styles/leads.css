@@ -122,9 +122,9 @@
 :root:root .ld .db-tbl .ld-statown .db-tone { font-size: 12px; line-height: 16px; }
 /* Lead table: text wraps only at spaces; a single word longer than its column is cut with an ellipsis (whole in the tooltip) */
 .ld .db-tbl.is-grid :is(.db-clamp, .db-tone, .db-owner > span) { overflow-wrap: normal; word-break: normal; hyphens: manual; }
-/* The name column's cells read from the left (name, age, phone), so its heading starts on the same left edge */
-:root:root .ld .db-tbl.is-grid.is-fit thead th.ld-col-name { text-align: left; }
-.ld .db-tbl.is-fit th.ld-col-name .db-th-sort { justify-content: flex-start; }
+/* The name column is centred like every other: heading, name, age and the phone line with its WhatsApp and copy icons share one centre */
+:root:root .ld .db-tbl.is-grid.is-fit thead th.ld-col-name { text-align: center; }
+.ld .db-tbl.is-fit th.ld-col-name .db-th-sort { justify-content: center; }
 
 /* ---------- Upload dialog ---------- */
 .ld-upload-body { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
@@ -177,6 +177,8 @@
 .ld-map th:nth-child(2), .ld-map td:nth-child(2) { width: 22%; }
 .ld-map th:nth-child(3), .ld-map td:nth-child(3) { width: 30%; }
 .ld-map th:nth-child(4), .ld-map td:nth-child(4) { width: 14%; text-align: center; }
+.ld-map :is(th, td) { text-align: center; }
+.ld-map td.ld-map-sample { text-align: left; }
 .ld-map-col span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--text-main); }
 .ld-map td.ld-map-sample { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .ld-map .custom-select-trigger { height: 36px; min-height: 36px; font-size: 13px; }
@@ -200,7 +202,7 @@
 .ld-result h3 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.02em; color: var(--text-main); }
 .ld-result p { margin: 0; font-size: 14px; color: var(--text-muted); }
 .ld-result .ld-map-foot { margin-top: 12px; }
-.ld-batch-acts { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: nowrap; white-space: nowrap; }
+.ld-batch-acts { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: nowrap; white-space: nowrap; }
 
 /* ---------- Forms in dialogs ---------- */
 .ld-form { display: flex; flex-direction: column; gap: 16px; min-width: 0; }

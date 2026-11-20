@@ -23,6 +23,8 @@
   max-width: none; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; word-break: normal; -webkit-line-clamp: unset;
 }
 :root:root .ops-fit :is(.record-name, .cl-cell > b, .cl-place-text b, .cl-place-text small) { display: block; }
+/* a contact cell never grows past its column: the e-mail shrinks with its ellipsis (the whole address is the tooltip) instead of overflowing on both sides */
+:root:root .ops-fit .cl-cell { grid-template-columns: minmax(0, 1fr); }
 :root:root .ops-fit .cs-stack-names { min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
 /* a phone number may hold two numbers: wrap them; an email keeps its single line with the tooltip */
 :root:root .ops-fit .cl-cell > .cl-line > a[href^='tel:'] { overflow: visible; text-overflow: clip; white-space: normal; }
@@ -31,6 +33,8 @@
 :root:root .ops-fit .cs-tags { flex-wrap: wrap; }
 :root:root .ops-fit .cs-tag { max-width: 100%; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
 :root:root .ops-fit .uv-work { white-space: normal; }
+/* a role / status chip is one word group: it never breaks inside a word (the column leaves room for it) */
+:root:root .ops-fit .ui-data-table td :is(.ui-badge, .ui-badge-chip, .ui-badge-dot) { white-space: nowrap; }
 :root:root .ops-fit .uv-flags { max-width: none; }
 :root:root .ops-fit .js-openings { max-width: none; }
 
@@ -41,7 +45,7 @@
 :root:root .ops-fit.ops-jobs .ui-data-table table.is-fixed th.ui-actions-cell { width: 17%; }
 :root:root .ops-fit.ops-users .ui-data-table table.is-fixed th.ui-actions-cell { width: 16%; }
 :root:root .ops-fit.ops-currencies .ui-data-table table.is-fixed th.ui-actions-cell { width: 25%; }
-:root:root .ops-fit .ui-data-table :is(th, td).ui-actions-cell { min-width: 0; text-align: left; }
+:root:root .ops-fit .ui-data-table :is(th, td).ui-actions-cell { min-width: 0; }
 :root:root .ops-fit :is(.cs-row-actions, .uv-actions, .wa-doc-actions) { flex-wrap: wrap; justify-content: flex-start; }
 :root:root .ops-fit .ui-data-table td.ui-actions-cell { white-space: normal; }
 
@@ -62,9 +66,9 @@
 .ops-fees col.fc-balance { width: 8%; }
 .ops-fees col.fc-status { width: 11%; }
 .ops-fees col.fc-manage { width: 7%; }
-:root:root .ops-fees thead th { box-sizing: border-box; height: 44px; padding: 0 10px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: left; text-transform: uppercase; white-space: nowrap; overflow: hidden; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); }
+:root:root .ops-fees thead th { box-sizing: border-box; height: 44px; padding: 0 10px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: center; text-transform: uppercase; white-space: nowrap; overflow: hidden; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); }
 :root:root .ops-fees thead th:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-header-line); }
-:root:root .ops-fees tbody td { height: 56px; padding: 8px 10px; vertical-align: middle; text-align: left; font-size: 13px; line-height: 1.35; overflow-wrap: break-word; border-bottom: var(--table-line-width, 1px) solid var(--table-line); }
+:root:root .ops-fees tbody td { height: 56px; padding: 8px 10px; vertical-align: middle; text-align: center; font-size: 13px; line-height: 1.35; overflow-wrap: break-word; border-bottom: var(--table-line-width, 1px) solid var(--table-line); }
 :root:root .ops-fees tbody td:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-column-line, color-mix(in srgb, var(--border-main) 55%, var(--bg-card))); }
 :root:root .ops-fees tbody tr:hover > td { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
 .ops-fees td b { font-weight: 600; }
@@ -79,12 +83,12 @@
 
 /* ---------- client detail: the candidates of a job, the same look inside the job card ---------- */
 .cd-order-list .cd-cands { box-sizing: border-box; width: calc(100% - 40px); margin: 0 20px 20px; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); border-radius: var(--table-frame-radius, 6px); overflow: hidden; }
-:root:root .cd-order-list .cd-cands thead th { box-sizing: border-box; height: 44px; padding: 0 10px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: left; text-transform: uppercase; white-space: nowrap; overflow: hidden; border-top: 0; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); }
+:root:root .cd-order-list .cd-cands thead th { box-sizing: border-box; height: 44px; padding: 0 10px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: center; text-transform: uppercase; white-space: nowrap; overflow: hidden; border-top: 0; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); }
 :root:root .cd-order-list .cd-cands thead th:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-header-line); }
-:root:root .cd-order-list .cd-cands tbody td { height: 56px; padding: 8px 10px; vertical-align: middle; text-align: left; overflow-wrap: break-word; border-bottom: var(--table-line-width, 1px) solid var(--table-line); }
+:root:root .cd-order-list .cd-cands tbody td { height: 56px; padding: 8px 10px; vertical-align: middle; text-align: center; overflow-wrap: break-word; border-bottom: var(--table-line-width, 1px) solid var(--table-line); }
 :root:root .cd-order-list .cd-cands tbody td:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-column-line, color-mix(in srgb, var(--border-main) 55%, var(--bg-card))); }
 :root:root .cd-order-list .cd-cands :is(th, td):first-child { padding-left: 10px; }
-:root:root .cd-order-list .cd-cands :is(th, td):last-child { padding-right: 10px; text-align: left; }
+:root:root .cd-order-list .cd-cands :is(th, td):last-child { padding-right: 10px; text-align: center; }
 .cd-order-list .cd-cands .cd-cand-text > :is(b, small), .cd-order-list .cd-cands .cd-owner > span:last-child { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
 .cd-order-list .cd-cands .cd-profile-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width: 760px) {
@@ -96,3 +100,40 @@
 /* ---------- order detail: matched candidates ---------- */
 :root:root .ops-matched .ui-data-table .jv-cell-title { white-space: normal; }
 :root:root .ops-matched .ui-data-table .truncate { overflow: visible; text-overflow: clip; white-space: normal; }
+
+/* ---------- centring: every heading and cell of the table is CENTRED (horizontally and vertically), numbers included; from the table's own width
+ * (below it the rows are labelled cards that keep their left labels). The cell wrappers centre too, so a value sits under its heading. ---------- */
+@media (min-width: 768px) {
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 :is(th, td) { text-align: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 td :is(.record-identity, .cl-cell > .cl-line, .cs-tags, .jv-person, .uv-person, .uv-name, .cs-row-actions, .uv-actions, .wa-doc-actions, .jv-tracker-label, .jv-row-actions) { justify-content: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 td :is(.record-name, .record-detail, .cl-cell, .cl-place-text, .cl-progress, .js-client, .js-openings, .uv-work, .ai-cell, .wa-state, .cd-cand-text, .jv-stage-cell, .jv-tracker, .jv-cell, .jv-cell-title, .jv-cell-sub) { text-align: center; justify-items: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 td .uv-status { justify-items: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 td :is(.wa-state, .cl-place.is-stacked) { align-items: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 td :is(.js-openings, .uv-flags, .jv-tracker-bar) { margin-inline: auto; }
+}
+@media (min-width: 1024px) {
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 :is(th, td) { text-align: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 td :is(.record-identity, .cl-cell > .cl-line, .cs-tags, .jv-person, .uv-person, .uv-name, .cs-row-actions, .uv-actions, .wa-doc-actions, .jv-tracker-label, .jv-row-actions) { justify-content: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 td :is(.record-name, .record-detail, .cl-cell, .cl-place-text, .cl-progress, .js-client, .js-openings, .uv-work, .ai-cell, .wa-state, .cd-cand-text, .jv-stage-cell, .jv-tracker, .jv-cell, .jv-cell-title, .jv-cell-sub) { text-align: center; justify-items: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 td .uv-status { justify-items: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 td :is(.wa-state, .cl-place.is-stacked) { align-items: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 td :is(.js-openings, .uv-flags, .jv-tracker-bar) { margin-inline: auto; }
+}
+@media (min-width: 1280px) {
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 :is(th, td) { text-align: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td :is(.record-identity, .cl-cell > .cl-line, .cs-tags, .jv-person, .uv-person, .uv-name, .cs-row-actions, .uv-actions, .wa-doc-actions, .jv-tracker-label, .jv-row-actions) { justify-content: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td :is(.record-name, .record-detail, .cl-cell, .cl-place-text, .cl-progress, .js-client, .js-openings, .uv-work, .ai-cell, .wa-state, .cd-cand-text, .jv-stage-cell, .jv-tracker, .jv-cell, .jv-cell-title, .jv-cell-sub) { text-align: center; justify-items: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td .uv-status { justify-items: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td :is(.wa-state, .cl-place.is-stacked) { align-items: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td :is(.js-openings, .uv-flags, .jv-tracker-bar) { margin-inline: auto; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td[data-label='Message or document'] { text-align: left; }   /* a file name and its caption are free text: they read from the left (the heading stays centred) */
+}
+
+/* client detail: the candidates of a job (a plain table, 761px and up; below it the rows are cards that keep their left labels) */
+@media (min-width: 761px) {
+  :root:root:root .cd-order-list .cd-cands :is(th, td) { text-align: center; }
+  :root:root:root .cd-order-list .cd-cands :is(.cd-cand, .cd-owner, .cd-profile-actions) { justify-content: center; text-align: center; }
+  :root:root:root .cd-order-list .cd-cands :is(.cd-cand-text, .jv-tracker, .jv-tracker-label) { justify-items: center; justify-content: center; text-align: center; }
+  :root:root:root .cd-order-list .cd-cands .jv-tracker-bar { margin-inline: auto; }
+  .cd-order-list .cd-cands :is(.jv-tracker-label, .jv-tracker-label span) { overflow: visible; text-overflow: clip; white-space: normal; }
+}

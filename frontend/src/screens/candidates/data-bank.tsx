@@ -254,7 +254,7 @@ export default function DataBankPage() {
   useEffect(() => { setSelected([]) }, [query, pool, skills, skillMode, skillStatus, page, pageSize])
 
   // The grid table scrolls sideways (actions and WhatsApp pinned); narrower than GRID_TABLE_MIN_WIDTH the same candidates read as stacked cards.
-  const forceCards = boxWidth > 0 && boxWidth < DATA_BANK_TABLE_MIN_WIDTH
+  const forceCards = boxWidth > 0 && (boxWidth < DATA_BANK_TABLE_MIN_WIDTH || !fit.fits)   // cards when even the required columns would not fit: never a cut word, never a sideways scroll
   const showCards = forceCards || view === 'cards'
   const allOpen = rows.length > 0 && rows.every(row => expanded.includes(row.id))
   const cards = statCards({ all: counts?.all ?? ownedCandidates.length, unassigned: counts?.unassigned ?? ownedCandidates.filter((candidate) => !candidate.ownerId).length, needs_review: counts?.needs_review ?? ownedCandidates.filter((candidate) => candidate.needsReview || candidate.status === 'needs_review').length }, pool, store.me.role)

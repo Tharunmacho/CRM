@@ -222,7 +222,7 @@ export default function LeadsPage() {
 
   const rows = data.page?.items ?? []
   const total = data.page?.total ?? 0
-  const forceCards = boxWidth > 0 && boxWidth < TABLE_MIN_WIDTH
+  const forceCards = boxWidth > 0 && (boxWidth < TABLE_MIN_WIDTH || !fit.fits)   // cards when even the required columns would not fit: never a cut word, never a sideways scroll
   const showCards = forceCards || view === 'cards'
   const card = activeCard(filters)
   const pickCard = (next: LeadCard) => patchFilters({ followUp: '', ...(card === 'follow_ups' ? { assigned: '' } : {}), ...(next === 'follow_ups' && card !== 'follow_ups' ? { ...cardFilters('follow_ups'), assigned: 'me' } : card === next && next !== 'total' ? cardFilters('total') : cardFilters(next)) })

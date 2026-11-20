@@ -7,12 +7,11 @@ const read = (relative) => readFile(new URL(`../src/${relative}`, import.meta.ur
 test('Travelled is a fit table with the Tasks look: no scroll, light column lines, 6px frame, cards under 900px', async () => {
   const css = await read('styles/travelled.css')
   assert.match(css, /\.tv-table-wrap \{ max-height: max\(360px, calc\(100dvh - 380px\)\); overflow-x: hidden;/, 'no sideways scroll')
-  assert.match(css, /\.tv-table \{ width: 100%; min-width: 0; table-layout: fixed;/)
+  assert.match(css, /\.tv-table \{ width: 100%; min-width: 0; table-layout: auto;/, 'the columns size to their content (longest word + padding), not to fixed shares')
   assert.doesNotMatch(css, /min-width: 820px/)
   assert.doesNotMatch(css, /overflow-wrap: anywhere/, 'words wrap at spaces, never mid-word')
   assert.match(css, /border-radius: var\(--table-frame-radius, 6px\)/)
-  const widths = [...css.matchAll(/\.tv-c-[a-z]+ \{ width: (\d+)%; \}/g)].reduce((sum, match) => sum + Number(match[1]), 0)
-  assert.equal(widths, 100, 'the column shares add up to the whole frame')
+  assert.doesNotMatch(css, /\.tv-c-[a-z]+ \{ width: \d+%; \}/, 'no per-column percentage widths')
 })
 
 test('every candidate table card (Lead sheet, Data Bank, Matched) has one thin border with the 6px curve', async () => {

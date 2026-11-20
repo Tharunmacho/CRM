@@ -19,15 +19,17 @@
 }
 
 /* The jobs table: 44 px header with single-line uppercase 11.5px/600 labels, rows of at least 56 px with every cell centred, 14 px side padding on header
-   and cells alike (a header starts on the same left edge as its cells), a line under every row, and the Actions header and buttons on one left edge. */
+   and cells alike, a line under every row, and the Actions header and buttons centred under it. */
 @media (min-width: 1280px) {
-  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1.2; text-align: left; text-transform: uppercase; white-space: nowrap; }
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1.2; text-align: center; text-transform: uppercase; white-space: nowrap; }
   :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid thead th button { font: inherit; letter-spacing: inherit; text-transform: inherit; }
   :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
-  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { text-align: left; }
-  .jobs-simple .js-jobs-table .cs-row-actions { justify-content: flex-start; }
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { text-align: center; }
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid tbody td { text-align: center; }
+  .jobs-simple .js-jobs-table .cs-row-actions { justify-content: center; }
+  .jobs-simple .js-jobs-table .js-openings { margin-inline: auto; }
 }
 /* A job just saved: a soft tint that fades, always next to the job itself. */
 .jobs-simple tr.js-new > td { animation: js-new-fade 6s ease-out; }

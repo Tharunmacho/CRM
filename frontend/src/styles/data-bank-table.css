@@ -1,6 +1,6 @@
 /*
  * The Data Bank candidate table: Actions, Candidate, Contact, Source, Agency, Recruiter, Status. The look is the approved Tasks table (candidate-tables.css).
- * Header and body cells share one padding (8px sides) and one alignment (text left); widths are shares of the row, never less than the least a column needs
+ * Header and body cells share one padding (8px sides) and one alignment (centred, like the Tasks table); widths are shares of the row, never less than the least a column needs
  * (dataBankColumns); words wrap at spaces, rows are at least 60px and grow. The job groups (data-bank-positions.css) and the mobile cards use the same
  * cells. Rules carry :root:root so they beat the shared grid skin (data-bank-v2.css, db-fit.css, skin.css).
  */
@@ -65,13 +65,30 @@ strong.dbt-main { font-weight: 600; }
 .db-tbl.is-bank .db-selcell > * { flex: none; }
 .db-tbl.is-bank .db-selcell > .dbt-stack, .db-tbl.is-bank .db-selcell > .db-th-sort { flex: 1 1 auto; min-width: 0; }
 .db-tbl.is-bank .db-expand-gap { display: inline-block; width: 20px; }
-/* sort caret sits beside the label, not at the cell edge */
 .db-tbl.is-bank .db-th-sort { justify-content: flex-start; gap: 4px; text-align: left; }
-.db-tbl.is-bank .db-th-caret { position: static; margin: 0; }
+/* the caret hangs in the cell padding (candidate-tables.css), so the heading's words stay centred */
 /* off-by-default columns (country, registry fields): free text is three lines, then an ellipsis (whole in the tooltip) */
 .db-tbl.is-bank .db-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: break-word; text-overflow: ellipsis; white-space: normal; font-size: 13px; line-height: 18px; text-align: left; }
 .db-tbl.is-bank .db-cpills { flex-wrap: wrap; justify-content: flex-start; }
 .db-tbl.is-bank .db-muted { font-size: 13px; }
+
+/* ---- the table (NOT the cards or the job groups, which stay labelled and left): every cell and heading is CENTRED, horizontally and vertically.
+   The row buttons, chips, ids, names, contact lines, recruiter and stage lines centre as blocks; the e-mail (one line, ellipsis) centres too. */
+:root:root .db-tbl.is-grid.is-bank :is(th, td) { text-align: center; }
+:root:root .db-tbl.is-bank .db-selcell { justify-content: center; }
+/* the heading's label and the row buttons share the room left of the arrow and the tick box, so the word sits exactly over the buttons */
+:root:root .db-tbl.is-bank .db-selcell > :is(.db-th-plain, .db-acts.is-grid) { flex: 1 1 auto; width: auto; min-width: 0; }
+:root:root .db-tbl.is-bank .db-selcell > .db-th-plain { text-align: center; }
+.db-tbl.is-bank .dbt-sub.is-email { max-width: 100%; min-width: 0; }
+:root:root .db-tbl.is-bank :is(.dbt-stack, .dbt-stage, .db-track-text, .db-clamp) { align-items: center; text-align: center; }
+:root:root .db-tbl.is-bank .dbt-line { justify-content: center; max-width: 100%; }
+:root:root .db-tbl.is-bank .db-owner { justify-content: center; text-align: center; }
+:root:root .db-tbl.is-bank .db-track { align-items: center; }
+:root:root .db-tbl.is-bank .db-track-bar { margin-inline: auto; }
+:root:root .db-tbl.is-bank .db-track-text { justify-content: center; }
+:root:root .db-tbl.is-bank .db-th-sort { justify-content: center; text-align: center; }
+:root:root .db-tbl.is-bank .db-cpills { justify-content: center; }
+:root:root .db-tbl.is-bank .db-acts, :root:root .db-tbl.is-bank .db-acts.is-grid { justify-content: center; }
 
 /* ---- mobile cards: name and status on top, contact, source and recruiter below */
 .db-mini-head { align-items: center; }

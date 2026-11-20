@@ -343,8 +343,10 @@
 .ic-files-caption { margin: 0 0 4px; color: var(--text-muted); font-size: 12.5px; line-height: 1.45; }
 .ic-files-wrap { overflow-x: auto; border: var(--table-line-width) solid var(--table-line); border-radius: 12px; }
 .ic-files { width: 100%; border-collapse: collapse; font-size: 13px; }
-.ic-files th { padding: 9px 12px; background: var(--tint-1); color: var(--text-muted); font-size: 12px; font-weight: 600; text-align: left; }
-.ic-files td { padding: 8px 12px; border-top: var(--table-line-width) solid var(--table-line); vertical-align: middle; }
+.ic-files th { padding: 9px 12px; background: var(--tint-1); color: var(--text-muted); font-size: 12px; font-weight: 600; text-align: center; }
+.ic-files td { padding: 8px 12px; border-top: var(--table-line-width) solid var(--table-line); vertical-align: middle; text-align: center; }
+/* file names (the file, and the name it will be saved as) are free text: they read from the left; the headings stay centred */
+.ic-files td:is(.ic-file-name, :nth-child(4)) { text-align: left; }
 .ic-files th:nth-child(2), .ic-files td:nth-child(2) { width: 24%; } .ic-files th:nth-child(3), .ic-files td:nth-child(3) { width: 21%; } .ic-files th:nth-child(4), .ic-files td:nth-child(4) { width: 27%; }
 .ic-file-name { min-width: 0; overflow-wrap: anywhere; }
 .ic-file-name em { margin-left: 6px; color: var(--text-muted); font-style: normal; font-size: 12px; white-space: nowrap; }
@@ -422,7 +424,7 @@
   :root:root:root .ic-files { overflow: visible; border: 0; border-radius: 0; }
   .ic-files thead { display: none; }
   .ic-files tr { margin-bottom: 10px; padding: 10px 12px; border: var(--table-line-width) solid var(--table-line); border-radius: 12px; }
-  .ic-files td, .ic-files th:nth-child(n), .ic-files td:nth-child(n) { width: 100%; padding: 4px 0; border: 0; }
+  .ic-files td, .ic-files th:nth-child(n), .ic-files td:nth-child(n) { width: 100%; padding: 4px 0; border: 0; text-align: left; }
   .ic-files td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; color: var(--text-light); font-size: 11.5px; font-weight: 600; }
   .ic-files td.ic-file-name::before { display: none; }
   .ic-files td.ic-file-name { font-weight: 500; }

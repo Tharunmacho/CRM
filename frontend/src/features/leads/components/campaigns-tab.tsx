@@ -57,7 +57,7 @@ function NameCell({ row }: { row: CampaignRow }) {
 
 export function campaignColumns(): DbColumn<CampaignRow>[] {
   return [
-    { key: 'campaign', header: 'Campaign', sortKey: 'campaign', width: 210, align: 'left', render: (r) => <NameCell row={r} /> },
+    { key: 'campaign', header: 'Campaign', sortKey: 'campaign', width: 210, align: 'center', render: (r) => <NameCell row={r} /> },
     { key: 'leads', header: 'Leads', sortKey: 'leads', width: 70, render: (r) => <Num value={r.leads} /> },
     { key: 'new', header: 'New', sortKey: 'newToday', width: 92, optional: 3, render: (r) => <Num value={r.newToday} sub={`${r.last7Days.toLocaleString()} in 7 days`} /> },
     { key: 'assigned', header: 'Assigned', sortKey: 'assignedPct', width: 80, render: (r) => <Pct pct={r.assignedPct} count={r.assigned} /> },
@@ -67,8 +67,8 @@ export function campaignColumns(): DbColumn<CampaignRow>[] {
     { key: 'converted', header: 'Converted', sortKey: 'conversionRate', width: 128, render: (r) => <ConversionCell row={r} /> },
     { key: 'upload', header: 'Last upload', sortKey: 'lastUploadAt', width: 96, optional: 4, render: (r) => <span className="lc-num"><strong className="tnum" style={{ fontSize: 13 }}>{uploadAgo(r.lastUploadAt)}</strong></span> },
     { key: 'platform', header: 'Platform', width: 124, optional: 5, render: (r) => <PlatformCell row={r} /> },
-    { key: 'positions', header: 'Top jobs', width: 190, optional: 6, align: 'left', render: (r) => <span className="lc-text" title={topText(r.topPositions)}>{topText(r.topPositions) || '–'}</span> },
-    { key: 'countries', header: 'Country interest', width: 130, optional: 7, align: 'left', render: (r) => <span className="lc-text" title={topText(r.topCountries)}>{topText(r.topCountries) || '–'}</span> },
+    { key: 'positions', header: 'Top jobs', width: 190, optional: 6, align: 'center', render: (r) => <span className="lc-text" title={topText(r.topPositions)}>{topText(r.topPositions) || '–'}</span> },
+    { key: 'countries', header: 'Country interest', width: 130, optional: 7, align: 'center', render: (r) => <span className="lc-text" title={topText(r.topCountries)}>{topText(r.topCountries) || '–'}</span> },
   ]
 }
 

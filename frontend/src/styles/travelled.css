@@ -96,13 +96,12 @@
    between body columns. Words wrap at spaces (a link or a name is never cut); under 900px the rows are labelled cards. The box is as tall as the screen allows
    (the header stays in sight while the rows scroll) and the pager sits right under it. */
 .tv-table-wrap { max-height: max(360px, calc(100dvh - 380px)); overflow-x: hidden; overflow-y: auto; }
-.tv-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
-.tv-c-date { width: 13%; } .tv-c-who { width: 16%; } .tv-c-client { width: 13%; } .tv-c-country { width: 11%; }
-.tv-c-job { width: 12%; } .tv-c-agency { width: 11%; } .tv-c-docs { width: 13%; } .tv-c-recruiter { width: 11%; }
+.tv-table { width: 100%; min-width: 0; table-layout: auto; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
+/* the columns size to their content (table-layout: auto): each at least its longest word and its heading plus the padding, the rest shared by what each holds; no fixed percentages */
 .tv-table td { overflow-wrap: break-word; }
-.tv-table th { position: sticky; top: 0; z-index: 2; box-sizing: border-box; height: 44px; padding: 0 8px; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); text-align: left; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 16px; text-transform: uppercase; color: var(--on-primary); white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.tv-table th { position: sticky; top: 0; z-index: 2; box-sizing: border-box; height: 44px; padding: 0 8px; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); text-align: center; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 16px; text-transform: uppercase; color: var(--on-primary); white-space: nowrap; overflow: hidden; text-overflow: clip; }
 .tv-table th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
-.tv-table td { box-sizing: border-box; height: 56px; padding: 8px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: middle; text-align: left; color: var(--text-main); }
+.tv-table td { box-sizing: border-box; height: 56px; padding: 8px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: middle; text-align: center; color: var(--text-main); }
 .tv-table td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
 .tv-table tbody tr:last-child td { border-bottom: var(--table-line-width) solid var(--table-line); }
 .tv-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
@@ -110,7 +109,7 @@
 .tv-table a { color: var(--primary); font-weight: 500; }
 .tv-table a:hover { text-decoration: underline; }
 .tv-who a { font-weight: 600; }
-.tv-who .cid-chip { display: flex; width: fit-content; margin-top: 4px; }
+.tv-who .cid-chip { display: flex; width: fit-content; margin: 4px auto 0; }
 /* the chip says only the ID (the column is the candidate's; the full words stay for screen readers and the tooltip) */
 .tv-who .cid-chip > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .tv-who .cid-chip { position: relative; padding-inline: 8px; }
@@ -209,7 +208,8 @@ body.tv-sheet-open { overflow: hidden; }
   .tv-table, .tv-table tbody, .tv-table td { display: block; }
   :root:root:root .tv-table { overflow: visible; border: 0; border-radius: 0; }
   .tv-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; padding: 12px 16px; }
-  :root:root .tv-table td { height: auto; padding: 6px 0; border: 0; font-size: 14px; }
+  :root:root .tv-table td { height: auto; padding: 6px 0; border: 0; font-size: 14px; text-align: left; }
+  .tv-who .cid-chip { margin: 4px 0 0; }
   .tv-table td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
   .tv-table td { min-width: 0; overflow-wrap: break-word; }
   .tv-table td:nth-child(2) { grid-column: 1 / -1; order: 0; }

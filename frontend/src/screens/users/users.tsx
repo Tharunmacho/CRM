@@ -155,7 +155,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
 
   const columns: Column<User>[] = [
     {
-      key: 'name', header: 'Team member', width: '22%', sortable: true, value: (u) => u.name.toLowerCase(),
+      key: 'name', header: 'Team member', width: '21%', sortable: true, value: (u) => u.name.toLowerCase(),
       render: (u) => <div className="uv-person">
         <UserAvatar name={u.name} muted={!u.active} />
         <div>
@@ -164,7 +164,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
         </div>
       </div>,
     },
-    { key: 'role', header: 'Role', width: '10%', sortable: true, value: (u) => roleRank[u.role], render: (u) => <RolePill role={u.role} /> },
+    { key: 'role', header: 'Role', width: '12%', sortable: true, value: (u) => roleRank[u.role], render: (u) => <RolePill role={u.role} /> },
     {
       key: 'phone', header: 'Phone', width: '12%',
       render: (u) => u.phone ? <div><a className="uv-phone" href={'tel:' + u.phone.replace(/\s+/g, '')} title={'Call ' + u.name}>{u.phone}</a></div> : <span className="uv-none" aria-label="Phone not set">—</span>,
@@ -184,7 +184,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
       </div> : <span className="uv-none" title={u.role !== 'staff' ? 'Recruiters only' : 'Account inactive'}>—</span>,
     },
     {
-      key: 'work', header: 'Open work', width: '12%', sortable: true, value: (u) => work(u.id).candidates + work(u.id).tasks,
+      key: 'work', header: 'Open work', width: '11%', sortable: true, value: (u) => work(u.id).candidates + work(u.id).tasks,
       render: (u) => { const counts = work(u.id); return <div className="uv-work">
         <span><b>{counts.candidates}</b> {counts.candidates === 1 ? 'candidate' : 'candidates'}</span>
         <span><b>{counts.tasks}</b> open {counts.tasks === 1 ? 'task' : 'tasks'}</span>
@@ -252,7 +252,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
         {filtered && <Button variant="ghost" onClick={clearFilters}>Clear filters</Button>}
       </div>
       {!autoOn && <p className="uv-assignment-note">Automatic assignment is off. Recruiter preferences below are saved for when it is enabled.</p>}
-      <DataTable compact plain stackBelow={1280} pageSize={PAGE_SIZE} rows={rows} columns={columns.map(column => ({ ...column, align: column.actions ? 'right' : 'left' }))} rowKey={(u) => u.id}
+      <DataTable compact plain stackBelow={1280} pageSize={PAGE_SIZE} rows={rows} columns={columns.map(column => ({ ...column, align: 'center' as const }))} rowKey={(u) => u.id}
         resetPageKey={`${query}|${roleFilter}|${statusFilter}`} rowClassName={(u) => cn(!u.active && 'uv-row-off')}
         empty={<EmptyState title="No team members match" description="Try a different name, email or filter."
           action={filtered ? <Button onClick={clearFilters}>Clear filters</Button> : undefined} />} />

@@ -30,13 +30,15 @@ export interface FitResult {
   hidden: number
   /** The person asked for the wide table: it may scroll sideways. */
   wide: boolean
+  /** The columns left (after hiding every optional one) add up to no more than the box: false = even the required columns would be squeezed, so the screen shows cards instead of cutting words. */
+  fits: boolean
 }
 
 export function fitColumns(columns: readonly FitColumn[], boxWidth: number, choices: ColumnChoices = {}): FitResult {
   const wanted = columns.filter((column) => (column.off ? choices[column.key] === true : choices[column.key] !== false))
   const wide = choices[CHOICE_WIDE] === true
   const forced = choices[CHOICE_COMPACT]
-  if (wide || !(boxWidth > 0)) return { keys: wanted.map((column) => column.key), compact: forced === true, hidden: 0, wide }
+  if (wide || !(boxWidth > 0)) return { keys: wanted.map((column) => column.key), compact: forced === true, hidden: 0, wide, fits: true }
   const shown = new Set(wanted.map((column) => column.key))
   const total = () => wanted.filter((column) => shown.has(column.key)).reduce((sum, column) => sum + column.width, 0)
   // Hide order: columns the person did not ask for first, then the ones they asked for; within each, the least important first.
@@ -44,10 +46,10 @@ export function fitColumns(columns: readonly FitColumn[], boxWidth: number, choi
     .sort((a, b) => Number(choices[a.key] === true) - Number(choices[b.key] === true) || (b.optional as number) - (a.optional as number))
   for (;;) {
     const width = total()
-    if (forced !== true && fitsIn(width, boxWidth)) return { keys: wanted.filter((c) => shown.has(c.key)).map((c) => c.key), compact: false, hidden: wanted.length - shown.size, wide }
-    if (forced !== false && fitsIn(width * COMPACT_RATIO, boxWidth)) return { keys: wanted.filter((c) => shown.has(c.key)).map((c) => c.key), compact: true, hidden: wanted.length - shown.size, wide }
+    if (forced !== true && fitsIn(width, boxWidth)) return { keys: wanted.filter((c) => shown.has(c.key)).map((c) => c.key), compact: false, hidden: wanted.length - shown.size, wide, fits: true }
+    if (forced !== false && fitsIn(width * COMPACT_RATIO, boxWidth)) return { keys: wanted.filter((c) => shown.has(c.key)).map((c) => c.key), compact: true, hidden: wanted.length - shown.size, wide, fits: true }
     const next = candidates()[0]
-    if (!next) return { keys: wanted.filter((c) => shown.has(c.key)).map((c) => c.key), compact: forced !== false, hidden: wanted.length - shown.size, wide }
+    if (!next) return { keys: wanted.filter((c) => shown.has(c.key)).map((c) => c.key), compact: forced !== false, hidden: wanted.length - shown.size, wide, fits: false }
     shown.delete(next.key)
   }
 }

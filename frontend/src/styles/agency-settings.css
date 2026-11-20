@@ -130,14 +130,19 @@
    14 px side padding so a header starts on the same left edge as its cells, a line under every row, everything left), scrolling inside its card
    with the header kept in view, so 150 currencies do not make the page 3000 px long. */
 @media (min-width: 768px) {
-  :root:root .as-currencies .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1.2; text-align: left; text-transform: uppercase; white-space: nowrap; }
+  :root:root .as-currencies .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1.2; text-transform: uppercase; white-space: nowrap; }
   :root:root .as-currencies .ui-data-table.is-grid thead th button { font: inherit; letter-spacing: inherit; text-transform: inherit; }
-  :root:root .as-currencies .ui-data-table.is-grid tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .as-currencies .ui-data-table.is-grid tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .as-currencies .ui-data-table.is-grid tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .as-currencies .ui-data-table.is-grid :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
   :root:root .as-currencies .ui-data-table.is-grid :is(th, td).ui-actions-cell { text-align: left; }
 }
 .as-currencies .uv-actions { justify-content: flex-start; }
+/* the table (from 1024px; below it the rows are cards that keep their left labels): heading and cells CENTRED */
+@media (min-width: 1024px) {
+  :root:root .as-currencies .ui-data-table.is-grid :is(thead th, tbody td, :is(th, td).ui-actions-cell) { text-align: center; }
+  .as-currencies .uv-actions { justify-content: center; }
+}
 
 /* Tablets and phones: switches, icon buttons and the Edit / Delete / Rename buttons are at least 44 px tall (a switch keeps its look and gains an invisible 44 px hit area). */
 @media (max-width: 1023px), (pointer: coarse) {

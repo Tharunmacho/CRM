@@ -45,16 +45,16 @@ test('sort carets and the select-all box stay visible on the blue', () => {
   assert.match(css, /thead th \.custom-checkbox \{ border-color: var\(--on-primary\)/)
 })
 
-test('body: rows of at least 60px, 8px edge, a 1px line under every row (the last too), a light line between columns, everything left', () => {
+test('body: rows of at least 60px, 8px edge, a 1px line under every row (the last too), a light line between columns, everything centred', () => {
   const sharedBody = shared.slice(shared.indexOf(':root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td {'), shared.indexOf('}', shared.indexOf(':root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td {')))
   assert.match(sharedBody, /height: 60px/)
   assert.match(sharedBody, /padding: 8px;/, 'the same 8px left edge as the header')
   assert.match(sharedBody, /vertical-align: middle/)
-  assert.match(sharedBody, /text-align: left/)
+  assert.match(sharedBody, /text-align: center/)
   assert.match(sharedBody, /border-bottom: var\(--table-line-width\) solid var\(--table-line\)/)
   assert.match(shared, /td:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-column-line\); \}/)
   assert.match(shared, /tr:not\(\.db-xrow\):last-child > td \{ border-bottom: var\(--table-line-width\) solid var\(--table-line\)/)
-  assert.match(rule(':root:root .ld .db-tbl.is-grid.is-fit tbody td.is-center {'), /text-align: left/, 'Created and the experience answers read from the left too')
+  assert.match(rule(':root:root .ld .db-tbl.is-grid.is-fit tbody td.is-center {'), /text-align: center/, 'Created and the experience answers are centred under centred headings')
   assert.match(css, /\.ld-position, \.ld-owner-name, \.ld-identity-name, \.ld-camp-name, \.ld-answer-text, \.db-tone\) \{[^}]*white-space: normal; line-height: 18px/, 'names, jobs, places and statuses wrap at spaces')
   const widths = Object.fromEntries([...definitions.matchAll(/key: '(experienceIndia|experienceAbroad|experience)'[^\n]*?width: (\d+)/g)].map((m) => [m[1], +m[2]]))
   assert.ok(widths.experienceIndia <= widths.experienceAbroad, 'each experience column is as wide as its heading needs')

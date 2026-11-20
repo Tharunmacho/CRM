@@ -13,17 +13,17 @@
  * Tokens only, so dark mode follows. Below 900px the Data Bank, Lead sheet and Matched candidates show labelled cards (no table), so none of this applies there.
  */
 :root:root:root .db-tbl.is-grid thead th {
-  box-sizing: border-box; height: 44px; padding: 0 8px; overflow: hidden; text-overflow: clip; vertical-align: middle; text-align: left; white-space: nowrap; overflow-wrap: normal;
+  box-sizing: border-box; height: 44px; padding: 0 8px; overflow: hidden; text-overflow: clip; vertical-align: middle; text-align: center; white-space: nowrap; overflow-wrap: normal;
   border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); border-radius: 0; background: var(--primary); color: var(--on-primary);
   font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 16px; text-transform: uppercase;
 }
 :root:root:root .db-tbl.is-grid thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
-:root:root:root .db-tbl.is-grid thead th.is-right { text-align: right; }
+:root:root:root .db-tbl.is-grid thead th.is-right { text-align: center; }
 :root:root:root .db-tbl.is-grid thead th :is(button, a, svg, span, label) { color: inherit; }
-:root:root:root .db-tbl.is-grid thead .db-th-sort { display: inline-flex; align-items: center; justify-content: flex-start; gap: 4px; max-width: 100%; min-width: 0; min-height: 0; padding: 0; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; white-space: nowrap; color: inherit; }
+:root:root:root .db-tbl.is-grid thead .db-th-sort { display: inline-flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; min-width: 0; min-height: 0; padding: 0; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: center; white-space: nowrap; color: inherit; }
 :root:root:root .db-tbl.is-grid thead .db-th-sort:is(:hover, .is-on) { color: inherit; }
 :root:root:root .db-tbl.is-grid thead .db-th-label { display: block; overflow: visible; text-overflow: clip; white-space: nowrap; }
-:root:root:root .db-tbl.is-grid thead .db-th-caret { position: static; flex: none; margin: 0; color: inherit; opacity: .7; }
+:root:root:root .db-tbl.is-grid thead .db-th-caret { position: absolute; top: 50%; right: 3px; flex: none; margin: -6px 0 0; color: inherit; opacity: .7; pointer-events: none; }   /* hangs in the padding: the heading's words stay centred */
 :root:root:root .db-tbl.is-grid thead .db-th-sort.is-on .db-th-caret { color: inherit; opacity: 1; }
 :root:root:root .db-tbl.is-grid thead :is(button, a, input, [tabindex]):focus-visible { outline: 2px solid var(--on-primary); outline-offset: 1px; }
 :root:root:root .db-tbl.is-grid thead .custom-checkbox { border-color: color-mix(in srgb, var(--on-primary) 70%, var(--primary)); background-color: color-mix(in srgb, var(--on-primary) 14%, var(--primary)); }
@@ -31,11 +31,11 @@
 :root:root:root .db-tbl.is-grid thead .custom-checkbox:is(:checked, :indeterminate)::after { background-color: var(--primary); }
 
 :root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td {
-  box-sizing: border-box; height: 60px; min-height: 60px; padding: 8px; vertical-align: middle; text-align: left; overflow-wrap: break-word;
+  box-sizing: border-box; height: 60px; min-height: 60px; padding: 8px; vertical-align: middle; text-align: center; overflow-wrap: break-word;
   border: 0; border-bottom: var(--table-line-width) solid var(--table-line);
 }
 :root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
-:root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td.is-right { text-align: right; }
+:root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td.is-right { text-align: center; }
 :root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow):last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
 :root:root:root .db-tbl.is-grid :is(th, td).is-right { padding-left: 8px; }
 :root:root:root .db-tbl.is-grid :is(th, td).is-select { padding-left: 8px; padding-right: 8px; }

@@ -123,8 +123,8 @@ export default function OrderDetailPage() {
       key: 'candidate',
       header: 'Candidate',
       sortable: true,
-      align: 'left',
-      width: '24%',
+      align: 'center',
+      width: '23%',
       value: (a) => store.candidate(a.candidateId)?.name ?? '',
       render: (a) => {
         const c = store.candidate(a.candidateId)
@@ -142,7 +142,7 @@ export default function OrderDetailPage() {
     {
       key: 'stage',
       header: 'Stage',
-      width: '25%',
+      width: '24%',
       sortable: true,
       filterable: true,
       value: (a) =>
@@ -159,7 +159,7 @@ export default function OrderDetailPage() {
     {
       key: 'owner',
       header: 'Recruiter',
-      width: '13%',
+      width: '14%',
       sortable: true,
       filterable: true,
       value: (a) => store.user(store.candidate(a.candidateId)?.ownerId ?? '')?.name ?? '',
@@ -375,6 +375,7 @@ export default function OrderDetailPage() {
           </>
         ) : (
           <DataTable
+            stackBelow={1024}
             rows={visibleApps}
             columns={matchedColumns}
             rowKey={(a) => a.id}

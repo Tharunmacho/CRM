@@ -67,7 +67,7 @@ const CHECK_LABELS: [keyof MrzCheckDigits, string][] = [
   ['composite', 'Composite'],
 ]
 
-const th = 'pb-2 pr-4 text-[13px] font-medium text-ink-500'
+const th = 'pb-2 pr-4 text-center text-[13px] font-medium text-ink-500'
 
 /* ---------------------------------------------------------------------- Passport */
 
@@ -184,7 +184,7 @@ function InspectionTable({ view }: { view: InspectionView }) {
           )}
           {view.rows.length > 0 && (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[30rem] text-left text-[14px]">
+              <table className="w-full min-w-[30rem] text-center text-[14px]">
                 <thead>
                   <tr>
                     <th className={th}>Page</th>
@@ -197,13 +197,13 @@ function InspectionTable({ view }: { view: InspectionView }) {
                 </thead>
                 <tbody className="divide-y divide-rule-soft">
                   {view.rows.map((r) => (
-                    <tr key={r.page} className="align-top">
+                    <tr key={r.page} className="align-middle">
                       <td className="py-2 pr-4 font-medium text-ink-700 tnum">{r.page}</td>
                       <td className={cn('py-2 pr-4', r.status === 'unread' ? 'text-amber-700' : 'text-ink-600')}>{capitalise(r.status)}</td>
                       <td className={cn('py-2 pr-4', r.type === 'Unknown' ? 'text-amber-700' : 'text-ink-600')}>{r.type}</td>
                       <td className="py-2 pr-4 text-ink-600">{r.method}</td>
                       <td className="py-2 pr-4 text-ink-600 tnum">{r.confidence}</td>
-                      <td className="break-words py-2 text-ink-600">{r.reason}</td>
+                      <td className="break-words py-2 text-left text-ink-600">{r.reason}</td>
                     </tr>
                   ))}
                 </tbody>

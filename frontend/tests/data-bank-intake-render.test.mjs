@@ -65,11 +65,11 @@ test('mobile cards show Source instead of Stage and keep the referring agency se
   assert.match(referral, />Al Noor Agency</)
 })
 
-test('the row buttons are the FIRST column, fixed width, left aligned, never a far-right Actions column', () => {
+test('the row buttons are the FIRST column, fixed width, centred under a centred heading, never a far-right Actions column', () => {
   const columns = dataBankColumns({ store, ...handlers })
   assert.equal(columns[0].key, 'actions')
   assert.equal(columns.findIndex(column => column.key === 'actions'), 0)
-  assert.equal(columns[0].align, 'left')
+  assert.equal(columns[0].align, 'center')
   assert.equal(columns[0].optional, undefined)
   assert.equal(columns[0].sortKey, undefined)
   assert.ok(columns[0].width >= 32 * 3 + 4 * 2 + 20 + 18 + 16 + 32, 'room for three buttons beside the expand arrow and the checkbox')

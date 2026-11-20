@@ -14,7 +14,7 @@ export interface DbColumn<T> {
   sortKey?: string
   /** Design width in px. Classic tables turn the widths into shares so they always add up to 100%; the grid table uses them as minimum widths. */
   width: number
-  /** Cell alignment. The grid table centres by default. */
+  /** Cell alignment. The grid table centres by default (headings are always centred); 'left' is for long free text only. 'right' is treated as centre. */
   align?: 'left' | 'center' | 'right'
   /** Grid table only: pin the column to the left or right edge while the table scrolls sideways. */
   sticky?: 'start' | 'end'
@@ -158,8 +158,8 @@ export const DbRow = memo(DbRowView) as typeof DbRowView
  */
 export function DbTable<T>({ rows, columns, rowKey, onRowClick, sort, onSort, selectable, selected = [], onSelectedChange, rowClassName, label, variant = 'classic', fit = false, expandedIds, onToggleExpand, renderExpanded }: Props<T>) {
   const grid = variant === 'grid'
-  // A fit table whose columns all state their alignment (the Data Bank) is a flush-left table: header and cells share one padding and one alignment.
-  const flush = grid && fit && columns.length > 0 && columns.every(column => column.align === 'left' || column.align === 'right')
+  // A fit table whose columns all state their alignment (the Data Bank, the Lead sheet) is a flush table: header and cells share one padding and one alignment (centred; 'left' only for long free text).
+  const flush = grid && fit && columns.length > 0 && columns.every(column => column.align !== undefined)
   const merged = grid && fit && !!selectable  // fit mode: the checkbox lives inside the first column
   const expandable = grid && fit && !!renderExpanded && !!onToggleExpand
   const [scrollRef, edges] = useScrollEdges(grid)
@@ -194,8 +194,8 @@ export function DbTable<T>({ rows, columns, rowKey, onRowClick, sort, onSort, se
       selectable: !!selectable, merged, expandable, checkPinned: grid && !!selectable && !merged && starts.length > 0,
       cellClass: (column: DbColumn<T>) => cn(
         column.className,
-        column.align === 'right' && 'is-right',
-        grid && (column.align ?? 'center') === 'center' && 'is-center',
+        column.align === 'left' && 'is-left',
+        grid && (column.align ?? 'center') !== 'left' && 'is-center',
         grid && starts.includes(column) && 'is-pin-start',
         grid && !fit && column.sticky === 'end' && 'is-pin-end',
         grid && edges.start && column.key === lastStart && 'is-edge',
@@ -248,7 +248,7 @@ export function DbTable<T>({ rows, columns, rowKey, onRowClick, sort, onSort, se
                 {selectAll && !flush
                   ? selectAllBox
                   : flush && index === 0 && (selectAll || expandable)
-                  ? <span className="db-selcell">{expandable && <span className="db-expand-gap" aria-hidden="true" />}{selectAll && selectAllBox}{label}</span>
+                  ? <span className="db-selcell">{expandable && <span className="db-expand-gap" aria-hidden="true" />}{selectAll && selectAllBox}{typeof label === 'string' ? <span className="db-th-plain">{label}</span> : label}</span>
                   : label}
               </th>
             )

@@ -15,26 +15,26 @@
 /* ---------- Header ---------- */
 :root:root .ld .db-tbl.is-grid.is-fit thead th {
   position: sticky; top: 0; z-index: 3; padding: 0 8px; overflow: hidden;
-  text-align: left; text-overflow: clip; white-space: nowrap; overflow-wrap: normal; vertical-align: middle;
+  text-align: center; text-overflow: clip; white-space: nowrap; overflow-wrap: normal; vertical-align: middle;
 }
-:root:root .ld .db-tbl.is-grid.is-fit thead th.is-center { padding-inline: 8px; text-align: left; }
+:root:root .ld .db-tbl.is-grid.is-fit thead th.is-center { padding-inline: 8px; text-align: center; }
 :root:root .ld .db-tbl.is-grid.is-fit thead th :is(button, svg, .db-th-label) { color: inherit; }
 /* the shared compact skin (db-fit.css) tightens padding and height; the lead sheet keeps one geometry in both spacings */
 :root:root .ld .db-box.is-compact .db-tbl.is-grid.is-fit thead th { padding: 0 8px; font-size: 11.5px; }
 :root:root .ld .db-box.is-compact .db-tbl.is-grid.is-fit thead th.is-select { padding-left: 28px; }
 :root:root .ld .db-box.is-compact .db-tbl.is-grid.is-fit tbody td { height: 60px; padding: 8px; }
 /* the sort button fills the cell: the label (never wrapped, never cut: the column is wide enough) and the caret that is always shown */
-.ld .db-tbl.is-fit thead th .db-th-sort { display: flex; align-items: center; justify-content: flex-start; width: 100%; min-width: 0; padding: 0; font-size: inherit; font-weight: inherit; letter-spacing: inherit; text-transform: inherit; white-space: nowrap; color: inherit; }
+.ld .db-tbl.is-fit thead th .db-th-sort { display: flex; align-items: center; justify-content: center; width: 100%; min-width: 0; padding: 0; font-size: inherit; font-weight: inherit; letter-spacing: inherit; text-transform: inherit; white-space: nowrap; color: inherit; }
 .ld .db-tbl.is-fit thead th .db-th-label { display: block; min-width: 0; overflow: visible; line-height: 1.2; text-overflow: clip; white-space: nowrap; }
 .ld .db-tbl.is-fit thead th .db-th-sort:hover, .ld .db-tbl.is-fit thead th .db-th-sort.is-on { color: inherit; }
-.ld .db-tbl.is-fit thead th .db-th-caret { position: static; flex: none; width: 11px; height: 11px; margin: 0 0 0 3px; color: var(--on-primary); }
+.ld .db-tbl.is-fit thead th .db-th-caret { position: absolute; top: 50%; right: 3px; flex: none; width: 11px; height: 11px; margin: -5.5px 0 0; color: var(--on-primary); pointer-events: none; }   /* hangs in the padding, so the heading's WORDS stay exactly centred over the centred cells */
 .ld .db-tbl.is-fit thead th .db-th-caret.is-idle { opacity: .72; }
 .ld .db-tbl.is-fit thead th .db-th-sort.is-on .db-th-caret.is-idle, .ld .db-tbl.is-fit thead th:hover .db-th-caret.is-idle { opacity: 1; }
 .ld .db-tbl.is-fit thead th .db-th-sort:focus-visible { outline: 2px solid var(--on-primary); outline-offset: 3px; border-radius: 4px; }
 /* the actions column has no heading of its own (its cells are the arrow, the tick box and the menu): the word stays for screen readers and the tooltip */
 :root:root .ld .db-tbl.is-grid.is-fit thead th:first-child:not(.is-select) { font-size: 0; }
 /* the select-all box sits exactly over the row boxes (it skips the width of the row arrow) */
-:root:root .ld .db-tbl.is-grid.is-fit thead th.is-select { overflow: visible; padding-left: 28px; padding-right: 0; }
+:root:root .ld .db-tbl.is-grid.is-fit thead th.is-select { overflow: visible; padding-left: 28px; padding-right: 0; text-align: left; }
 .ld .db-tbl.is-fit thead th .custom-checkbox { border-color: var(--on-primary); }
 .ld .db-tbl.is-fit thead th .custom-checkbox:checked, .ld .db-tbl.is-fit thead th .custom-checkbox:indeterminate { border-color: var(--on-primary); background-color: var(--on-primary); }
 .ld .db-tbl.is-fit thead th .custom-checkbox::after { background-color: var(--primary); }
@@ -42,15 +42,17 @@
 
 /* ---------- Body: one padding, left text, a line under every row and a light line between columns (candidate-tables.css) ---------- */
 :root:root .ld .db-tbl.is-grid.is-fit tbody td {
-  overflow: hidden; font-size: 13px; line-height: 18px; text-align: left;
+  overflow: hidden; font-size: 13px; line-height: 18px; text-align: center;
 }
-:root:root .ld .db-tbl.is-grid.is-fit tbody td.is-center { padding-inline: 8px; text-align: left; }
+:root:root .ld .db-tbl.is-grid.is-fit tbody td.is-center { padding-inline: 8px; text-align: center; }
+:root:root .ld .db-tbl.is-grid.is-fit tbody td.is-left { padding-inline: 8px; text-align: left; }
 :root:root .ld .db-tbl.is-grid.is-fit tbody tr.db-xrow > td { height: auto; padding: 0; overflow: visible; border-right: 0; }
 :root:root .ld .db-tbl.is-grid.is-fit tbody td.is-select { overflow: visible; }
 
-/* cells that centre by default read from the left */
-.ld .db-tbl.is-fit .db-2l { align-items: flex-start; gap: 2px; text-align: left; }
-.ld .db-tbl.is-fit td :is(.db-clamp, .db-tone, .ld-answer-text) { text-align: left; }
+/* every cell centres (headings too); only a cell of long free text (a custom question answer, a registry field) reads from the left */
+.ld .db-tbl.is-fit .db-2l { align-items: center; gap: 2px; text-align: center; }
+.ld .db-tbl.is-fit td :is(.db-clamp, .db-tone, .ld-answer-text) { text-align: center; }
+.ld .db-tbl.is-fit td.is-left :is(.db-2l, .db-clamp, .db-tone, .ld-answer-text) { align-items: flex-start; text-align: left; }
 
 /* WRAP at spaces: names, jobs, places, recruiters, statuses (a word wider than its column breaks only as the last resort) */
 .ld .db-tbl.is-fit :is(.ld-position, .ld-owner-name, .ld-identity-name, .ld-camp-name, .ld-answer-text, .db-tone) { display: block; overflow: visible; overflow-wrap: break-word; word-break: normal; text-overflow: clip; white-space: normal; line-height: 18px; }
@@ -62,45 +64,49 @@
 
 /* Name / age / phone: name (and the age beside it) over the phone line */
 .ld .db-tbl.is-fit .ld-identity { width: 100%; gap: 3px; }
-.ld .ld-identity-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 6px; width: 100%; min-width: 0; }
+.ld .ld-identity-top { display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; gap: 0 6px; width: 100%; min-width: 0; }
+.ld .ld-card .ld-identity-top { justify-content: flex-start; }
 .ld .ld-identity-top .ld-identity-name { flex: 0 1 auto; min-width: 0; width: auto; }
 .ld .ld-identity-age { flex: none; font-size: 12px; font-weight: 500; line-height: 18px; white-space: nowrap; color: var(--text-muted); }
-.ld .db-tbl.is-fit .ld-identity-phone { display: flex; align-items: center; flex-wrap: nowrap; gap: 2px; width: 100%; min-width: 0; height: 24px; }
+.ld .db-tbl.is-fit .ld-identity-phone { display: flex; align-items: center; justify-content: center; flex-wrap: nowrap; gap: 2px; width: 100%; min-width: 0; height: 24px; }
 .ld .db-tbl.is-fit .ld-identity-phone > .ident { flex: 0 0 auto; min-width: 0; white-space: nowrap; }
 .ld .db-tbl.is-fit .ld-identity-phone .db-wa { flex: none; width: 22px; height: 22px; }
 .ld .db-tbl.is-fit .ld-identity-phone .ld-copy { flex: none; width: 22px; height: 22px; }
-.ld .db-tbl.is-fit .ld-line { justify-content: flex-start; }
+.ld .db-tbl.is-fit .ld-line { justify-content: center; }
 /* the e-mail is the one unbounded text: one line with an ellipsis, whole in the tooltip */
 .ld .db-tbl.is-fit .ld-contact .db-ellip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Assigned to: name over the status (and the follow-up beside it, or under it when the column is narrow) */
-.ld .db-tbl.is-fit .ld-statown { align-items: flex-start; gap: 2px; width: 100%; text-align: left; }
+.ld .db-tbl.is-fit .ld-statown { align-items: center; gap: 2px; width: 100%; text-align: center; }
 .ld .db-tbl.is-fit .ld-statown-btn { margin: 0; padding: 2px 0; }
-.ld .ld-statline { display: flex; align-items: center; flex-wrap: wrap; gap: 0 8px; width: 100%; min-width: 0; }
+.ld .ld-statline { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0 8px; width: 100%; min-width: 0; }
+.ld .ld-card .ld-statline { justify-content: flex-start; }
 .ld .ld-statline > .db-tone { flex: 0 1 auto; min-width: 0; }
 .ld .ld-statline > small.ld-follow { flex: 0 1 auto; min-width: 0; }
 
 /* Experience: one left-aligned answer; a Yes / No answer is a button (a tap opens the question) */
-.ld .db-tbl.is-fit .ld-experience-cell { display: flex; justify-content: flex-start; width: 100%; }
-.ld .db-tbl.is-fit .ld-experience-answer { display: inline-flex; align-items: center; justify-content: flex-start; width: auto; min-height: 36px; padding: 0; border-radius: 8px; text-decoration: underline dotted color-mix(in srgb, var(--text-muted) 70%, transparent); text-underline-offset: 3px; }
-.ld .db-tbl.is-fit .ld-experience-value { display: block; max-width: 100%; overflow: visible; overflow-wrap: break-word; text-overflow: clip; white-space: normal; line-height: 18px; text-align: left; }
+.ld .db-tbl.is-fit .ld-experience-cell { display: flex; justify-content: center; width: 100%; }
+.ld .db-tbl.is-fit .ld-experience-answer { display: inline-flex; align-items: center; justify-content: center; width: auto; min-height: 36px; padding: 0; border-radius: 8px; text-decoration: underline dotted color-mix(in srgb, var(--text-muted) 70%, transparent); text-underline-offset: 3px; }
+.ld .db-tbl.is-fit .ld-experience-value { display: block; max-width: 100%; overflow: visible; overflow-wrap: break-word; text-overflow: clip; white-space: normal; line-height: 18px; text-align: center; }
 
 /* Resume: left-aligned, controls 36px, chips 24px; a chip's words wrap rather than being cut */
-.ld .db-tbl.is-fit .ld-resume { align-items: flex-start; gap: 3px; max-width: 100%; }
+.ld .db-tbl.is-fit .ld-resume { align-items: center; gap: 3px; max-width: 100%; }
 .ld .db-tbl.is-fit .ld-upload { box-sizing: border-box; height: 36px; min-width: 36px; gap: 6px; padding: 0 12px; font-size: 12.5px; }
-.ld .db-tbl.is-fit .ld-got { box-sizing: border-box; justify-content: flex-start; min-height: 24px; height: auto; font-size: 12px; line-height: 16px; text-align: left; }
+.ld .db-tbl.is-fit .ld-got { box-sizing: border-box; justify-content: center; min-height: 24px; height: auto; font-size: 12px; line-height: 16px; text-align: center; }
 .ld .db-tbl.is-fit .ld-got > span { min-width: 0; overflow: visible; overflow-wrap: break-word; text-overflow: clip; white-space: normal; }
-.ld .db-tbl.is-fit .ld-match { box-sizing: border-box; display: block; min-height: 24px; height: auto; padding: 4px 8px; font-size: 11px; line-height: 14px; text-align: left; white-space: normal; overflow-wrap: break-word; }
-.ld .db-tbl.is-fit .ld-cand { box-sizing: border-box; align-items: flex-start; min-height: 36px; padding: 3px 10px; text-align: left; white-space: normal; }
-.ld .db-tbl.is-fit .ld-camp { justify-content: flex-start; }
+.ld .db-tbl.is-fit .ld-match { box-sizing: border-box; display: block; min-height: 24px; height: auto; padding: 4px 8px; font-size: 11px; line-height: 14px; text-align: center; white-space: normal; overflow-wrap: break-word; }
+.ld .db-tbl.is-fit .ld-cand { box-sizing: border-box; align-items: center; min-height: 36px; padding: 3px 10px; text-align: center; white-space: normal; }
+.ld .db-tbl.is-fit .ld-camp { justify-content: center; }
+.ld .db-tbl.is-fit .ld-camp-text { align-items: center; text-align: center; }
+.ld .db-tbl.is-fit .ld-camp { text-align: center; }
 .ld .db-tbl.is-fit .ld-camp-text small { display: block; overflow: visible; overflow-wrap: break-word; text-overflow: clip; white-space: normal; line-height: 16px; }
 
 /* First cell: arrow, tick box and "..." menu, each a 36px target, centred on the row */
-.ld .db-tbl.is-fit .db-selcell { display: flex; align-items: center; justify-content: flex-start; gap: 0; max-width: none; }
+.ld .db-tbl.is-fit .db-selcell { display: flex; align-items: center; justify-content: center; gap: 0; max-width: none; }
 .ld .db-tbl.is-fit .db-selcell .db-expand { width: 20px; height: 36px; margin-right: 0; border-radius: 8px; }
 .ld .db-tbl.is-fit .db-selcell > label, .ld .db-tbl.is-fit thead th.is-select > label { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; cursor: pointer; }
 .ld .db-tbl.is-fit .db-selcell > label .custom-checkbox, .ld .db-tbl.is-fit thead th.is-select > label .custom-checkbox { margin: 0; }
-.ld .db-tbl.is-fit .db-selcell .db-acts { justify-content: flex-start; }
+.ld .db-tbl.is-fit .db-selcell .db-acts { justify-content: center; }
 .ld .db-tbl.is-fit :is(.db-menu-trigger, .db-act) { width: 36px; min-width: 36px; height: 36px; }
 .ld .db-tbl.is-fit .ld-acts { gap: 0; }
 

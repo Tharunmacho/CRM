@@ -113,17 +113,17 @@ function JobCards({ rows, query, newId, onOpen, onEdit, onDelete }: { rows: JobR
 function JobTable({ rows, query, loading, newId, onOpen, onEdit, onDelete }: { rows: JobRow[]; query: string; loading: boolean; newId: string; onOpen: (o: Order) => void; onEdit?: (o: Order) => void; onDelete?: (o: Order) => void }) {
   const columns: Column<JobRow>[] = [
     {
-      key: 'job', header: 'Job', width: '19%',
+      key: 'job', header: 'Job', width: '19%', align: 'center',
       render: (row) => <div className="cl-cell"><b title={row.title}><Hi text={row.title} query={query} /></b><span className="ident" title={row.order.ref}><Hi text={row.order.ref} query={query} /></span></div>,
     },
     {
-      key: 'client', header: 'Client', width: '18%', align: 'left',
+      key: 'client', header: 'Client', width: '18%', align: 'center',
       render: (row) => <div className="cl-cell"><b title={row.company}><Hi text={row.company} query={query} /></b></div>,
     },
-    { key: 'location', header: 'Location', width: '11%', align: 'left', render: (row) => <Location country={row.country} city={row.city} query={query} /> },
-    { key: 'salary', header: 'Salary', width: '12%', align: 'left', render: (row) => <Salary order={row.order} /> },
-    { key: 'openings', header: 'Openings', width: '13%', align: 'left', render: (row) => <Openings row={row} /> },
-    { key: 'status', header: 'Status', width: '10%', align: 'left', render: (row) => <OrderStatusText order={row.order} /> },
+    { key: 'location', header: 'Location', width: '11%', align: 'center', render: (row) => <Location country={row.country} city={row.city} query={query} /> },
+    { key: 'salary', header: 'Salary', width: '12%', align: 'center', render: (row) => <Salary order={row.order} /> },
+    { key: 'openings', header: 'Openings', width: '13%', align: 'center', render: (row) => <Openings row={row} /> },
+    { key: 'status', header: 'Status', width: '10%', align: 'center', render: (row) => <OrderStatusText order={row.order} /> },
     {
       key: 'actions', header: 'Actions', actions: true,
       render: (row) => <span className="cs-row-actions">

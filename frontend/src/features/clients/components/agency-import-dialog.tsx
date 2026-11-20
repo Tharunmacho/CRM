@@ -15,17 +15,17 @@ import '@/styles/ops-tables.css'
 function ImportRows({ preview }: { preview: AgencyImportPreview }) {
   const columns: Column<AgencyImportRow>[] = [
     { key: 'row', header: 'Row', width: '8%', render: row => row.rowNumber },
-    { key: 'agency', header: 'Agency / contact', width: '25%', align: 'left', render: row => <div className="ai-cell">
+    { key: 'agency', header: 'Agency / contact', width: '25%', align: 'center', render: row => <div className="ai-cell">
       <strong>{row.values.agencyName || '—'}{row.values.activeAgency === true && <span className="ai-active">Active</span>}</strong>
       {row.values.name && row.values.name !== row.values.agencyName && <span>{row.values.name}</span>}
       {row.values.phone && <span>{row.values.phone}</span>}{row.values.email && <span>{row.values.email}</span>}
     </div> },
-    { key: 'place', header: 'Location / notes', width: '34%', align: 'left', render: row => <div className="ai-cell">
+    { key: 'place', header: 'Location / notes', width: '34%', align: 'center', render: row => <div className="ai-cell">
       {[row.values.place, row.values.state].filter(Boolean).length > 0 && <strong>{[row.values.place, row.values.state].filter(Boolean).join(', ')}</strong>}
       {row.values.address && <span>{row.values.address}</span>}{row.values.notes && <span>{row.values.notes}</span>}
       {!row.values.place && !row.values.state && !row.values.address && !row.values.notes && <span className="ai-muted">—</span>}
     </div> },
-    { key: 'status', header: 'Import result', width: '35%', align: 'left', render: row => <div className="ai-cell">
+    { key: 'status', header: 'Import result', width: '35%', align: 'center', render: row => <div className="ai-cell">
       <span className={`ai-status is-${row.status}`}>{AGENCY_IMPORT_STATUS[row.status]}</span><span>{row.message}</span>
     </div> },
   ]

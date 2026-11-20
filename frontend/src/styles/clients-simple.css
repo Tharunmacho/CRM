@@ -240,15 +240,15 @@
 /* The agencies table: the Tasks table's blue header band (44 px, one line, uppercase 11.5px/700), 56 px rows with everything centred, 14 px
    side padding on every cell so a header starts on the same left edge as its cells, and a visible var(--table-line) line under every row, the last one too, and between every pair of columns (the frame is the DataTable box's, data-table.css). */
 @media (min-width: 1024px) {
-  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: left; text-transform: uppercase; white-space: nowrap; }
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: center; text-transform: uppercase; white-space: nowrap; }
   :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
   :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid thead th:last-child { border-right: 0; }
   .clients-simple .cs-agency-table .ui-data-table.is-grid thead th .ui-th-inner { display: inline-flex; max-width: 100%; }
   .clients-simple .cs-agency-table .ui-data-table.is-grid thead th button { color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
-  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: center; border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
-  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { width: 9.5rem; min-width: 9.5rem; text-align: left; }
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { width: 9.5rem; min-width: 9.5rem; text-align: center; }
 }
 .clients-simple .cs-agency-table .cs-row-actions { justify-content: flex-start; }
 .clients-simple .cs-agency-table .record-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }

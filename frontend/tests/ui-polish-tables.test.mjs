@@ -17,7 +17,8 @@ test('every table follows one set of rules: 44 px header, single-line uppercase 
   assert.match(jobs, /\.js-jobs-table \.ui-data-table\.is-grid tbody td \{ height: 56px; padding: 8px 14px; vertical-align: middle;/)
   const settings = await css('agency-settings.css')
   assert.match(settings, /\.as-currencies \.ui-data-table\.is-grid thead th \{ height: 44px; padding: 0 14px; font-size: 11\.5px;[^}]*text-transform: uppercase; white-space: nowrap; \}/)
-  assert.match(settings, /\.as-currencies \.ui-data-table\.is-grid tbody td \{ height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left;/)
+  assert.match(settings, /\.as-currencies \.ui-data-table\.is-grid tbody td \{ height: 56px; padding: 8px 14px; vertical-align: middle;/)
+  assert.match(settings, /@media \(min-width: 1024px\) \{\s*:root:root \.as-currencies \.ui-data-table\.is-grid :is\(thead th, tbody td, :is\(th, td\)\.ui-actions-cell\) \{ text-align: center; \}/, 'heading and cells centred from the table width')
 })
 
 test('the card-style stacking of the shared table is left alone: the desktop table rules apply only above the stacking width', async () => {

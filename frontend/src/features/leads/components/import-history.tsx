@@ -73,17 +73,17 @@ export function ImportHistory({ supervisor, canAdmin, onViewBatch, refreshKey, o
         </span>
       ),
     },
-    { key: 'by', header: 'Uploaded by', width: 140, align: 'left', render: (b) => <span className="db-clamp">{b.uploadedByName || '–'}</span> },
+    { key: 'by', header: 'Uploaded by', width: 140, align: 'center', render: (b) => <span className="db-clamp">{b.uploadedByName || '–'}</span> },
     {
-      key: 'when', header: 'Uploaded', width: 110, align: 'left',
+      key: 'when', header: 'Uploaded', width: 110, align: 'center',
       render: (b) => { const parts = createdParts(b.createdAt); return parts ? <span className="db-2l" title={new Date(b.createdAt).toLocaleString()}><strong className="db-num">{parts.day}</strong><small>{parts.year}</small></span> : <span className="db-muted">–</span> },
     },
-    { key: 'total', header: 'Rows', width: 70, align: 'right', render: (b) => <span className="tnum db-num">{b.rowsTotal.toLocaleString()}</span> },
-    { key: 'new', header: 'New', width: 70, align: 'right', render: (b) => <span className="db-tone is-ok tnum">{b.rowsNew.toLocaleString()}</span> },
-    { key: 'dup', header: 'Duplicates', width: 96, align: 'right', render: (b) => <span className={`db-tone tnum ${b.rowsDuplicate ? 'is-warn' : 'is-quiet'}`}>{b.rowsDuplicate.toLocaleString()}</span> },
-    { key: 'invalid', header: 'Invalid', width: 76, align: 'right', render: (b) => <span className={`db-tone tnum ${b.rowsInvalid ? 'is-bad' : 'is-quiet'}`}>{b.rowsInvalid.toLocaleString()}</span> },
+    { key: 'total', header: 'Rows', width: 70, align: 'center', render: (b) => <span className="tnum db-num">{b.rowsTotal.toLocaleString()}</span> },
+    { key: 'new', header: 'New', width: 70, align: 'center', render: (b) => <span className="db-tone is-ok tnum">{b.rowsNew.toLocaleString()}</span> },
+    { key: 'dup', header: 'Duplicates', width: 96, align: 'center', render: (b) => <span className={`db-tone tnum ${b.rowsDuplicate ? 'is-warn' : 'is-quiet'}`}>{b.rowsDuplicate.toLocaleString()}</span> },
+    { key: 'invalid', header: 'Invalid', width: 76, align: 'center', render: (b) => <span className={`db-tone tnum ${b.rowsInvalid ? 'is-bad' : 'is-quiet'}`}>{b.rowsInvalid.toLocaleString()}</span> },
     {
-      key: 'actions', header: 'Actions', width: canAdmin ? 330 : 220, align: 'right', render: actions,
+      key: 'actions', header: 'Actions', width: canAdmin ? 330 : 220, align: 'center', render: actions,
     },
   ]
 

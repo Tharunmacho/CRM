@@ -38,15 +38,15 @@ export function CurrencyCard({ editable, defaultOrder, defaultAdvance }: { edita
 
   const sorted = [...rows].sort((x, y) => x.sortOrder - y.sortOrder || x.code.localeCompare(y.code))
   const columns: Column<CurrencyOption>[] = [
-    { key: 'code', header: 'Code', width: '9%', align: 'left', render: (c) => <strong className="as-code">{c.code}</strong> },
-    { key: 'name', header: 'Name', width: '22%', align: 'left', render: (c) => <span className="as-name">{c.name}</span> },
-    { key: 'symbol', header: 'Symbol', width: '10%', align: 'left', render: (c) => c.symbol ? <b className="as-symbol">{c.symbol}</b> : <span className="uv-none" aria-label="None">—</span> },
+    { key: 'code', header: 'Code', width: '9%', align: 'center', render: (c) => <strong className="as-code">{c.code}</strong> },
+    { key: 'name', header: 'Name', width: '22%', align: 'center', render: (c) => <span className="as-name">{c.name}</span> },
+    { key: 'symbol', header: 'Symbol', width: '10%', align: 'center', render: (c) => c.symbol ? <b className="as-symbol">{c.symbol}</b> : <span className="uv-none" aria-label="None">—</span> },
     {
-      key: 'offered', header: 'Offered', width: '18%', align: 'left',
+      key: 'offered', header: 'Offered', width: '18%', align: 'center',
       render: (c) => <label className="as-switch"><Switch compact checked={c.active} disabled={!editable || !!pending} label={`${c.code} is offered`} onChange={(on) => void toggle(c, on)} /><span>{c.active ? 'Offered' : 'Not offered'}</span></label>,
     },
     {
-      key: 'defaults', header: 'Default for', width: '16%', align: 'left',
+      key: 'defaults', header: 'Default for', width: '16%', align: 'center',
       render: (c) => c.code === defaultOrder || c.code === defaultAdvance ? <div className="as-tags">
         {c.code === defaultOrder && <Badge tone="navy" variant="chip">Orders</Badge>}
         {c.code === defaultAdvance && <Badge tone="navy" variant="chip">Advances</Badge>}

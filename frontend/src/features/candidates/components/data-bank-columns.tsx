@@ -304,12 +304,12 @@ export const ROW_BUTTONS_WIDTH = 190
 /** A recruiter has no checkbox and no Delete: arrow, Application form, Request and the menu. */
 export const STAFF_BUTTONS_WIDTH = 150
 /** Least width (px) of the text columns: the longest usual word (a recruiter's first name, an agency word) and the heading with its sort caret. */
-const BANK_COLUMN_LEAST: Record<string, number> = { candidate: 176, contact: 168, source: 96, agent: 112, owner: 130, status: 104 }
+const BANK_COLUMN_LEAST: Record<string, number> = { candidate: 176, contact: 168, source: 96, agent: 112, owner: 150, status: 116 }
 
 /**
  * The Data Bank table: Actions (the row buttons, first, right after the expand arrow and checkbox), Candidate, Contact, Source,
  * Agent, Recruiter, Status. The widths come from one list (data-bank-table.ts) that the job groups and the cards read too.
- * Every column is left-aligned with the same padding in the header and the body. Everything else the profile holds (preferred country, passport, job, documents on
+ * Every column is centred (heading and cells), with the same padding in the header and the body; only the registry fields (free text) read from the left. Everything else the profile holds (preferred country, passport, job, documents on
  * file ...) is in the expanded row, and in the Columns menu as columns that start switched off.
  */
 export function dataBankColumns({ store, onOpen, onReassign, onEdit, options, directoryPending = false }: ColumnContext): DbColumn<Candidate>[] {
@@ -318,7 +318,7 @@ export function dataBankColumns({ store, onOpen, onReassign, onEdit, options, di
   /** The least each column needs for its words and its heading in full (the table hides optional columns before it narrows one). */
   const base = (key: (typeof BANK_TABLE_COLUMNS)[number]['key']) => ({ key, header: spec[key].header, sortKey: spec[key].sortKey, width: Math.max(bankColumnWidth(spec[key]), BANK_COLUMN_LEAST[key] ?? 0), align: spec[key].align })
   const rowButtons: DbColumn<Candidate> = {
-    ...base('actions'), width: store.me.role === 'staff' ? STAFF_BUTTONS_WIDTH : ROW_BUTTONS_WIDTH, align: 'left', group: undefined,
+    ...base('actions'), width: store.me.role === 'staff' ? STAFF_BUTTONS_WIDTH : ROW_BUTTONS_WIDTH, align: 'center', group: undefined,
     render: (c) => <RowActions candidate={c} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} />,
   }
   const core: DbColumn<Candidate>[] = [
@@ -331,7 +331,7 @@ export function dataBankColumns({ store, onOpen, onReassign, onEdit, options, di
   ]
   // Preferred country is off the default table; it stays one click away in the Columns menu and always in the expanded row.
   const country: DbColumn<Candidate> = {
-    key: 'country', group: 'Screening', header: 'Preferred country', sortKey: 'country', width: 130, align: 'left', optional: 10, off: true,
+    key: 'country', group: 'Screening', header: 'Preferred country', sortKey: 'country', width: 130, align: 'center', optional: 10, off: true,
     render: (c) => <CountryPills value={c.countryPreference} />,
   }
   // The rest of the registry: columns that start switched off (Columns menu); every field is also in the expanded row.

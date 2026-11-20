@@ -142,11 +142,11 @@
 /* ---------- List view: one grid for header and body, every column visible, no horizontal scroll ---------- */
 .db-box { container-type: inline-size; min-width: 0; }
 .db-tbl { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12.5px; color: var(--text-main); }
-.db-tbl th { height: 44px; padding: 0 8px; vertical-align: middle; text-align: left; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--text-muted); border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--bg-card); }
-.db-tbl td { height: 64px; padding: 6px 8px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); overflow: hidden; }
+.db-tbl th { height: 44px; padding: 0 8px; vertical-align: middle; text-align: center; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--text-muted); border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--bg-card); }
+.db-tbl td { height: 64px; padding: 6px 8px; vertical-align: middle; text-align: center; border-bottom: var(--table-line-width) solid var(--table-line); overflow: hidden; }
 .db-tbl :is(th, td):first-child { padding-left: 16px; }
 .db-tbl :is(th, td):last-child { padding-right: 16px; }
-.db-tbl :is(th, td).is-right { text-align: right; }
+.db-tbl td.is-left { text-align: left; }
 .db-tbl tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
 .db-tbl tbody tr.is-clickable { cursor: pointer; }
 .db-tbl tbody tr:hover > td { background: var(--tint-1); }
@@ -159,17 +159,19 @@
 .db-nowrap, .db-num { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .db-wrap { display: block; min-width: 0; line-height: 1.4; overflow-wrap: break-word; word-break: normal; }
 .db-tbl .db-who.is-compact { gap: 8px; }
+.db-tbl .db-who { justify-content: center; }
+.db-tbl .db-who-text { align-items: center; text-align: center; }
 .db-tbl .db-who.is-compact .db-avatar { display: none; }
 .db-tbl .db-who-text strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; font-size: 13px; line-height: 1.25; }
 .db-tbl .db-who-text small { font-size: 12px; line-height: 1.3; }
 .db-tbl .ui-button { height: 32px; padding: 0 10px; font-size: 12.5px; gap: 6px; }
 .db-tbl .db-pill { font-size: 11.5px; gap: 5px; padding: 2px 8px 2px 7px; }
 .db-tbl .db-pill-dot { width: 5px; height: 5px; }
-.db-tbl .db-owner { font-size: 12.5px; gap: 6px; max-width: 100%; }
+.db-tbl .db-owner { justify-content: center; font-size: 12.5px; gap: 6px; max-width: 100%; text-align: center; }
 .db-tbl .db-order-chip { max-width: 100%; padding: 2px 7px; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 .db-tbl .db-track { gap: 4px; }
-.db-tbl .db-track-bar { width: 100%; }
-.db-tbl .db-track-text { align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.3; }
+.db-tbl .db-track-bar { width: 100%; margin-inline: auto; }
+.db-tbl .db-track-text { align-items: center; justify-content: center; gap: 6px; font-size: 12px; line-height: 1.3; text-align: center; }
 .db-tbl .db-track-text b { flex: none; min-width: 18px; height: 18px; font-size: 11px; border-radius: 5px; }
 .db-tbl .db-track-text span { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .db-icon-chip { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--tint-2); color: var(--text-muted); }
@@ -177,7 +179,7 @@
 .db-icon-chip.db-source.is-whatsapp { background: var(--success-fill); color: var(--success-ink); }
 .db-icon-chip.db-source.is-walk_in { background: var(--warning-fill); color: var(--warning-ink); }
 .db-icon-chip svg { color: inherit !important; }
-.db-tbl .db-acts { gap: 4px; }
+.db-tbl .db-acts { gap: 4px; justify-content: center; }
 .db-tbl .db-act, .db-menu-trigger { min-width: 32px; width: 32px; height: 32px; padding: 0; }
 .db-tbl .db-act.is-form { width: auto; padding: 0 10px; }
 .db-tbl .db-act.is-form span { white-space: nowrap; }
@@ -293,7 +295,7 @@
 .db-pill > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .db-with-flag { min-width: 0; }
 .db-with-flag > span, .db-tbl .db-with-flag { overflow-wrap: break-word; }
-.db-tbl .db-with-flag { display: flex; width: 100%; }
+.db-tbl .db-with-flag { display: flex; justify-content: center; width: 100%; text-align: center; }
 .db-tbl .db-with-flag > .db-wrap { flex: 1 1 auto; }
 .db-tbl .db-with-flag > .db-flag, .db-tbl .db-with-flag > .db-flag-globe { margin-top: 3px; }
 /* Overdue rows use is-late, not is-overdue: the shared .is-overdue rule (dashboard.css) would turn the whole row blue. */

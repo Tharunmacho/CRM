@@ -145,8 +145,6 @@ export default function MappedCandidatesPage() {
   const onFile = store.applications.filter((a) => a.status === tab && store.candidate(a.candidateId)).length
   const hasFilters = Boolean(query.trim()) || stageFilter !== 'all' || ownerFilter !== 'all' || designationFilter !== 'all' || companyFilter !== 'all' || sourceFilter !== 'all' || overdueOnly
   const clearFilters = () => { setQuery(''); setStageFilter('all'); setOwnerFilter('all'); setDesignationFilter('all'); setCompanyFilter('all'); setSourceFilter('all'); setOverdueOnly(false) }
-  const forceCards = boxWidth > 0 && boxWidth < MAPPED_TABLE_MIN_WIDTH
-  const showCards = forceCards || view === 'cards'
 
   const statusLabel = (a: Application) => (a.status === 'closed' ? (a.closureReason ? closureLabels[a.closureReason] : STATUS_TEXT.closed) : isOverdue(a) ? 'Overdue' : STATUS_TEXT[a.status])
   const statusDot = (a: Application) => (
@@ -168,35 +166,38 @@ export default function MappedCandidatesPage() {
   /**
    * The table fits its box (DbTable fit): widths are the least each column needs for its heading and its words in full. When they do not add up
    * the columns with the highest `optional` number are hidden first (Source, Matched, Passport, ...); the Columns menu and the cards still show
-   * every field. Everything is left-aligned with the same 8px padding as the Tasks table.
+   * every field. Everything is centred (heading and cells) with the same 8px padding as the Tasks table.
    */
   const allColumns: DbColumn<Application>[] = [
     {
-      key: 'candidate', header: 'Candidate', sortKey: 'candidate', width: 176, align: 'left', group: 'Person',
+      key: 'candidate', header: 'Candidate', sortKey: 'candidate', width: 176, align: 'center', group: 'Person',
       render: (a) => { const c = store.candidate(a.candidateId)!; return <Who compact name={c.name} sub={<span className="ident" title={c.phone}>{c.phone}</span>} /> },
     },
     {
-      key: 'passport', header: 'Passport', sortKey: 'passport', width: 104, align: 'left', optional: 8, group: 'Person',
+      key: 'passport', header: 'Passport', sortKey: 'passport', width: 104, align: 'center', optional: 8, group: 'Person',
       render: (a) => { const c = store.candidate(a.candidateId)!; return c.passportNo ? <span className="ident db-nowrap" title={`Passport ${c.passportNo}`}>{c.passportNo}</span> : <Dash /> },
     },
-    { key: 'order', header: 'Order', sortKey: 'order', width: 136, align: 'left', optional: 5, group: 'Order', render: (a) => <span className="db-order-chip ident" title={store.orderLabel(a.orderId)}>{store.order(a.orderId)?.ref ?? '–'}</span> },
-    { key: 'designation', header: 'Job title', sortKey: 'designation', width: 120, align: 'left', group: 'Order', render: (a) => <span className="db-wrap" title={designationOf(a)}>{designationOf(a) || <Dash />}</span> },
+    { key: 'order', header: 'Order', sortKey: 'order', width: 136, align: 'center', optional: 5, group: 'Order', render: (a) => <span className="db-order-chip ident" title={store.orderLabel(a.orderId)}>{store.order(a.orderId)?.ref ?? '–'}</span> },
+    { key: 'designation', header: 'Job title', sortKey: 'designation', width: 120, align: 'center', group: 'Order', render: (a) => <span className="db-wrap" title={designationOf(a)}>{designationOf(a) || <Dash />}</span> },
     {
-      key: 'company', header: 'Company', sortKey: 'company', width: 160, align: 'left', group: 'Order',
+      key: 'company', header: 'Company', sortKey: 'company', width: 160, align: 'center', group: 'Order',
       render: (a) => { const name = companyOf(a); return <span className="db-wrap" title={name}>{name || <Dash />}</span> },
     },
-    { key: 'source', header: 'Source', width: 84, align: 'left', optional: 10, group: 'Person', render: (a) => <SourceIcon source={sourceOf(a) || 'other'} /> },
-    { key: 'owner', header: 'Recruiter', sortKey: 'owner', width: 124, align: 'left', optional: 4, group: 'Workflow', render: (a) => <OwnerText candidate={store.candidate(a.candidateId)!} store={store} /> },
+    { key: 'source', header: 'Source', width: 84, align: 'center', optional: 10, group: 'Person', render: (a) => <SourceIcon source={sourceOf(a) || 'other'} /> },
+    { key: 'owner', header: 'Recruiter', sortKey: 'owner', width: 124, align: 'center', optional: 4, group: 'Workflow', render: (a) => <OwnerText candidate={store.candidate(a.candidateId)!} store={store} /> },
     {
-      key: 'stage', header: 'Stage', sortKey: 'stage', width: 150, align: 'left', group: 'Workflow',
+      key: 'stage', header: 'Stage', sortKey: 'stage', width: 150, align: 'center', group: 'Workflow',
       render: (a) => (a.status === 'closed' && a.closureReason ? <span className="db-wrap">{closureLabels[a.closureReason]}</span> : <StageChip stage={a.currentStage} />),
     },
-    { key: 'status', header: 'Status', width: 100, align: 'left', group: 'Workflow', render: (a) => statusDot(a) },
-    { key: 'mapped', header: 'Matched', sortKey: 'mapped', width: 102, align: 'left', optional: 9, group: 'Workflow', render: (a) => <span className="db-nowrap" title={dateLabel(a.createdAt)}>{shortDate(a.createdAt)}</span> },
-    { key: 'action', header: 'Actions', width: 92, align: 'left', group: 'Workflow', render: (a) => openButton(a) },
+    { key: 'status', header: 'Status', width: 100, align: 'center', group: 'Workflow', render: (a) => statusDot(a) },
+    { key: 'mapped', header: 'Matched', sortKey: 'mapped', width: 102, align: 'center', optional: 9, group: 'Workflow', render: (a) => <span className="db-nowrap" title={dateLabel(a.createdAt)}>{shortDate(a.createdAt)}</span> },
+    { key: 'action', header: 'Actions', width: 92, align: 'center', group: 'Workflow', render: (a) => openButton(a) },
   ]
   const fit = useMemo(() => fitColumns(allColumns, boxWidth, columnChoices), [allColumns, boxWidth, columnChoices]) // eslint-disable-line react-hooks/exhaustive-deps
   const columns = useMemo(() => allColumns.filter((column) => fit.keys.includes(column.key)), [allColumns, fit.keys]) // eslint-disable-line react-hooks/exhaustive-deps
+  // cards when even the required columns would not fit the box: the table never cuts a word or scrolls sideways
+  const forceCards = boxWidth > 0 && (boxWidth < MAPPED_TABLE_MIN_WIDTH || !fit.fits)
+  const showCards = forceCards || view === 'cards'
   const menuColumns = useMemo(() => allColumns.filter((column) => column.key !== 'action').map((column) => ({ key: column.key, header: column.header, group: column.group })), [allColumns]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const emptyState = (

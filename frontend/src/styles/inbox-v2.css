@@ -32,7 +32,7 @@
 .wa-intake .record-name, .wa-intake .record-detail { max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wa-intake .ui-data-table .record-identity { min-width: 0; }
 .wa-doc { display: flex; min-width: 0; align-items: flex-start; gap: 10px; }
-.wa-doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; line-height: 1.4; color: var(--text-main); }
+.wa-doc-name { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; font-size: 13.5px; font-weight: 600; line-height: 1.4; color: var(--text-main); }
 .wa-doc-caption { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 12.5px; line-height: 1.4; color: var(--text-muted); }
 .wa-doc-error { margin-top: 2px; font-size: 12.5px; line-height: 1.4; color: var(--error-ink); }
 .wa-when { font-size: 13px; color: var(--text-main); }

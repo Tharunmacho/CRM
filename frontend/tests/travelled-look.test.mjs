@@ -119,8 +119,7 @@ test('the toolbar and the table sit above the fold: slim header, 40px controls, 
   assert.match(css, /\.tv-table-wrap \{ max-height: max\(360px, calc\(100dvh - 380px\)\);/, 'the table box fits the screen')
   assert.match(css, /\.tv-table th \{ position: sticky; top: 0;/)
   assert.match(css, /\.tv-table td \{[^}]*height: 56px;/)
-  const widths = [...css.matchAll(/\.tv-c-[a-z]+ \{ width: (\d+)%; \}/g)].reduce((sum, match) => sum + Number(match[1]), 0)
-  assert.equal(widths, 100)
+  assert.doesNotMatch(css, /\.tv-c-[a-z]+ \{ width: \d+%; \}/, 'columns size to their content, no fixed shares')
   // the order of the page: header, toolbar, chips row, breakdown (folded), table
   const source = await read('screens/travelled/travelled.tsx')
   const order = ['<PageHeader', 'className="tv-toolbar"', 'className="tv-meta"', 'tv-breakdowns', '<TravelTable'].map(marker => source.indexOf(marker))

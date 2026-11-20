@@ -13,17 +13,18 @@ export interface BankTableColumn {
   sortKey?: string
   /** Percent of the row. */
   share: number
-  align: 'left' | 'right'
+  /** Every heading and cell is centred (the Tasks table look); 'left' is reserved for long free text. */
+  align: 'left' | 'center'
 }
 
 export const BANK_TABLE_COLUMNS: readonly BankTableColumn[] = [
-  { key: 'candidate', header: 'Candidate', sortKey: 'name', share: 24, align: 'left' },
-  { key: 'contact', header: 'Contact', sortKey: 'phone', share: 19, align: 'left' },
-  { key: 'source', header: 'Source', sortKey: 'source', share: 12, align: 'left' },
-  { key: 'agent', header: 'Agency', share: 12, align: 'left' },
-  { key: 'owner', header: 'Recruiter', sortKey: 'owner', share: 11, align: 'left' },
-  { key: 'status', header: 'Status', sortKey: 'status', share: 13, align: 'left' },
-  { key: 'actions', header: 'Actions', share: 9, align: 'right' },
+  { key: 'candidate', header: 'Candidate', sortKey: 'name', share: 24, align: 'center' },
+  { key: 'contact', header: 'Contact', sortKey: 'phone', share: 19, align: 'center' },
+  { key: 'source', header: 'Source', sortKey: 'source', share: 12, align: 'center' },
+  { key: 'agent', header: 'Agency', share: 12, align: 'center' },
+  { key: 'owner', header: 'Recruiter', sortKey: 'owner', share: 11, align: 'center' },
+  { key: 'status', header: 'Status', sortKey: 'status', share: 13, align: 'center' },
+  { key: 'actions', header: 'Actions', share: 9, align: 'center' },
 ]
 
 /** Pixels of minimum width per share point. */
