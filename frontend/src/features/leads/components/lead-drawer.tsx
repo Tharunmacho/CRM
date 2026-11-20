@@ -9,11 +9,12 @@ import { FileLink } from '@/shared/ui/file-drop'
 import { primaryId } from '@/features/candidates/candidate-ids'
 import { gateFromRefusal, leadApi, type LeadDetail } from '../lead-api'
 import {
-  PLATFORM_LABEL, RESUME_REQUIRED_REASON, SETTABLE_STATUSES, cleanPhone, createdParts, dobLabel, experienceLabel, followUpLabel, followUpState, fromLocalInput, leadDate, leadStatus, platformKind, toLocalInput, whatsappLink,
+  PLATFORM_LABEL, RESUME_REQUIRED_REASON, cleanPhone, createdParts, dobLabel, experienceLabel, followUpLabel, followUpState, fromLocalInput, leadDate, leadStatus, platformKind, statusPick, toLocalInput, whatsappLink,
   type Lead, type LeadActor,
 } from '../lead-model'
 import { GATE_REASON, gateBlocks, type GateState, type LeadGate } from '../lead-gate'
 import { CopyButton } from './lead-columns'
+import { StatusSelect } from './status-select'
 import { openWhatsApp } from './wa-template'
 import { isAdminLevel } from '@/shared/model/role-labels'
 
@@ -91,19 +92,19 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
   }, [load, version])
   const shown: Lead | null = detail ?? row
   // Fill the edit fields when a different lead (or a fresh copy from the server) arrives.
-  const stamp = detail ? `${detail.id}:${detail.status}:${detail.notes ?? ''}:${detail.nextFollowUpAt ?? ''}` : ''
+  const stamp = detail ? `${detail.id}:${detail.status}:${detail.statusLabel ?? ''}:${detail.notes ?? ''}:${detail.nextFollowUpAt ?? ''}` : ''
   useEffect(() => {
     if (!detail) return
-    setStatus(detail.status); setNotes(detail.notes ?? ''); setFollow(toLocalInput(detail.nextFollowUpAt))
+    setStatus(statusPick(detail)); setNotes(detail.notes ?? ''); setFollow(toLocalInput(detail.nextFollowUpAt))
   }, [stamp]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const blocked = gateBlocks(gate) ? GATE_REASON : workRefusal
-  const dirty = useMemo(() => !!detail && (status !== detail.status || notes.trim() !== (detail.notes ?? '').trim() || follow !== toLocalInput(detail.nextFollowUpAt)), [detail, status, notes, follow])
+  const dirty = useMemo(() => !!detail && (status !== statusPick(detail) || notes.trim() !== (detail.notes ?? '').trim() || follow !== toLocalInput(detail.nextFollowUpAt)), [detail, status, notes, follow])
 
   if (!row || !shown) return null
   const phone = cleanPhone(shown.phone)
   const wa = whatsappLink(phone)
-  const st = leadStatus(shown.status)
+  const st = leadStatus(shown.status, shown.statusLabel)
   const date = leadDate(shown)
   const created = createdParts(date?.value)
   const followState = followUpState(shown.nextFollowUpAt, shown.status)
@@ -115,10 +116,10 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
     if (!detail || !dirty || saving) return
     setSaving(true); setSaveError('')
     const body: Record<string, unknown> = {}
-    if (status !== detail.status) body.status = status
+    if (status !== statusPick(detail)) body.status = status
     if (notes.trim() !== (detail.notes ?? '').trim()) body.notes = notes.trim()
     if (follow !== toLocalInput(detail.nextFollowUpAt)) body.nextFollowUpAt = fromLocalInput(follow)
-    try { await leadApi.update(detail.id, body); await load(); onChanged(); if (body.status !== undefined) onStatusChange?.(detail, detail.status, String(body.status)) } catch (e) {
+    try { await leadApi.update(detail.id, body); await load(); onChanged(); if (body.status !== undefined) onStatusChange?.(detail, statusPick(detail), String(body.status)) } catch (e) {
       const refused = gateFromRefusal(e)
       if (refused) onGateRefusal(refused)
       setSaveError(e instanceof Error ? e.message : 'Your changes were not saved. Please try again.')
@@ -183,10 +184,8 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
           <h3>Status, follow-up and notes</h3>
           <div className="ld-grid2">
             <Field label="Status">
-              <Select aria-label="Status" value={status || shown.status} disabled={Boolean(blocked) || !detail || Boolean(shown.candidateId)} onChange={(event) => setStatus(event.target.value)}>
-                {SETTABLE_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                {shown.status === 'converted' && <option value="converted">Converted</option>}
-              </Select>
+              <StatusSelect value={status || statusPick(shown)} lead={shown} disabled={Boolean(blocked) || !detail || Boolean(shown.candidateId)} allowAdd={!blocked && !converted}
+                extra={shown.status === 'converted' ? [{ value: 'converted', label: 'Converted' }] : undefined} onChange={setStatus} />
             </Field>
             <Field label="Next follow-up">
               <Input type="datetime-local" value={follow} disabled={Boolean(blocked) || !detail} onChange={(event) => setFollow(event.target.value)} />

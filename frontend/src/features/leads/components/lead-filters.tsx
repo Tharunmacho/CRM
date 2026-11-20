@@ -49,7 +49,7 @@ export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpe
         {choice('campaign', 'Filter by campaign', 'Any campaign', plain(facets?.campaigns, filters.campaign))}
         {choice('position', 'Filter by job', 'Any job', plain(facets?.positions, filters.position))}
         {choice('country', 'Filter by country', 'Any country', plain(facets?.countries, filters.country))}
-        {choice('status', 'Filter by status', 'Any status', statusChoices(filters.status))}
+        {choice('status', 'Filter by status', 'Any status', statusChoices(filters.status, facets))}
         {choice('platform', 'Filter by platform', 'Any platform', withCurrent(facets?.platforms, filters.platform).map((item) => [item, `${PLATFORM_LABEL[platformKind(item)]}${platformKind(item) === 'other' ? ` (${item})` : ''}`]))}
         <span className="db-sel">
           <Select aria-label="Filter by who the lead is assigned to" value={filters.assigned} onChange={(event) => onChange({ assigned: event.target.value })}>

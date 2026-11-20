@@ -67,9 +67,9 @@ def test_domain_names_cover_renamed_models_and_documented_intake_extension():
     expected |= {"crm_application_feedback"}
     expected |= {"crm_worker_heartbeats"}
     expected |= {"crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments", "crm_candidate_id_counters", "crm_traveller_id_counters"}
-    expected |= {"remark_templates"}
+    expected |= {"remark_templates", "crm_lead_status_templates"}
     assert set(Base.metadata.tables) == expected
-    assert len(Base.metadata.tables) == 70
+    assert len(Base.metadata.tables) == 71
     for table in Base.metadata.tables.values():
         assert table.comment, f"{table.name} needs a browser-visible description"
         for foreign_key in table.foreign_keys:
@@ -615,7 +615,7 @@ def test_attendance_policy_upgrade_preserves_existing_clocks_and_presence(schema
     def kept(after):
         return {name: [{key: row[key] for key in before[name][0]} if before[name] else row for row in rows] for name, rows in after.items()}
     assert kept(snapshot()) == before
-    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 70
+    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 71
     _migrate(engine, "0014_attendance_ordering", downgrade=True)
     assert snapshot() == before
     assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 35

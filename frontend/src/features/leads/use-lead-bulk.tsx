@@ -6,7 +6,7 @@ import {
   EMPTY_SELECTION, assignToast, bulkBody, changeSelection, filterFromQuery, isUnassign, resultToast, resultVerb, selectAllMatching, selectionCount, statusToast, undoAlive, undoBody, undoEntry, undoneToast, visibleSelected,
   type BulkAction, type BulkOptions, type Selection, type UndoEntry,
 } from './lead-bulk-model'
-import { leadStatus, type Lead } from './lead-model'
+import { pickLabel, type Lead } from './lead-model'
 import type { LeadGate } from './lead-gate'
 import { BulkBar } from './components/bulk-bar'
 import { BulkDialog, DeleteLeadDialog, StatusDialog } from './components/bulk-dialogs'
@@ -66,14 +66,14 @@ export function useLeadBulk(params: Params) {
       if (refused) onGateRefusal(refused)
       throw error
     }
-    if (announce) setUndo({ entry, text: statusToast(to, (value) => leadStatus(value).label) })
+    if (announce) setUndo({ entry, text: statusToast(to, pickLabel) })
     refresh()
   }, [onGateRefusal, refresh])
 
   /** The drawer saved a new status itself: offer the same undo. */
   const offerUndo = useCallback((lead: Pick<Lead, 'id' | 'name' | 'status'>, from: string, to: string) => {
-    const entry = undoEntry({ ...lead, status: from }, to)
-    if (entry) setUndo({ entry, text: statusToast(to, (value) => leadStatus(value).label) })
+    const entry = undoEntry({ id: lead.id, name: lead.name, status: from }, to)
+    if (entry) setUndo({ entry, text: statusToast(to, pickLabel) })
   }, [])
 
   const quickStatus = useCallback(async (lead: Lead, to: string) => {
@@ -85,7 +85,7 @@ export function useLeadBulk(params: Params) {
     setUndoBusy(true)
     try {
       await leadApi.update(undo.entry.leadId, undoBody(undo.entry))
-      const text = undoneToast(undo.entry, (value) => leadStatus(value).label)
+      const text = undoneToast(undo.entry, pickLabel)
       setUndo(null); flash(text); refresh()
     } catch (error) {
       setUndo(null); flash(bulkErrorMessage(error, 'We could not undo that.'))

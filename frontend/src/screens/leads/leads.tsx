@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { CalendarPlus, ChevronsDownUp, ChevronsUpDown, Download, FileCheck2, PhoneOff, RefreshCw, Search, ThumbsUp, Users, Upload, BellRing } from 'lucide-react'
+import { CalendarPlus, ChevronsDownUp, ChevronsUpDown, Download, FileCheck2, ListChecks, PhoneOff, RefreshCw, Search, ThumbsUp, Users, Upload, BellRing } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { useStore } from '@/shared/state/crm-store'
 import { EmptyState, PageHeader, Panel } from '@/shared/ui/display'
@@ -16,6 +16,7 @@ import { FIELD_GROUPS } from '@/features/leads/lead-fields'
 import { ownersLine } from '@/features/leads/lead-bulk-model'
 import { LeadCards } from '@/features/leads/components/lead-cards'
 import { LeadFiltersBar } from '@/features/leads/components/lead-filters'
+import { StatusManageDialog } from '@/features/leads/components/status-manage-dialog'
 import { GateBanner } from '@/features/leads/components/gate-banner'
 import { UploadLeadsDialog } from '@/features/leads/components/upload-dialog'
 import { ImportHistory } from '@/features/leads/components/import-history'
@@ -90,6 +91,7 @@ export default function LeadsPage() {
   const [fresh, setFresh] = useState('')
   const [historyKey, setHistoryKey] = useState(0)
   const [exporting, setExporting] = useState(false)
+  const [managingStatuses, setManagingStatuses] = useState(false)
   const [message, setMessage] = useState('')
   const [boxRef, boxWidth] = useElementWidth<HTMLDivElement>()
   const [choices, setChoices] = useColumnChoices('leads-details-v2')
@@ -254,6 +256,8 @@ export default function LeadsPage() {
         description="People who responded to your ads. Call them, collect their updated resume, and turn them into candidates."
         actions={(
           <>
+
+            {canAssign && <Button variant="secondary" icon={<ListChecks className="h-4 w-4" />} onClick={() => setManagingStatuses(true)}>Manage statuses</Button>}
             {/* Every signed-in person may export the leads they can see: a recruiter gets only the leads allocated to them (the server narrows the file), an admin or MD gets the whole filtered sheet. */}
             <Button variant="secondary" icon={<Download className="h-4 w-4" />} disabled={exporting || total === 0} onClick={() => void exportExcel()}>{exporting ? 'Preparing…' : 'Export'}</Button>
             {supervisor && <Button variant="primary" icon={<Upload className="h-4 w-4" />} onClick={() => setUploading(true)}>Upload leads</Button>}
@@ -325,6 +329,7 @@ export default function LeadsPage() {
         )}
       </Panel>
 
+      {canAssign && <StatusManageDialog open={managingStatuses} onClose={() => setManagingStatuses(false)} onChanged={() => data.refresh({ facets: true })} />}
       <UploadLeadsDialog open={uploading} users={store.users} canAssign={canAssign} canReport={canAssign} onClose={() => { setUploading(false); if (location.pathname.endsWith('/import')) navigate('/leads', { replace: true }) }}
         onImported={(result) => { if (result.batchId) highlight(result.batchId); refreshAll() }} onViewBatch={viewBatch} />
 

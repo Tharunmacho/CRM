@@ -4,7 +4,7 @@ import { cn } from '@/shared/lib/cn'
 import { Dialog } from '@/shared/ui/overlay'
 import { Button, Field, Input, Textarea } from '@/shared/ui/primitives'
 import { leadApi } from '../lead-api'
-import { CALL_OUTCOMES, cleanPhone, fromLocalInput, leadStatus, statusAfterCall, toLocalInput, type Lead } from '../lead-model'
+import { CALL_OUTCOMES, cleanPhone, fromLocalInput, isAttemptLabel, leadStatus, statusAfterCall, toLocalInput, type Lead } from '../lead-model'
 import { gateFromRefusal } from '../lead-api'
 import type { LeadGate } from '../lead-gate'
 
@@ -34,6 +34,8 @@ export function CallDialog({ lead, onClose, onSaved, blockedReason, onGateRefusa
 
   if (!lead) return null
   const after = statusAfterCall(outcome, lead.status)
+  const current = leadStatus(lead.status, lead.statusLabel).label
+  const endsAttempt = outcome === 'answered' && isAttemptLabel(lead.statusLabel)   // reaching the person ends Ringing / No incoming calls
   const closes = outcome === 'not_interested' || outcome === 'wrong_number'
 
   const save = async () => {
@@ -65,7 +67,7 @@ export function CallDialog({ lead, onClose, onSaved, blockedReason, onGateRefusa
               <button key={item.value} type="button" role="radio" aria-checked={outcome === item.value} className={cn('ld-outcome', outcome === item.value && 'is-on')} onClick={() => setOutcome(item.value)}>{item.label}</button>
             ))}
           </div>
-          <p className="ld-hint">{after && after !== lead.status ? <>Status will change from <b>{leadStatus(lead.status).label}</b> to <b>{leadStatus(after).label}</b>.</> : <>Status stays <b>{leadStatus(lead.status).label}</b>.</>}</p>
+          <p className="ld-hint">{after && after !== lead.status ? <>Status will change from <b>{current}</b> to <b>{leadStatus(after).label}</b>.</> : endsAttempt ? <>Status will change from <b>{current}</b> to <b>{leadStatus(lead.status).label}</b>.</> : <>Status stays <b>{current}</b>.</>}</p>
         </fieldset>
         <Field label="Remarks" hint="What did they say? Whatever you write is saved in the lead's timeline.">
           <Textarea value={remarks} maxLength={2000} rows={3} placeholder="e.g. Will send the updated resume tomorrow" onChange={(event) => setRemarks(event.target.value)} />

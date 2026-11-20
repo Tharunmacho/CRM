@@ -24,6 +24,7 @@ from app.api.routers import travelled as travelled_router
 from app.api.routers import daily_work_report as daily_work_report_router
 from app.api.routers import candidate_exports
 from app.api.routers import remark_templates as remark_templates_router
+from app.api.routers import lead_status_templates as lead_status_templates_router
 from app.api.routers import candidate_invoices, invoice_payments
 from app.core.config import get_settings
 from app.core.timing import ApiTimingMiddleware
@@ -179,6 +180,7 @@ app.include_router(events.router)
 app.include_router(lead_campaigns_router.router)  # before leads: /api/leads/campaigns must not be read as /api/leads/{lead_id}
 app.include_router(leads_router.router)
 app.include_router(lead_bulk_router.router)
+app.include_router(lead_status_templates_router.router)
 app.include_router(agency_settings_router.router)
 app.include_router(remark_templates_router.router)
 

@@ -206,7 +206,7 @@ def lead_detail(lead_id: str, db: Session = Depends(get_db), user: User = Depend
 
 class LeadPatch(Wire):
     model_config = ConfigDict(alias_generator=Wire.model_config["alias_generator"], populate_by_name=True, extra="forbid")
-    status: str | None = Field(default=None, max_length=20)
+    status: str | None = Field(default=None, max_length=40)  # a built-in code or a status template's name
     notes: str | None = Field(default=None, max_length=5000)
     next_follow_up_at: datetime | None = None
     position_applied: str | None = Field(default=None, max_length=200)

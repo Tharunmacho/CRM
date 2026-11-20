@@ -114,6 +114,7 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "crm_leads": ("leads",),
     "crm_lead_batches": ("leads",),
     "crm_lead_activities": ("leads",),
+    "crm_lead_status_templates": ("leads",),
 }
 
 # Internal bookkeeping that no screen shows: writing to it announces nothing.

@@ -123,6 +123,9 @@ ADMIN_ONLY = [
     ("POST", "/api/remark-templates", {}),
     ("PATCH", "/api/remark-templates/none", {}),
     ("DELETE", "/api/remark-templates/none", None),
+    # lead status templates: anybody signed in adds one, only admin/MD changes or deletes
+    ("PATCH", "/api/lead-status-templates/none", {}),
+    ("DELETE", "/api/lead-status-templates/none", None),
     # candidate merge / delete / export / assign-waiting
     ("POST", "/api/candidates/a/merge-into/b", {}),
     ("DELETE", "/api/candidates/none", None),
@@ -176,10 +179,10 @@ def matrix_env():
         db.commit()
 
     from app.api.routers import (candidate_import, candidate_invoices, candidate_merge, candidates, daily_work, data, form_options,
-                                 invoice_payments, lead_bulk, leads, remark_templates, reports, settings, users, workflow)
+                                 invoice_payments, lead_bulk, lead_status_templates, leads, remark_templates, reports, settings, users, workflow)
     application = FastAPI()
     for module in (settings, users, candidate_invoices, invoice_payments, remark_templates, candidate_merge, candidates, reports,
-                   data, workflow, daily_work, leads, lead_bulk, form_options):
+                   data, workflow, daily_work, leads, lead_bulk, lead_status_templates, form_options):
         application.include_router(module.router)
     application.include_router(candidate_import.candidate_reading_router)
 

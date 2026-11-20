@@ -27,7 +27,7 @@ class BulkBody(Wire):
     filter: dict | None = None
     owner_id: str | None = Field(default=None, max_length=36)
     assignee_ids: list[str] | None = Field(default=None, max_length=100)  # assign: the recruiters who share the leads equally
-    status: str | None = Field(default=None, max_length=20)
+    status: str | None = Field(default=None, max_length=40)  # a built-in code or a status template's name
     only_unassigned: bool = False
     confirm: str | None = Field(default=None, max_length=20)
     expected_count: int | None = Field(default=None, ge=0)

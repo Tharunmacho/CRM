@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, undefer
 
 from app.core.config import get_settings
 from app.db.models import AuditEntry, Lead, LEAD_STATUSES, Notification, Role, User
-from app.services import lead_followups, lead_sheet
+from app.services import lead_followups, lead_sheet, lead_status_templates as status_templates
 from app.services.lead_sheet import STATUS_LABELS, fail
 from app.core.roles import is_admin_level
 
@@ -83,7 +83,7 @@ def resolve(db: Session, user: User, ids: list[str] | None, filt: dict | None, *
     if not lead_sheet.sees_all_leads(user):
         filt["owner"] = "me"  # a recruiter's selection never reaches beyond their own leads
     base, owner, has_resume = lead_sheet._base_query()
-    statement = (lead_sheet.apply_filters(base, owner, has_resume, user, filt)
+    statement = (lead_sheet.apply_filters(base, owner, has_resume, user, filt, db)
                  .with_only_columns(Lead.id, Lead.status, Lead.owner_id, Lead.candidate_id)
                  .order_by(*_order_resolving()).limit(BULK_LIMIT + 1))
     if lock:
@@ -132,12 +132,15 @@ def run(db: Session, user: User, body: dict) -> dict | tuple[bytes, int]:
     # `export` is open to every signed-in person: `export_selected` narrows it to the leads they may see (a recruiter gets only the leads allocated to them).
 
     target_status = "not_interested" if action == "not_interested" else body.get("status")
+    target = status_templates.Target("not_interested") if action == "not_interested" else None
     owner_id = body.get("ownerId")
     if action == "status":
-        if target_status not in LEAD_STATUSES:
-            raise fail(422, "invalid_request", f"status must be one of: {', '.join(LEAD_STATUSES)}.")
-        if target_status == "converted":
+        if target_status in LEAD_STATUSES and target_status != "converted":
+            target = status_templates.Target(target_status)
+        elif target_status == "converted":
             raise fail(422, "invalid_request", "Use Convert to turn a lead into a candidate.")
+        else:   # a status template's name (an unknown name is a 422)
+            target = status_templates.resolve_target(db, target_status)
     assignees = body.get("assigneeIds")
     if action == "assign" and ((owner_id and assignees is not None) or (not owner_id and assignees is None)):
         raise fail(422, "invalid_request", "Choose who the leads go to: one recruiter, several recruiters (assigneeIds), or automatic.")
@@ -160,7 +163,7 @@ def run(db: Session, user: User, body: dict) -> dict | tuple[bytes, int]:
     # Staff never see leads that are not theirs: a selected id that did not resolve is "not yours" to them.
     skipped = {"gone": missing} if lead_sheet.sees_all_leads(user) else {"not_yours": missing}
     if action in ("status", "not_interested"):
-        result = _change_status(db, user, rows, target_status, skipped)
+        result = _change_status(db, user, rows, target, skipped)
     elif action == "assign":
         result = _assign(db, user, rows, owner_id, body.get("onlyUnassigned", False), skipped, assignees)
     else:
@@ -171,31 +174,36 @@ def run(db: Session, user: User, body: dict) -> dict | tuple[bytes, int]:
 
 # ------------------------------------------------------------------ status
 
-def _change_status(db: Session, user: User, rows: list[tuple], target: str, skipped: dict) -> dict:
-    todo: list[tuple[str, str]] = []
+def _change_status(db: Session, user: User, rows: list[tuple], target: "status_templates.Target", skipped: dict) -> dict:
+    """Set the status (a built-in one, or a status template: its counting code plus its name) on the selected leads."""
+    labels = dict(db.execute(select(Lead.id, Lead.status_label).where(Lead.id == any_(literal([r[0] for r in rows], ARRAY(String))))).all()) if rows else {}
+    todo: list[tuple[str, str, str | None]] = []
     for row in rows:
         lead_id, status, owner, _ = row
         if not lead_sheet.sees_all_leads(user) and owner != user.id:
             skipped["not_yours"] = skipped.get("not_yours", 0) + 1
         elif is_linked(row):
             skipped["converted"] = skipped.get("converted", 0) + 1
-        elif status == target:
+        elif status == target.code and (labels.get(lead_id) or "").lower() == (target.label or "").lower():
             skipped["already_set"] = skipped.get("already_set", 0) + 1
         else:
-            todo.append((lead_id, status))
+            todo.append((lead_id, status, labels.get(lead_id)))
     if todo:
-        ids, olds = [t[0] for t in todo], [t[1] for t in todo]
+        ids, olds, old_labels = [t[0] for t in todo], [t[1] for t in todo], [t[2] for t in todo]
         db.execute(text(
             "INSERT INTO crm_lead_activities (id, lead_id, user_id, kind, summary, meta) "
             "SELECT gen_random_uuid()::text, x.id, :u, 'status', "
-            "'Status changed from ' || coalesce(CAST(:labels AS jsonb) ->> x.old, x.old) || ' to ' || CAST(:to_label AS text), "
-            "jsonb_build_object('from', x.old, 'to', CAST(:to AS text), 'bulk', true) "
-            "FROM unnest(CAST(:ids AS text[]), CAST(:olds AS text[])) AS x(id, old)"),
-            {"u": user.id, "labels": _labels_json(), "to_label": STATUS_LABELS[target], "to": target, "ids": ids, "olds": olds})
-        db.execute(text("UPDATE crm_leads SET status = :s, updated_at = now() WHERE id = ANY(CAST(:ids AS text[]))"), {"s": target, "ids": ids})
+            "'Status changed from ' || coalesce(x.old_label, CAST(:labels AS jsonb) ->> x.old, x.old) || ' to ' || CAST(:to_label AS text), "
+            "jsonb_build_object('from', x.old, 'to', CAST(:to AS text), 'fromLabel', x.old_label, 'toLabel', CAST(:to_name AS text), "
+            "'attempt', CAST(:attempt AS boolean), 'bulk', true) "
+            "FROM unnest(CAST(:ids AS text[]), CAST(:olds AS text[]), CAST(:old_labels AS text[])) AS x(id, old, old_label)"),
+            {"u": user.id, "labels": _labels_json(), "to_label": lead_sheet.status_text(target.code, target.label), "to": target.code,
+             "to_name": target.label, "attempt": target.attempt, "ids": ids, "olds": olds, "old_labels": old_labels})
+        db.execute(text("UPDATE crm_leads SET status = :s, status_label = :label, updated_at = now() WHERE id = ANY(CAST(:ids AS text[]))"),
+                   {"s": target.code, "label": target.label, "ids": ids})
         lead_followups.sync(db, ids)  # a lead that is closed no longer has a follow-up to-do; a reopened one gets it back
-        _summary_audit(db, user, "Bulk status change", len(ids), {"to": target, "count": len(ids)})
-    return {"updated": len(todo), "status": target}
+        _summary_audit(db, user, "Bulk status change", len(ids), {"to": target.code, "count": len(ids), **({"toLabel": target.label} if target.label else {})})
+    return {"updated": len(todo), "status": target.label or target.code}
 
 
 def _labels_json() -> str:
@@ -321,7 +329,7 @@ def export_selected(db: Session, user: User, body: dict) -> tuple[bytes, int]:
         filt = clean_filter(body["filter"])
         if user.role == Role.staff:
             filt["owner"] = "me"
-        query = lead_sheet.apply_filters(query, owner, has_resume, user, filt)
+        query = lead_sheet.apply_filters(query, owner, has_resume, user, filt, db)
     else:
         raise fail(422, "invalid_request", "Choose the leads (ids) or give a filter.")
     found = db.execute(query.options(undefer(Lead.extra)).order_by(*lead_sheet._order(owner, sort, direction)).limit(BULK_LIMIT + 1)).all()

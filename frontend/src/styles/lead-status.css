@@ -1,0 +1,30 @@
+/* Lead sheet: the status dropdown with its "+ Add a status" box (features/leads/components/status-select.tsx) and the status list manager. */
+.ld-statussel { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ld-addstatus { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 12px; padding: 12px; border: 1px solid var(--border-main); border-radius: 8px; background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
+.ld-addstatus label { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 12.5px; font-weight: 500; color: var(--text-main); }
+.ld-addstatus-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.ld-addstatus-ok, .ld-addstatus-cancel { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px solid var(--border-main); border-radius: 7px; background: var(--bg-card); font-size: 13px; font-weight: 600; color: var(--text-main); cursor: pointer; }
+.ld-addstatus-ok { border-color: var(--primary); background: var(--primary); color: #fff; }
+.ld-addstatus-ok:disabled, .ld-addstatus-cancel:disabled { opacity: .55; cursor: default; }
+.ld-addstatus-ok:focus-visible, .ld-addstatus-cancel:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ld-addstatus-hint { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--text-muted); }
+.ld-addstatus-error { grid-column: 1 / -1; margin: 0; min-height: 0; font-size: 12.5px; font-weight: 500; color: var(--error-ink); }
+.ld-addstatus-error:empty { display: none; }
+@media (max-width: 760px) {
+  .ld-addstatus { grid-template-columns: minmax(0, 1fr); }
+  .ld-addstatus-actions > button { flex: 1 1 auto; justify-content: center; }
+}
+
+/* The small manage list (admin and MD): rename, hide and delete the statuses people added. */
+.ld-statuslist { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ld-statuslist li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 8px 10px; border: 1px solid var(--border-main); border-radius: 8px; background: var(--bg-card); }
+.ld-statuslist li.is-hidden .ld-statuslist-name { color: var(--text-muted); text-decoration: none; font-style: italic; }
+.ld-statuslist-name { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 500; }
+.ld-statuslist-meta { font-size: 12px; color: var(--text-muted); }
+.ld-statuslist-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.ld-statuslist-acts button { height: 30px; padding: 0 10px; border: 1px solid var(--border-main); border-radius: 7px; background: var(--bg-card); font-size: 12.5px; font-weight: 600; color: var(--text-main); cursor: pointer; }
+.ld-statuslist-acts button.is-danger { color: var(--error-ink); }
+.ld-statuslist-acts button:disabled { opacity: .55; cursor: default; }
+.ld-statuslist-acts button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ld-statuslist-edit { display: flex; flex: 1 1 100%; gap: 8px; }
+.ld-statuslist-edit input { flex: 1 1 auto; min-width: 0; }

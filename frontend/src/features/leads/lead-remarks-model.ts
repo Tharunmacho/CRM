@@ -99,7 +99,8 @@ export function remarkCards(activities: ActivityLike[], notes?: string | null): 
   return cards
 }
 
-const statusName = (value: unknown) => leadStatus(typeof value === 'string' ? value : '').label
+/** A status in the timeline: the template's name when the change carried one (meta.fromLabel / toLabel), else the built-in label. */
+const statusName = (value: unknown, label?: unknown) => (typeof label === 'string' && label.trim() ? label.trim() : leadStatus(typeof value === 'string' ? value : '').label)
 
 /** One activity as a plain-English event (the remark text itself lives on the cards, not here). */
 export function timelineEvent(item: ActivityLike): TimelineEvent {
@@ -119,7 +120,7 @@ export function timelineEvent(item: ActivityLike): TimelineEvent {
     case 'status': {
       const from = text(item.meta?.from)
       const to = text(item.meta?.to)
-      return { ...base, icon: 'status', tone: 'info', title: from && to ? `Changed status from ${statusName(from)} to ${statusName(to)}` : summary || 'Changed the status', detail: '' }
+      return { ...base, icon: 'status', tone: 'info', title: from && to ? `Changed status from ${statusName(from, item.meta?.fromLabel)} to ${statusName(to, item.meta?.toLabel)}` : summary || 'Changed the status', detail: '' }
     }
     case 'assign': return { ...base, icon: 'assign', tone: 'info', title: summary || 'Lead assigned', detail: '' }
     case 'import': return { ...base, icon: 'import', tone: 'quiet', title: 'Lead imported', detail: summary && !/^imported/i.test(summary) ? summary : '' }

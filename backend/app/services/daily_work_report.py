@@ -46,8 +46,9 @@ Lead feedback: for every lead a person contacted in the range, the outcome of th
   wrongNumber     wrong_number
   notReachable    invalid (shown as "Not reachable" on the Lead sheet)
   callback        any other outcome while the lead still has a follow-up date set and is open ("call back")
-  noAnswer        no_answer without a follow-up date
-  answered        answered / contacted without a decision and without a follow-up date
+  noAnswer        no_answer without a follow-up date; also a status template with the contact-attempt tone (Ringing, No incoming calls:
+                  the status activity carries meta.attempt = true), which counts as contacted but is not reached and not interested
+  answered        answered / contacted without a decision and without a follow-up date (a neutral status template counts here)
   notContacted    leads the person holds (assigned and still open, or contacted in the range) that they did NOT contact in the range
 Per staff, `other` = answered + notReachable, so interested + notInterested + noAnswer + wrongNumber + callback + other =
 contacted. The team's leadsContacted is the sum of each person's distinct leads (a lead two people called counts for both).
@@ -319,7 +320,7 @@ SELECT 'total', uid, CAST(NULL AS date), CAST(NULL AS text), created_at >= :cur_
 UNION ALL
 SELECT 'final', f.uid, CAST(NULL AS date), f.raw, f.follow, count(*) FROM (
   SELECT DISTINCT ON (a.uid, a.lead_id) a.uid,
-         CASE WHEN a.kind = 'call' THEN a.meta ->> 'outcome' ELSE a.meta ->> 'to' END AS raw,
+         CASE WHEN a.kind = 'call' THEN a.meta ->> 'outcome' WHEN a.meta ->> 'attempt' = 'true' THEN 'no_answer' ELSE a.meta ->> 'to' END AS raw,
          (l.next_follow_up_at IS NOT NULL AND l.status NOT IN {CLOSED}) AS follow
     FROM act a JOIN crm_leads l ON l.id = a.lead_id
    WHERE a.created_at >= :cur_start
@@ -901,7 +902,7 @@ def _stage_rows(session, key, p, staff_id, client_id, offset, limit):
 _LEAD_ROWS_SQL = text(f"""
 WITH f AS (
   SELECT DISTINCT ON (a.user_id, a.lead_id) a.user_id AS uid, a.lead_id, a.created_at AS at,
-         CASE WHEN a.kind = 'call' THEN a.meta ->> 'outcome' ELSE a.meta ->> 'to' END AS raw
+         CASE WHEN a.kind = 'call' THEN a.meta ->> 'outcome' WHEN a.meta ->> 'attempt' = 'true' THEN 'no_answer' ELSE a.meta ->> 'to' END AS raw
     FROM crm_lead_activities a
    WHERE a.kind IN ('call', 'status') AND a.user_id IS NOT NULL AND a.created_at >= :cur_start AND a.created_at < :end
      AND (CAST(:staff AS varchar) IS NULL OR a.user_id = CAST(:staff AS varchar))
@@ -963,27 +964,27 @@ _LEAD_LIST_WHERE = {
 def _lead_list_rows(session, metric, p, staff_id, offset, limit):
     """The leads behind the period-aware lead numbers (same conditions as the report's SQL), newest first."""
     at, where = _LEAD_LIST_WHERE[metric]
-    sql = text(f"SELECT {at} AS at, u.name AS owner_name, l.id, l.name, l.position_applied, l.status, count(*) OVER () AS total "
+    sql = text(f"SELECT {at} AS at, u.name AS owner_name, l.id, l.name, l.position_applied, l.status, l.status_label, count(*) OVER () AS total "
                f"FROM crm_leads l LEFT JOIN auth_users u ON u.id = l.owner_id WHERE {where} "
                f"AND (CAST(:staff AS varchar) IS NULL OR l.owner_id = CAST(:staff AS varchar)) ORDER BY 1 DESC, l.id LIMIT :limit OFFSET :offset")
     rows = session.execute(sql, {"staff": staff_id, "cur_start": p.start, "end": p.end, "offset": offset, "limit": limit}).all()
     verb = LEAD_LIST_METRICS[metric][1]
     return [{"at": r.at.isoformat(), "staffName": r.owner_name or "Unassigned", "kind": "lead", "candidateId": None, "leadId": r.id,
              "careId": None, "name": r.name or "No name", "client": None, "job": r.position_applied,
-             "detail": f"{verb}: {LEAD_STATUS_LABELS.get(r.status, r.status)}"} for r in rows], (int(rows[0].total) if rows else 0)
+             "detail": f"{verb}: {r.status_label or LEAD_STATUS_LABELS.get(r.status, r.status)}"} for r in rows], (int(rows[0].total) if rows else 0)
 
 
 def _owned_lead_rows(session, staff_id, offset, limit):
     L = m.Lead
     at = func.coalesce(L.assigned_at, L.created_at)
-    query = select(at, m.User.name, L.id, L.name, L.position_applied, L.status, func.count().over()).select_from(L) \
+    query = select(at, m.User.name, L.id, L.name, L.position_applied, L.status, L.status_label, func.count().over()).select_from(L) \
         .join(m.User, m.User.id == L.owner_id).where(L.owner_id.is_not(None))
     if staff_id:
         query = query.where(L.owner_id == staff_id)
     rows = session.execute(query.order_by(at.desc(), L.id).offset(offset).limit(limit)).all()
     return [{"at": r[0].isoformat(), "staffName": r[1], "kind": "lead", "candidateId": None, "leadId": r[2], "careId": None,
              "name": r[3] or "No name", "client": None, "job": r[4],
-             "detail": f"Status: {LEAD_STATUS_LABELS.get(r[5], r[5])}"} for r in rows], (int(rows[0][6]) if rows else 0)
+             "detail": f"Status: {r[6] or LEAD_STATUS_LABELS.get(r[5], r[5])}"} for r in rows], (int(rows[0][7]) if rows else 0)
 
 
 def _task_rows(session, metric, p, staff_id, now, offset, limit):

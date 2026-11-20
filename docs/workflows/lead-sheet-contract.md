@@ -54,6 +54,38 @@ uploaded to a lead (below) sets `resume_received` automatically.
 
 Activity kinds: `call`, `note`, `status`, `assign`, `import`, `convert`, `resume`, `edit`.
 
+### Status templates (migration `0050_lead_status_templates`)
+
+Besides the nine built-in statuses a lead can hold a **status template**: the three built-in templates **Ringing**, **No incoming calls**
+and **Not eligible**, and any status the team adds with "+ Add a status" in the status dropdown (shared by every user). Storage: `crm_leads.status`
+still holds one of the nine codes above (the check constraint, indexes, filters, reports and dashboard all keep reading it); `crm_leads.status_label`
+(nullable, 40 characters) holds the template's **name**, NULL = the built-in status as it is. The lead JSON adds `statusLabel` (name or null) and
+`statusText` (what to show: the name, else the built-in label); `status` is the code the template counts as. A new built-in status (a call outcome that
+changes the status, a resume arriving, Convert, a PATCH with a code) clears the label; `answered` also clears a contact-attempt label.
+
+How a template counts is decided by its **tone**, fixed when it is created:
+
+| tone | `status` (counts as) | reports |
+| --- | --- | --- |
+| `neutral` (default; every user-added status unless chosen otherwise) | `contacted` | contacted ("spoke, no decision yet") |
+| `positive` | `interested` | contacted and interested |
+| `warning` (built-in: Ringing, No incoming calls) | `contacted` | a contact attempt that did not connect: counted as contacted / called, **not** reached ("No answer" group of the lead feedback report) and **not** interested |
+| `negative` (built-in: Not eligible) | `not_interested` | a negative end state like Not interested: the lead is closed, no follow-up is due |
+
+`PATCH /api/leads/{id}` and `POST /api/leads/bulk` (`action: status`) take in `status` either a built-in code or a template's name (any letter case;
+a switched-off template is refused, except for the lead that already holds it; `converted` is never accepted). The status activity keeps `meta.to` =
+the counting code and adds `meta.fromLabel`, `meta.toLabel` and, for a warning tone, `meta.attempt = true` (the lead feedback report reads it). The `status`
+filter takes built-in codes (matched on `status`, so a template that counts as the code matches too) and/or template names (matched on `status_label`,
+any letter case; an unknown name is `422`); `q` also matches the label. Exports show `statusText` in the Status column. `GET /api/leads/facets` adds
+`statuses: [{value, label, count, kind: builtin|template, tone?, builtin?}]` (built-in codes in the usual order, then built-in templates, then the rest A to Z;
+`count` = the viewer's leads holding it; a hidden or deleted template is listed only while leads still hold its name).
+
+Endpoints (`/api/lead-status-templates`): `GET [?all=1]` (everybody; `all` only for admin/MD) -> `{items:[{id,name,tone,active,builtin,sortOrder,countsAs}]}`;
+`POST {name, tone?}` (anybody signed in; trimmed, collapsed spaces, 1-40 characters, no comma, unique ignoring case, never a standard status name; `409 status_exists`
+with the existing item otherwise); `PATCH /{id} {name?, active?, sortOrder?}` and `DELETE /{id}` (admin/MD; a built-in template cannot be renamed or deleted,
+`409 builtin_status`; the tone cannot change; renaming also renames it on the leads that hold it; leads keep the name of a hidden or deleted template). Every change is audited.
+Downgrade of the migration keeps each lead at its built-in code and writes a history line naming the label it loses.
+
 ## Work rules (who may do what)
 
 | action | admin | manager | recruiter |
@@ -258,7 +290,7 @@ candidate). Returns `{ "deleted": n, "kept": m }`. The batch row stays (marked `
 | param | meaning |
 | --- | --- |
 | `q` | case-insensitive; comma-separated terms must **all** match; each term is a substring of name, phone digits (a phone typed with spaces/+ also works), e-mail, city, state, position, country interest, campaign, ad, ad set, form, owner name, notes, status (label or key) |
-| `status` | one or more (repeat the param or comma-separate) |
+| `status` | one or more built-in codes and/or status template names (repeat the param or comma-separate) |
 | `campaign`, `form`, `position`, `country`, `platform` | exact (case-insensitive) match on the stored value; comma-separate for several. A stored value that itself contains a comma (`Qatar, Kitchen (Doha)`) also matches as the whole text |
 | `owner` | `me`, `unassigned`, or a user id |
 | `created_from`, `created_to` | `YYYY-MM-DD` Asia/Kolkata calendar days (both included), on the date chosen by `date_field` |
@@ -283,7 +315,7 @@ campaign, form or upload when given. The Lead sheet offers one optional table co
 
 ### GET /api/leads/facets  (all)
 
-Distinct values for the filter drop-downs: `{ "campaigns": [..], "forms": [..], "positions": [..], "countries": [..], "platforms": [..], "owners": [{id,name,count}] }`.
+Distinct values for the filter drop-downs: `{ "campaigns": [..], "forms": [..], "positions": [..], "countries": [..], "platforms": [..], "owners": [{id,name,count}], "statuses": [{value,label,count,kind}] }` (see Status templates).
 
 ### GET /api/leads/summary  (all)  `?scope=mine|all`
 

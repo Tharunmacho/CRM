@@ -3,7 +3,8 @@ import { Lock } from 'lucide-react'
 import { Dialog } from '@/shared/ui/overlay'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { gateFromRefusal, leadApi } from '../lead-api'
-import { SETTABLE_STATUSES, experienceAnswer, leadAge, type Lead } from '../lead-model'
+import { experienceAnswer, leadAge, statusPick, type Lead } from '../lead-model'
+import { StatusSelect } from './status-select'
 import type { LeadGate } from '../lead-gate'
 
 /** The editable facts of one lead, as the form holds them (all text). Keys are the PATCH /leads/{id} names. */
@@ -19,7 +20,7 @@ export function formFromLead(lead: Lead): Form {
     name: lead.name ?? '', dob: lead.dob ?? '', gender: lead.gender ?? '', phone: lead.phone ?? '', email: lead.email ?? '',
     positionApplied: lead.positionApplied ?? '', countryInterest: lead.countryInterest ?? '', educationLevel: lead.educationLevel ?? '',
     experienceIndia: experienceText(lead, 'india'), experienceAbroad: experienceText(lead, 'abroad'), experienceTotal: experienceText(lead, 'total'),
-    city: lead.city ?? '', state: lead.state ?? '', status: lead.status, notes: lead.notes ?? '',
+    city: lead.city ?? '', state: lead.state ?? '', status: statusPick(lead), notes: lead.notes ?? '',
   }
 }
 
@@ -112,10 +113,8 @@ export function LeadEditDialog({ lead, blockedReason, onClose, onSaved, onGateRe
           <Field label="City"><Input value={form.city} maxLength={120} onChange={set('city')} /></Field>
           <Field label="State"><Input value={form.state} maxLength={120} onChange={set('state')} /></Field>
           <Field label="Status" hint={converted ? 'A converted lead keeps its status.' : undefined}>
-            <Select value={form.status} disabled={converted} onChange={set('status')}>
-              {SETTABLE_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              {converted && <option value="converted">Converted</option>}
-            </Select>
+            <StatusSelect value={form.status} lead={lead} disabled={converted} allowAdd={!converted} extra={converted ? [{ value: 'converted', label: 'Converted' }] : undefined}
+              onChange={(value) => setForm((current) => (current ? { ...current, status: value } : current))} />
           </Field>
           <Field label="Remarks" className="ld-editwide"><Textarea rows={3} value={form.notes} maxLength={5000} placeholder="Anything worth remembering about this person" onChange={set('notes')} /></Field>
         </fieldset>

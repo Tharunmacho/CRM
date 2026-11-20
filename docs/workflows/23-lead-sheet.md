@@ -46,6 +46,15 @@ A wrong upload can be undone by an admin from the upload history, as long as nob
 
 New, Contacted, Interested, Resume requested, Resume received, Converted, Not interested, Not reachable, Wrong number.
 
+Also in every status dropdown: **Ringing**, **No incoming calls** and **Not eligible**, then any status the team added, then **+ Add a status**. Pick it,
+type a name (up to 40 characters, no comma) and a tone, press Enter: the status is saved for everybody and selected at once. It then appears in every
+user's dropdown, in the Lead sheet status filter (with counts) and in the Excel export. An admin or MD can rename, hide or delete the added statuses
+(Lead sheet > **Manage statuses**); the three built-in ones can only be hidden. A lead keeps its status text even after its status is hidden or deleted.
+
+How they count in the reports (the tone decides): **Ringing** and **No incoming calls** are contact attempts: they count as contacted but not as reached and not as
+interested. **Not eligible** is a closed, negative end state like Not interested (no follow-up). A status someone adds counts as contacted (neutral) unless they
+choose Positive (counts as interested), Tried, not reached, or Negative.
+
 ## Failure recovery
 
 * A file that cannot be read (old `.xls`, macro workbook, password protected, too big, more than 100,000 rows) is refused with a message; nothing is stored.

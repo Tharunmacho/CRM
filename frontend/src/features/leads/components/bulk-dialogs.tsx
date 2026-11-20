@@ -5,8 +5,9 @@ import { Dialog } from '@/shared/ui/overlay'
 import { Button, Input, Select } from '@/shared/ui/primitives'
 import { bulkErrorMessage } from '../lead-bulk-api'
 import { UNASSIGNED, assignChoice, confirmCopy, deleteOneCopy, typedConfirmOk, type BulkAction, type BulkOptions } from '../lead-bulk-model'
-import { SETTABLE_STATUSES, leadStatus, type Lead } from '../lead-model'
+import { pickLabel, statusPick, type Lead } from '../lead-model'
 import { RecruiterPicker } from './recruiter-picker'
+import { StatusSelect } from './status-select'
 import '@/styles/lead-bulk.css'
 
 type Written = Exclude<BulkAction, 'export'>
@@ -41,7 +42,7 @@ export function BulkDialog({ action, count, allMatching, users, onClose, onConfi
   const copy = confirmCopy({
     action, count, allMatching,
     ownerName: nobody ? UNASSIGNED : names.length ? names[0] : 'auto', recruiterNames: nobody ? undefined : names,
-    statusLabel: leadStatus(status).label,
+    statusLabel: pickLabel(status),
   })
   const ready = !busy && count > 0 && (!copy.typed || typedConfirmOk(typed))
   const go = async () => {
@@ -64,9 +65,7 @@ export function BulkDialog({ action, count, allMatching, users, onClose, onConfi
         {action === 'status' && (
           <label className="ld-opt">
             <span>New status</span>
-            <Select aria-label="New status" value={status} onChange={(event) => setStatus(event.target.value)}>
-              {SETTABLE_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </Select>
+            <StatusSelect label="New status" value={status} disabled={busy} onChange={setStatus} />
           </label>
         )}
         <div className="ld-confirm-lines" role="group" aria-label="What will happen">
@@ -89,7 +88,7 @@ export function StatusDialog({ lead, onClose, onConfirm }: { lead: Lead | null; 
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  useEffect(() => { if (lead) { setStatus(lead.status); setError(''); setBusy(false) } }, [lead])
+  useEffect(() => { if (lead) { setStatus(statusPick(lead)); setError(''); setBusy(false) } }, [lead])
   if (!lead) return null
   const go = async () => {
     setBusy(true); setError('')
@@ -97,13 +96,11 @@ export function StatusDialog({ lead, onClose, onConfirm }: { lead: Lead | null; 
   }
   return (
     <Dialog open onClose={() => { if (!busy) onClose() }} title="Change status" width="sm" description={lead.name || undefined}
-      footer={<><Button variant="secondary" disabled={busy} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy || status === lead.status} onClick={() => void go()}>{busy ? 'Saving…' : 'Change status'}</Button></>}>
+      footer={<><Button variant="secondary" disabled={busy} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy || status === statusPick(lead)} onClick={() => void go()}>{busy ? 'Saving…' : 'Change status'}</Button></>}>
       <div className="ld-form">
         <label className="ld-opt">
           <span>Status</span>
-          <Select aria-label="Status" value={status} onChange={(event) => setStatus(event.target.value)}>
-            {SETTABLE_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-          </Select>
+          <StatusSelect label="Status" value={status} lead={lead} disabled={busy} onChange={setStatus} />
         </label>
         <p className="ld-hint">You can undo the change right after.</p>
         {error && <p role="alert" className="ld-alert"><span>{error}</span></p>}

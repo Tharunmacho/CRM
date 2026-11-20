@@ -144,7 +144,7 @@ export function CampaignCell({ lead }: { lead: Lead }) {
 }
 
 export function StatusText({ lead }: { lead: Lead }) {
-  const status = leadStatus(lead.status)
+  const status = leadStatus(lead.status, lead.statusLabel)
   return <span className={cn('db-tone', `is-${status.tone}`)} title={status.label}>{status.label}</span>
 }
 
@@ -187,7 +187,7 @@ export function StatusOwnerCell({ lead, userById, onViewRemarks }: { lead: Lead;
   // Only an assigned lead has a history to show; "Unassigned" and every other cell keep the row's click (opens the drawer).
   if (!name || !onViewRemarks) return <span className="db-2l ld-statown">{body}</span>
   return (
-    <button type="button" className="db-2l ld-statown ld-statown-btn" title={`See remarks and what ${name} did`} aria-label={`${name}, ${leadStatus(lead.status).label}. See remarks and what ${name} did on this lead`} aria-haspopup="dialog"
+    <button type="button" className="db-2l ld-statown ld-statown-btn" title={`See remarks and what ${name} did`} aria-label={`${name}, ${leadStatus(lead.status, lead.statusLabel).label}. See remarks and what ${name} did on this lead`} aria-haspopup="dialog"
       onClick={(event) => { event.stopPropagation(); onViewRemarks(lead) }}>
       {body}
     </button>

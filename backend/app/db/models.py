@@ -37,6 +37,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.expression import ColumnElement
@@ -1686,6 +1687,7 @@ class DocumentPersonGroup(Base, PkMixin, TimestampMixin):
 
 LEAD_STATUSES = ("new", "contacted", "interested", "resume_requested", "resume_received", "converted",
                  "not_interested", "invalid", "wrong_number")
+LEAD_STATUS_TONES = ("neutral", "positive", "warning", "negative")
 LEAD_ACTIVITY_KINDS = ("call", "note", "status", "assign", "import", "convert", "resume", "edit")
 
 
@@ -1774,7 +1776,8 @@ class Lead(Base, PkMixin, TimestampMixin):
     extra: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), comment="Columns of the file that have no lead field (different ad forms ask different questions).")
     raw: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), deferred=True, comment="The whole original row, header to text.")
 
-    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'new'"))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'new'"))  # always one of LEAD_STATUSES: the code every report and filter counts by
+    status_label: Mapped[str | None] = mapped_column(String(40), comment="Name of the status template the recruiter picked (Ringing, a custom status ...); NULL = the built-in status as it is. `status` holds the code the template counts as.")
     owner_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_contacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1797,6 +1800,35 @@ class Lead(Base, PkMixin, TimestampMixin):
         CheckConstraint("status IN ('new','contacted','interested','resume_requested','resume_received','converted',"
                         "'not_interested','invalid','wrong_number')", name="ck_crm_leads_status"),
         {"comment": "People who answered an ad (platform lead exports), stored once each, with the calling workflow: owner, status, follow-up and conversion."},
+    )
+
+
+@event.listens_for(Lead, "before_update")
+def _status_label_follows_status(mapper, connection, lead) -> None:
+    """A new built-in status (a call outcome, a resume arriving, Convert) ends the template label unless the same change sets one."""
+    state = sa_inspect(lead)
+    if state.attrs.status.history.has_changes() and not state.attrs.status_label.history.has_changes():
+        lead.status_label = None
+
+
+class LeadStatusTemplate(Base, PkMixin, TimestampMixin):
+    """A status a recruiter can pick besides the built-in ones (Ringing, Not eligible, ... and any the team adds). Shared by every user.
+
+    `tone` decides how a lead holding it is counted (see services/lead_status_templates.py); it cannot change once created.
+    A built-in template can be switched off but never renamed or deleted."""
+
+    __tablename__ = "crm_lead_status_templates"
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    tone: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'neutral'"))
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    __table_args__ = (
+        Index("ux_crm_lead_status_templates_name_lower", func.lower(name), unique=True),
+        CheckConstraint("char_length(btrim(name)) BETWEEN 1 AND 40 AND position(',' in name) = 0", name="ck_crm_lead_status_templates_name"),
+        CheckConstraint("tone IN ('neutral','positive','warning','negative')", name="ck_crm_lead_status_templates_tone"),
+        {"comment": "Shared Lead sheet status choices added to the built-in ones; a lead keeps the template's name when the template is hidden or deleted."},
     )
 
 

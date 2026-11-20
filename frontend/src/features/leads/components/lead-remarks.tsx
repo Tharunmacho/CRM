@@ -108,7 +108,7 @@ export function LeadRemarksSheet({ lead, ownerName, onClose, onOpenLead }: Props
 
   if (!lead) return null
   const shown: Lead = detail ?? lead
-  const status = leadStatus(shown.status)
+  const status = leadStatus(shown.status, shown.statusLabel)
   const stats = remarkStats(activities, cards, shown.callCount)
   const owner = ownerName || 'Recruiter'
   const assigned = dateOnly(shown.assignedAt)

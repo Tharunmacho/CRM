@@ -267,8 +267,9 @@ export const resultVerb = (action: BulkAction, ownerId?: string | null): string 
 /** One status change that can still be taken back. */
 export interface UndoEntry { leadId: string; name: string; from: string; to: string; at: number }
 
-export function undoEntry(lead: { id: string; name?: string | null; status: string }, to: string, at: number = Date.now()): UndoEntry | null {
-  return lead.status === to ? null : { leadId: lead.id, name: lead.name ?? '', from: lead.status, to, at }
+export function undoEntry(lead: { id: string; name?: string | null; status: string; statusLabel?: string | null }, to: string, at: number = Date.now()): UndoEntry | null {
+  const from = (lead.statusLabel ?? '').trim() || lead.status   // the select value: a template's name, else the built-in code
+  return from === to ? null : { leadId: lead.id, name: lead.name ?? '', from, to, at }
 }
 
 /** "Marked not interested." or "Status changed to Contacted." */

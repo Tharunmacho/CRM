@@ -127,7 +127,7 @@ def test_an_existing_former_user_is_reused_and_no_tombstone_means_no_new_account
 
 def test_an_empty_database_migrates_up_to_the_purge_and_creates_nothing(schema_database):
     engine = schema_database
-    _migrate(engine, "head")                  # the whole chain 0001 -> 0049 on an empty database
+    _migrate(engine, "0049_purge_user_tombstones")   # the whole chain 0001 -> 0049 on an empty database
     assert query(engine, "SELECT version_num FROM alembic_version") == [("0049_purge_user_tombstones",)]
     assert query(engine, "SELECT count(*) FROM auth_users") == [(0,)]       # no Former user is invented when nothing was purged
     _migrate(engine, PREVIOUS, downgrade=True)  # the downgrade is a no-op

@@ -2,6 +2,13 @@
 
 The import itself lives in lead_import.py and the file parsing in lead_parsing.py. Rules and JSON shapes are in
 docs/workflows/lead-sheet-contract.md.
+
+Status. `Lead.status` is always one of the nine built-in codes (models.LEAD_STATUSES) and is what every filter, summary, dashboard card
+and staff report counts by. A lead may also hold a status TEMPLATE (Ringing, No incoming calls, Not eligible, anything the team adds:
+lead_status_templates.py, table crm_lead_status_templates): then `Lead.status_label` is the template's name and `Lead.status` the code the
+template counts as. Counting rule, by the template's tone: neutral -> contacted; positive -> interested; warning (Ringing, No incoming
+calls) -> contacted / called but NOT reached and NOT interested; negative (Not eligible) -> not_interested, a closed end state. A new
+built-in status (call outcome, resume, Convert) clears the label. Screens, exports and history show `status_text(status, status_label)`.
 """
 from __future__ import annotations
 
@@ -20,7 +27,7 @@ from sqlalchemy.orm import Session, aliased, undefer
 
 from app.db.models import (Attachment, AuditEntry, Candidate, Lead, LeadActivity, LeadBatch, Notification, Role, User,
                            LEAD_STATUSES)
-from app.services import lead_followups, lead_matching, lead_parsing as lp
+from app.services import lead_followups, lead_matching, lead_parsing as lp, lead_status_templates as status_templates
 from app.services.candidate_search import agency_midnight, literal_contains, search_terms
 from app.core.roles import is_admin_level
 
@@ -29,6 +36,11 @@ STATUS_LABELS = {
     "resume_received": "Resume received", "converted": "Converted", "not_interested": "Not interested",
     "invalid": "Not reachable", "wrong_number": "Wrong number",
 }
+
+
+def status_text(code: str | None, label: str | None = None) -> str:
+    """What a lead's status reads as: the template's name when it holds one, else the built-in status's label."""
+    return label or STATUS_LABELS.get(code or "", code or "")
 CLOSED = ("converted", "not_interested", "invalid", "wrong_number")
 OUTCOMES = ("answered", "interested", "not_interested", "no_answer", "wrong_number")
 PLATFORM_LABELS = {"ig": "Instagram", "fb": "Facebook"}
@@ -173,7 +185,8 @@ def lead_dict(lead: Lead, *, owner_name=None, candidate_ref=None, matched_ref=No
         "leadStatusSource": lead.lead_status_source, "campaignId": lead.campaign_id, "campaignName": lead.campaign_name,
         "adsetId": lead.adset_id, "adsetName": lead.adset_name, "adId": lead.ad_id, "adName": lead.ad_name,
         "formId": lead.form_id, "formName": lead.form_name,
-        "status": lead.status, "ownerId": lead.owner_id, "ownerName": owner_name, "assignedAt": iso(lead.assigned_at),
+        "status": lead.status, "statusLabel": lead.status_label, "statusText": status_text(lead.status, lead.status_label),
+        "ownerId": lead.owner_id, "ownerName": owner_name, "assignedAt": iso(lead.assigned_at),
         "lastContactedAt": iso(lead.last_contacted_at), "nextFollowUpAt": iso(lead.next_follow_up_at), "callCount": lead.call_count,
         "notes": lead.notes, "candidateId": lead.candidate_id, "candidateRef": candidate_ref, "candidateCareId": candidate_care_id,
         "matchedCandidateId": lead.matched_candidate_id, "matchedCandidateRef": matched_ref, "matchedCandidateCareId": matched_care_id,
@@ -253,10 +266,12 @@ def ensure_can_see_lead(lead: Lead, user: User) -> None:
         raise fail(404, "not_found", "This lead was not found.")
 
 
-def apply_filters(query, owner, has_resume, user: User, f: dict):
+def apply_filters(query, owner, has_resume, user: User, f: dict, db: Session | None = None):
     """The list/export/assign filters (all optional, AND-ed). `f` holds the snake_case query parameters.
 
-    Always narrowed to the leads `user` may see: staff only ever get the leads assigned to them."""
+    Always narrowed to the leads `user` may see: staff only ever get the leads assigned to them.
+    `status` is a comma list of built-in codes (matched on `status`, so a lead holding a template that counts as that code matches too)
+    and/or status template names (matched on `status_label`, any letter case). With `db`, a name that no template or lead has is a 422."""
     query = query.where(visible_leads(user))
     # `uploaded` (default) = when the lead was imported into the CRM; `created` = the platform's own time, else the import time.
     date_field = (f.get("date_field") or "uploaded").strip().lower()
@@ -280,6 +295,7 @@ def apply_filters(query, owner, has_resume, user: User, f: dict):
         statuses = [key for key, label in STATUS_LABELS.items() if lowered in label.lower() or lowered in key.replace("_", " ")]
         if statuses:
             clauses.append(Lead.status.in_(statuses))
+        clauses.append(literal_contains(Lead.status_label, term))
         platforms = [key for key, label in PLATFORM_LABELS.items() if lowered in label.lower() or lowered == key]
         if platforms:
             clauses.append(Lead.platform.in_(platforms))
@@ -289,10 +305,14 @@ def apply_filters(query, owner, has_resume, user: User, f: dict):
         query = query.where(term_matches(term))
     statuses = _csv_param(f.get("status"))
     if statuses:
-        unknown = [s for s in statuses if s not in LEAD_STATUSES]
-        if unknown:
-            raise fail(422, "invalid_request", f"Unknown status: {', '.join(unknown)}.")
-        query = query.where(Lead.status.in_(statuses))
+        codes = [s for s in statuses if s in LEAD_STATUSES]
+        names = [s for s in statuses if s not in LEAD_STATUSES]
+        if names:
+            if db is None:
+                raise fail(422, "invalid_request", f"Unknown status: {', '.join(names)}.")
+            status_templates.check_filter_names(db, names)
+        query = query.where(or_(*([Lead.status.in_(codes)] if codes else []),
+                                *([func.lower(Lead.status_label).in_([n.lower() for n in names])] if names else [])))
     for key, column in (("campaign", Lead.campaign_name), ("form", Lead.form_name), ("position", Lead.position_applied),
                         ("country", Lead.country_interest), ("platform", Lead.platform)):
         values = _facet_values(f.get(key))
@@ -399,7 +419,7 @@ def extra_columns(db: Session, filters: dict | None = None, user: User | None = 
 def search_leads(db: Session, user: User, filters: dict, page: int, page_size: int, sort: str = "created", direction: str = "desc",
                  extra_keys: list[str] | None = None) -> dict:
     query, owner, has_resume = _base_query()
-    query = apply_filters(query, owner, has_resume, user, filters).order_by(*_order(owner, sort, direction))
+    query = apply_filters(query, owner, has_resume, user, filters, db).order_by(*_order(owner, sort, direction))
     listing = query.add_columns(func.count().over().label("total"))
     found = db.execute(listing.offset(page * page_size).limit(page_size)).all()
     if found:
@@ -539,7 +559,34 @@ def facets(db: Session, user: User) -> dict:
             out["owners"].append({"id": owner_id, "name": value, "count": count})
         elif len(out[plural[kind]]) < 300:
             out[plural[kind]].append(value)
+    out["statuses"] = status_options(db, user)
     return out
+
+
+def status_options(db: Session, user: User) -> list[dict]:
+    """The Status filter / dropdown choices with how many of the viewer's leads hold each: `{value, label, count, kind}` (+ `tone`, `builtin` for a template).
+
+    The built-in statuses first (the Lead sheet's order; `count` = leads at that code, which includes leads holding a template that counts
+    as it), then the status templates (built-in templates in their order, then the rest A-Z; `count` = leads holding that name), then
+    any name leads still hold whose template is gone (so it can still be filtered). `kind` is `builtin` or `template`; a hidden template
+    is listed only while a lead holds it. A filter value is the code for a built-in and the name for a template."""
+    counts = dict(db.execute(text("SELECT status, count(*) FROM crm_leads WHERE :everyone OR owner_id = :me GROUP BY status"),
+                             {"everyone": sees_all_leads(user), "me": user.id}).all())
+    held = {key: int(n) for key, n in db.execute(text(
+        "SELECT lower(status_label), count(*) FROM crm_leads WHERE status_label IS NOT NULL AND (:everyone OR owner_id = :me) GROUP BY 1"),
+        {"everyone": sees_all_leads(user), "me": user.id}).all()}
+    options = [{"value": code, "label": STATUS_LABELS[code], "count": int(counts.get(code, 0)), "kind": "builtin"} for code in LEAD_STATUSES]
+    listed = set()
+    for row in status_templates.list_templates(db, include_hidden=True):
+        n = held.get(row.name.lower(), 0)
+        listed.add(row.name.lower())
+        if row.active or n:
+            options.append({"value": row.name, "label": row.name, "tone": row.tone, "count": n, "kind": "template", "builtin": row.builtin})
+    for key, n in sorted(held.items()):   # a deleted template's name still on leads: the original spelling is on the lead
+        if key not in listed:
+            name = db.scalar(select(Lead.status_label).where(func.lower(Lead.status_label) == key).limit(1))
+            options.append({"value": name, "label": name, "tone": "neutral", "count": n, "kind": "template", "builtin": False})
+    return options
 
 
 # ------------------------------------------------------------------ call, patch, link
@@ -553,6 +600,8 @@ def log_call(db: Session, user: User, lead: Lead, outcome: str, remarks: str | N
     before = lead.status
     lead.call_count = (lead.call_count or 0) + 1
     lead.last_contacted_at = now
+    if outcome == "answered" and lead.status_label and status_templates.label_is_attempt(db, lead.status_label):
+        lead.status_label = None  # the person was reached: a contact attempt (Ringing, No incoming calls ...) is over; the status stays Contacted
     if outcome == "answered" and lead.status == "new":
         lead.status = "contacted"
     elif outcome == "interested" and lead.status not in ("resume_requested", "resume_received"):
@@ -580,16 +629,16 @@ EDITABLE = {
 def patch_lead(db: Session, user: User, lead: Lead, body: dict) -> None:
     """Apply the fields present in `body` (camelCase keys, already type-checked). Writes one activity per kind of change."""
     changes: list[str] = []
-    if "status" in body and body["status"] != lead.status:
-        status = body["status"]
-        if status not in LEAD_STATUSES:
-            raise fail(422, "invalid_request", f"status must be one of: {', '.join(LEAD_STATUSES)}.")
-        if status == "converted":
-            raise fail(422, "invalid_request", "Use Convert to turn a lead into a candidate.")
+    if "status" in body and " ".join(str(body["status"] or "").split()).lower() != (lead.status_label or lead.status).lower():
+        # `status` is a built-in code or a status template's name; a template sets the code it counts as plus its name (`status_label`).
+        target = status_templates.resolve_target(db, body["status"], current_label=lead.status_label)
         if lead.status == "converted":
             raise fail(409, "already_converted", "This lead is already converted to a candidate.")
-        before, lead.status = lead.status, status
-        log_activity(db, lead.id, user.id, "status", f"Status changed from {STATUS_LABELS[before]} to {STATUS_LABELS[status]}", {"from": before, "to": status})
+        before, before_label = lead.status, lead.status_label
+        lead.status, lead.status_label = target.code, target.label
+        log_activity(db, lead.id, user.id, "status",
+                     f"Status changed from {status_text(before, before_label)} to {status_text(target.code, target.label)}",
+                     {"from": before, "to": target.code, "fromLabel": before_label, "toLabel": target.label, "attempt": target.attempt})
     if "notes" in body and (body["notes"] or None) != lead.notes:
         lead.notes = (body["notes"] or "").strip() or None
         log_activity(db, lead.id, user.id, "note", (lead.notes or "Notes cleared")[:300])
@@ -678,7 +727,7 @@ def assign_leads(db: Session, user: User, ids: list[str] | None, filters: dict |
         query = query.where(Lead.id.in_(ids))
     else:
         base, owner, has_resume = _base_query()
-        filtered = apply_filters(base, owner, has_resume, user, filters or {})
+        filtered = apply_filters(base, owner, has_resume, user, filters or {}, db)
         query = select(Lead.id, Lead.owner_id).where(Lead.id.in_(select(filtered.with_only_columns(Lead.id).subquery().c.id)), Lead.status != "converted")
     if only_unassigned:
         query = query.where(Lead.owner_id.is_(None))
@@ -960,7 +1009,7 @@ EXPORT_COLUMNS = [
     ("Experience (total)", lambda l, o, e: experience_export_value(e, "experienceTotal")),
     ("Location", lambda l, o, e: e["_exportLocation"]),
     ("Created", lambda l, o, e: l.created_time), ("Imported", lambda l, o, e: l.created_at),
-    ("Campaign", lambda l, o, e: l.campaign_name), ("Form", lambda l, o, e: l.form_name), ("Status", lambda l, o, e: STATUS_LABELS.get(l.status, l.status)),
+    ("Campaign", lambda l, o, e: l.campaign_name), ("Form", lambda l, o, e: l.form_name), ("Status", lambda l, o, e: status_text(l.status, l.status_label)),
     ("Owner", lambda l, o, e: o), ("Calls", lambda l, o, e: l.call_count), ("Last contacted", lambda l, o, e: l.last_contacted_at),
     ("Next follow-up", lambda l, o, e: l.next_follow_up_at), ("Notes", lambda l, o, e: l.notes),
     ("Name", lambda l, o, e: l.name), ("Age", lambda l, o, e: e["_exportAge"]),
@@ -1006,7 +1055,7 @@ def export_leads(db: Session, user: User, filters: dict, fmt: str, sort: str = "
     (headed with the sheet's own wording). Excel keeps phone numbers and ids as text and dates as real dates."""
     from app.services import lead_xlsx
     query, owner, has_resume = _base_query()
-    query = apply_filters(query, owner, has_resume, user, filters).options(undefer(Lead.extra)).order_by(*_order(owner, sort, direction)).limit(EXPORT_LIMIT)
+    query = apply_filters(query, owner, has_resume, user, filters, db).options(undefer(Lead.extra)).order_by(*_order(owner, sort, direction)).limit(EXPORT_LIMIT)
     header, rows = export_table(db.execute(query).all())
     if fmt == "csv":
         out = io.StringIO()

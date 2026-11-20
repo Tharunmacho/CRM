@@ -3,7 +3,12 @@
 Both read `crm_leads` and `crm_lead_activities` (migration 0024) with ONE set-based statement each, never one statement
 per person, and both are cheap to repeat because the callers sit behind the response cache with the `leads` topic.
 Definitions live here so the dashboard, the report, the Excel export and the tests agree (docs/workflows/02-dashboard.md,
-17-reports.md, lead-sheet-contract.md):
+17-reports.md, lead-sheet-contract.md).
+
+Every figure reads `crm_leads.status`, which holds a built-in code even when the lead holds a status template (lead_status_templates.py):
+Ringing and No incoming calls count as `contacted` (a contact attempt: called, not reached, not interested), Not eligible as
+`not_interested` (closed), a custom template as its tone says (neutral -> contacted, positive -> interested, warning -> contacted attempt,
+negative -> not_interested). So none of the formulas below changes.
 
   Dashboard (role scoped like the rest of the page: staff their own leads, admin/MD the team or the chosen person)
     newToday         leads UPLOADED (stored in the CRM) in the last 24 hours, a rolling window: `created_at`, never the ad platform's own

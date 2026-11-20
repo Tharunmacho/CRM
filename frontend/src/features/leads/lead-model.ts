@@ -35,7 +35,12 @@ export interface Lead {
   adName?: string | null
   formName?: string | null
   countryInterest?: string | null
+  /** The built-in status code the lead is counted by (a status template counts as one of them). */
   status: string
+  /** The status template the lead holds (Ringing, a custom status ...); null / missing = the built-in status as it is. */
+  statusLabel?: string | null
+  /** What the screens show: the template name, else the built-in label (the server's wording). */
+  statusText?: string | null
   ownerId?: string | null
   ownerName?: string | null
   assignedAt?: string | null
@@ -118,7 +123,12 @@ export interface LeadSummary {
   lastImportAt?: string | null
 }
 
+/** One status choice of the Status filter with how many of the viewer's leads hold it (GET /leads/facets `statuses`). */
+export interface FacetStatus { value: string; label: string; count: number; kind: 'builtin' | 'template'; tone?: string; builtin?: boolean }
+
 export interface LeadFacets {
+  /** Every status the filter offers (built-in codes, then status templates), with counts. */
+  statuses?: FacetStatus[]
   campaigns: string[]
   forms?: string[]
   positions: string[]
@@ -173,10 +183,59 @@ export const SETTABLE_STATUSES = LEAD_STATUSES.filter((status) => status.value !
 
 const humanize = (value: string) => { const text = value.replace(/_/g, ' ').trim(); return text.charAt(0).toUpperCase() + text.slice(1) }
 
-/** Label and tone of a stored status; an unknown one reads as plain text rather than breaking the row. */
-export function leadStatus(value?: string | null): { value: string; label: string; tone: LeadTone } {
+/* ---- status templates: the statuses people add to the list ("+ Add a status"). A lead that holds one has `status` (the built-in code it counts as)
+ *      and `statusLabel` (the template's name). Rules and counting: backend/app/services/lead_status_templates.py. */
+
+/** A template as the status helpers need it (the API's item has more). */
+export interface StatusTemplateLike { name: string; tone: string; builtin?: boolean; active?: boolean }
+
+/** The chip tone of a template's tone (neutral / positive / warning / negative). */
+const TEMPLATE_TONE: Record<string, LeadTone> = { neutral: 'info', positive: 'ok', warning: 'warn', negative: 'bad' }
+export const templateTone = (tone: string | null | undefined): LeadTone => TEMPLATE_TONE[(tone ?? '').toLowerCase()] ?? 'info'
+
+/** The shared templates last read from the server (the API module keeps it current), so a chip anywhere can find its tone without being handed the list. */
+let knownTemplates: readonly StatusTemplateLike[] = []
+export const registerStatusTemplates = (list: readonly StatusTemplateLike[]) => { knownTemplates = list }
+const sameName = (a: string, b: string) => a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase()
+
+/** Label and tone of a stored status; an unknown one reads as plain text rather than breaking the row.
+ *  With `label` (the status template the lead holds) the name is shown, in the template's tone (else the tone of the code it counts as). */
+export function leadStatus(value?: string | null, label?: string | null): { value: string; label: string; tone: LeadTone } {
   const key = (value ?? '').trim()
-  return LEAD_STATUSES.find((status) => status.value === key) ?? { value: key, label: key ? humanize(key) : 'Not contacted', tone: 'quiet' }
+  const base = LEAD_STATUSES.find((status) => status.value === key) ?? { value: key, label: key ? humanize(key) : 'Not contacted', tone: 'quiet' as LeadTone }
+  const name = (label ?? '').replace(/\s+/g, ' ').trim()
+  if (!name) return base
+  const template = knownTemplates.find((item) => sameName(item.name, name))
+  return { value: name, label: name, tone: template ? templateTone(template.tone) : base.tone }
+}
+
+/** A status template with the "tried, not reached" tone (Ringing, No incoming calls): a call that connects ends it. */
+export const isAttemptLabel = (label?: string | null): boolean => {
+  const name = (label ?? '').trim()
+  return Boolean(name) && knownTemplates.some((item) => sameName(item.name, name) && item.tone === 'warning')
+}
+
+/** The value of the status select for a lead: the template's name, else the built-in code (what PATCH /leads/{id} and the bulk change take). */
+export const statusPick = (lead: Pick<Lead, 'status' | 'statusLabel'>): string => (lead.statusLabel ?? '').trim() || lead.status
+
+/** The words for a status select value: a built-in code reads as its label, a template's name as it is spelled. */
+export const pickLabel = (value: string): string => LEAD_STATUSES.find((status) => status.value === value)?.label ?? (value || 'Not contacted')
+
+export interface StatusOption { value: string; label: string; tone: LeadTone; kind: 'builtin' | 'template' }
+
+/** Built-in templates first (the server's order), then the rest A to Z; hidden ones are left out. */
+export function orderedTemplates<T extends StatusTemplateLike>(list: readonly T[]): T[] {
+  return list.filter((item) => item.active !== false).sort((a, b) => Number(Boolean(b.builtin)) - Number(Boolean(a.builtin)) || (a.builtin ? 0 : a.name.toLowerCase().localeCompare(b.name.toLowerCase())))
+}
+
+/** The choices of a status select, in order: the built-in statuses a person may set (the usual order), the built-in templates, every other
+ *  template A to Z. `current` (the lead's own label) stays listed even when its template was hidden, so the select never goes blank. */
+export function statusOptions(templates: readonly StatusTemplateLike[], current?: Pick<Lead, 'status' | 'statusLabel'> | null): StatusOption[] {
+  const out: StatusOption[] = SETTABLE_STATUSES.map((status) => ({ value: status.value, label: status.label, tone: status.tone, kind: 'builtin' as const }))
+  for (const item of orderedTemplates(templates)) out.push({ value: item.name, label: item.name, tone: templateTone(item.tone), kind: 'template' })
+  const own = (current?.statusLabel ?? '').trim()
+  if (own && !out.some((option) => sameName(option.value, own))) out.push({ value: own, label: own, tone: leadStatus(current?.status, own).tone, kind: 'template' })
+  return out
 }
 
 /** Call outcomes the "Add remarks" form offers (the server's list) and what each one does to the status. */
@@ -298,8 +357,15 @@ export function validDay(value: string | undefined | null): value is string {
 
 /** The Status select's choices. A card can set several statuses at once (Interested = interested + resume received): that value gets its own
  *  option, so the select shows what is filtered instead of "Any status" while the list is narrowed. */
-export function statusChoices(current: string): [string, string][] {
-  const choices: [string, string][] = LEAD_STATUSES.map((status) => [status.value, status.label])
+export function statusChoices(current: string, facets?: Pick<LeadFacets, 'statuses'> | null): [string, string][] {
+  let choices: [string, string][] = LEAD_STATUSES.map((status) => [status.value, status.label])
+  if (facets?.statuses?.length) {
+    // The server's list: the built-in statuses (our wording), then the status templates, each with how many leads hold it.
+    choices = facets.statuses.map((status) => {
+      const label = status.kind === 'builtin' ? leadStatus(status.value).label : status.label
+      return [status.value, `${label} (${status.count.toLocaleString()})`]
+    })
+  }
   if (current && !choices.some(([value]) => value === current)) {
     const labels = current.split(',').map((part) => part.trim()).filter(Boolean).map((part) => leadStatus(part).label)
     choices.push([current, labels.join(' or ')])
