@@ -97,7 +97,7 @@ def _follow_up(db: Session, user: User, staff: str | None) -> dict:
     now = datetime.now(timezone.utc)
     supervisor, selector, shown, roster, counts, fetched = _read(
         db, user, staff, lambda s, owners: daily_work.follow_up_counts(s, owners), lambda s, owners: daily_work.fetch_follow_up(s, owners))
-    items = daily_work.load_follow_up(db, selector, fetched=fetched, parallel=True) if fetched else []
+    items = daily_work.load_follow_up(db, selector, now=now, fetched=fetched, parallel=True) if fetched else []
     total = sum(counts.get(uid, 0) for uid in shown)
     result = {"serverTime": now, "staffCount": len(shown), "summary": {"total": total}, "items": items,
               "truncated": len(items) < total and len(items) >= daily_work.MAX_ROWS}

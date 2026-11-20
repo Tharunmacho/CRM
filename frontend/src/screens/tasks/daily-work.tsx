@@ -37,7 +37,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const everyoneFollow = useFollowUp({ staff: 'all', enabled: filtered })
   const [idleOnly, setIdleOnly] = useState(false)
   const [openApp, setOpenApp] = useState<{ id: string; stage?: number } | null>(null)
-  const zone = store.agencyTimezone
+  const zone = store.agencyTimezone || 'Asia/Kolkata'
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState('')
 

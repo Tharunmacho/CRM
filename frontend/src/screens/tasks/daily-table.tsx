@@ -172,7 +172,7 @@ export function ClientCell({ item }: { item: Pick<DailyItem, 'client' | 'kind' |
   return <span className="dw-cell-strong dw-clamp" title={item.clientContact ? `${cell.text}. Contact: ${item.clientContact}` : cell.text}>{cell.text}</span>
 }
 
-/** AGENCY: the candidate's referral agency (the referrer's name when someone referred them, otherwise how the CV arrived); a muted dash when none. Two lines at most. */
+/** The recorded agency, or a muted dash when no agency is known. */
 export function AgencyCell({ item }: { item: Pick<DailyItem, 'referral' | 'agency'> }) {
   const label = agencyLabel(item)
   if (!label) return <span className="dw-none" title="No agency recorded">—</span>

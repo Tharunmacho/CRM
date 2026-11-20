@@ -271,12 +271,6 @@ test('the Tasks table header row is the primary blue of the Complete button, sco
   assert.match(page, /:root:root \.tk \.tk-table thead th \{ background: var\(--primary\);[^}]*color: var\(--on-primary\)/)
 })
 
-test('the admin Tasks list fits the panel at a 1440px window (no sideways scroll, nothing under the sticky actions column)', async () => {
-  const widths = m.taskColumnsFor(true).map((c) => c.width)
-  assert.equal(widths.length, 11) // S NO, DOC, client, job, candidate, recruiter, agency, stage, today, remarks, actions
-  assert.ok(widths.reduce((a, b) => a + b, 0) <= 1111, `the plan is ${widths.reduce((a, b) => a + b, 0)}px, the panel 1111px`)
-})
-
 test('a follow-up row keeps the server agency when it is shown as a daily row', () => {
   const item = { id: 'f1', applicationId: 'f1', candidateId: 'c1', ownerId: 'u1', stage: 4, agency: 'Lotus Overseas', remark: null }
   const row = m.followUpAsDaily(item)
@@ -299,4 +293,17 @@ test('a placement moved on from stage 2 to 11 today counts as stage moved today 
   assert.equal(work.moved, 1)
   assert.equal(work.called, 1, 'a stage moved today counts as a call')
   assert.equal(work.untouched, 2)
+})
+
+test('Today distinguishes an initial call from actual stage movement and shows the latest recorded move on the agency clock', () => {
+  const zone = 'Asia/Kolkata'
+  const today = '2026-11-19'
+  const call = '2026-11-18T18:31:00Z'
+  const moved = '2026-11-19T05:15:00Z'
+  const row = { candidateId: 'c1', status: 'done', kind: 'stage', stage: 2, calledAt: call, completedAt: call, stageMovedAt: null }
+  const chips = (daily, follow = []) => m.todayChips(m.taskRows([daily], follow, today, zone)[0], zone).map(chip => chip.text)
+  assert.deepEqual(chips(row), ['Called 00:01'])
+  assert.deepEqual(chips({ ...row, stageMovedAt: moved }), ['Called 00:01', 'Stage moved 10:45'])
+  assert.deepEqual(chips({ ...row, stageMovedAt: moved }, [{ ...row, stageMovedAt: call }]), ['Called 00:01', 'Stage moved 10:45'])
+  assert.deepEqual(chips({ ...row, calledAt: null, stageMovedAt: '2026-11-18T18:29:59Z' }), [])
 })

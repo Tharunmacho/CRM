@@ -1,12 +1,12 @@
 """Agency names shared by reports and candidate search, without intake provenance."""
-from sqlalchemy import and_, case, exists, func, select
+from sqlalchemy import and_, case, exists, func, or_, select
 
-from app.db.models import Candidate, ReferenceAgency, Source
+from app.db.models import AuditEntry, Candidate, ReferenceAgency, Source
 
 MACHINE_SOURCE_DETAIL_PATTERN = r"^(email_message|whatsapp_message|person_review|lead_sheet):"
 
 
-def agency_display_expression(candidate_model=Candidate):
+def agency_display_expression(candidate_model=Candidate, *, require_assignment=False):
     """The assignment form's agency value as one correlated SQL expression.
 
     A candidate may arrive by email and later acquire a referring agency, so the
@@ -21,6 +21,23 @@ def agency_display_expression(candidate_model=Candidate):
     registered = exists(select(1).select_from(ReferenceAgency).where(
         func.lower(registered_name) == func.lower(detail),
     ).correlate(candidate_model))
+    if require_assignment:
+        # Non-referral intake accepts arbitrary notes in this same column. A name
+        # typed into the application form's Agency field has an assignment audit.
+        assigned = exists(select(1).select_from(AuditEntry).where(
+            AuditEntry.entity_type == "candidate",
+            AuditEntry.entity_id == candidate_model.id,
+            or_(
+                and_(AuditEntry.action == "Application form: agency changed", AuditEntry.meta["to"].astext == detail),
+                and_(AuditEntry.action == "Application form: source changed",
+                     AuditEntry.meta["from"].astext == "referral", AuditEntry.meta["referral_detail"].astext == detail),
+            ),
+        ).correlate(candidate_model))
+        return case(
+            (detail.op("~")(MACHINE_SOURCE_DETAIL_PATTERN), None),
+            (or_(candidate_model.source == Source.referral, registered, assigned), func.nullif(detail, "")),
+            else_=None,
+        )
     import_marker = and_(
         candidate_model.source != Source.referral,
         func.lower(func.regexp_replace(detail, r"\s+", " ", "g")) == "bulk import",

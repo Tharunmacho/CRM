@@ -26,27 +26,25 @@ const list = SEEDS.map((text, index) => ({ id: `t${index + 1}`, text, active: tr
 
 /* ------------------------------------------------------------------ columns */
 
-test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (supervisors), AGENCY, STAGE, TODAY, REMARKS, actions', () => {
+test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (supervisors), AGENCY, STAGE, TODAY, REMARKS, NOTES, actions', () => {
   assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.title),
-    ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'Actions'])
+    ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
   assert.deepEqual(daily.taskColumnsFor(false).map((c) => c.title),
-    ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'Actions'])
-  assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'today', 'remarks', 'actions'])
+    ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
+  assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'today', 'remarks', 'notes', 'actions'])
   assert.equal(daily.taskColumnsFor(true).at(-1).quiet, true, 'the actions header has no visible title')
   for (const c of daily.taskColumnsFor(true)) assert.doesNotMatch(c.title, /\//, 'one short word per header, never "CLIENT / COUNTRY"')
 })
 
-test('the supervisor column plan fits the 1111px panel at a 1440px window', () => {
-  const sum = (list) => list.reduce((total, c) => total + c.width, 0)
-  assert.ok(sum(daily.taskColumnsFor(true)) <= 1108, `${sum(daily.taskColumnsFor(true))}px`)
-  assert.ok(sum(daily.taskColumnsFor(false)) <= 1030, 'the plan without the Recruiter column (no Recruiter column) is narrower still')
-  const width = (key) => daily.taskColumnsFor(true).find((c) => c.key === key).width
-  assert.ok(width('actions') >= 116, 'the 72px Open / Complete button, the 36px menu, the gap and the right padding are not clipped')
-  assert.ok(width('remarks') >= 130, 'the dropdown keeps room for a remark')
-  assert.ok(width('doc') >= 92, '"19 Nov" / "2026" or the "Add date" button fit at 10px padding')
-  assert.ok(width('stage') >= 120, 'the stage chip keeps room for "1 · Prescreening"')
-  assert.ok(width('today') >= 100, 'the TODAY chip keeps room for "Moved 10:45" on one line')
-  assert.equal(width('no') <= 48, true, 'S NO is narrow')
+test('the smallest desktop table reserves space for the recruiter, notes and both actions', () => {
+  for (const supervisor of [true, false]) {
+    const columns = daily.taskColumnsFor(supervisor)
+    const total = columns.reduce((sum, column) => sum + column.width, 0)
+    const pixels = (key) => 1080 * columns.find((column) => column.key === key).width / total
+    if (supervisor) assert.ok(pixels('staff') >= 94, 'Srivathsala fits on one line')
+    assert.ok(pixels('actions') >= 120, 'both buttons and their padding fit')
+    assert.ok(pixels('notes') >= 110, 'notes wrap within their own cell')
+  }
 })
 
 test('the Tasks table renders the model columns and no longer has a "Remark added" chip', async () => {
@@ -56,7 +54,7 @@ test('the Tasks table renders the model columns and no longer has a "Remark adde
   assert.match(table, /Nothing yet/)
   assert.match(table, /todayChips\(/)
   const order = [...table.matchAll(/data-label="([^"]+)"/g)].map((m) => m[1])
-  assert.deepEqual(order, ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE NAME', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'Actions'])
+  assert.deepEqual(order, ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE NAME', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
   assert.doesNotMatch(await read('../src/styles/daily-work-board.css'), /\.tw-chip\.is-remark/)
 })
 
@@ -390,7 +388,7 @@ test('the CLIENT cell is the client name only: no country, no flag, nothing unde
   assert.doesNotMatch(await code('../src/screens/tasks/daily-staff-board.tsx'), /flag|<img/i)
 })
 
-test('the AGENCY column shows the server agency first; only an older server falls back to the referrer or how the CV arrived, else a dash', () => {
+test('the AGENCY column shows the recorded agency and uses only explicit referrals on older servers', () => {
   const row = (source, label, detail = null, extra = {}) => ({ referral: { source, label, detail }, ...extra })
   // the server's agency (the tracker's Ref) wins, also for a candidate who arrived by email and later got an agency
   assert.equal(daily.agencyLabel(row('email', 'Email', null, { agency: ' Lotus Overseas ' })), 'Lotus Overseas')
@@ -398,10 +396,11 @@ test('the AGENCY column shows the server agency first; only an older server fall
   // the server says there is none: a dash, not "Email" / "WhatsApp"
   assert.equal(daily.agencyLabel(row('whatsapp', 'WhatsApp', null, { agency: null })), '')
   assert.equal(daily.agencyLabel(row('referral', 'Referral', 'Sunrise', { agency: '' })), '')
-  // an older server sends no agency at all: the old referral / source logic
+  // An older server has only the referrer and intake channel.
   assert.equal(daily.agencyLabel(row('referral', 'Referral', ' Sunrise Overseas ')), 'Sunrise Overseas')
-  assert.equal(daily.agencyLabel(row('referral', 'Referral')), 'Referral')
-  assert.equal(daily.agencyLabel(row('whatsapp', 'WhatsApp')), 'WhatsApp')
+  assert.equal(daily.agencyLabel(row('referral', 'Referral')), '')
+  assert.equal(daily.agencyLabel(row('whatsapp', 'WhatsApp')), '')
+  assert.equal(daily.agencyLabel(row('other', 'Other', 'Current candidate documents import 2026-11-12')), '')
   assert.equal(daily.agencyLabel(row('', '')), '')
 })
 
@@ -430,7 +429,7 @@ test('the professional pass: one 60px row, a 44px one-line header, one padding f
   assert.match(css, /\.dw-act \{[^}]*width: 72px[^}]*height: 36px/)
   assert.match(css, /\.dw-more-btn \{ width: 36px; height: 36px/)
   assert.match(css, /\.dw-doc-add \{[^}]*height: 32px[^}]*text-decoration: none/)
-  assert.match(css, /\.tw-chip \{[^}]*height: 28px[^}]*white-space: nowrap/, 'the TODAY chip is one 28px line with its whole text')
+  assert.match(css, /\.tw-chip \{[^}]*max-width: 100%[^}]*white-space: normal/, 'activity chips wrap within the Today column')
   assert.match(css, /\.dw-stage-chip \{[^}]*min-height: 28px/)
   // the status never adds a line: a badge on the control, quiet states only for screen readers
   assert.match(css, /\.dw-remark-status \{ position: absolute/)

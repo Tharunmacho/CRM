@@ -222,33 +222,50 @@ def summarise(counts: list[tuple[int, int]]) -> dict:
 
 
 def fetch_rows(db, owner_ids, *, now: datetime | None = None, tz=None) -> list:
-    """The list's rows (candidate, waiting since, done at, agency) for these recruiters (ids, or a select of ids), in list order.
-    `agency` is the tracker's agency text (`agency_display_expression`), None when the candidate has none.
+    """The list's rows (candidate, waiting since, done at, agency, latest stage completion today) for these recruiters, in list order.
+    `agency` is the recorded agency, or None when no assignment is known.
 
     One statement. `load_rows` turns them into the screen's dicts. See the module docstring for the order."""
     now = now or datetime.now(timezone.utc)
     start, end = day_bounds(agency_today(now, tz), tz)
     inner = (select(Candidate.id.label("cid"), _waiting_since().label("waiting_since"), _done_at(start, end).label("done_at"))
              .where(Candidate.owner_id.in_(owner_ids), _on_list(start, end)).subquery("w"))
+    # Look across the candidate's placements, including a stage finished on a placement that has since closed.
+    moved = (select(func.max(ApplicationStage.completed_at)).join(Application, Application.id == ApplicationStage.application_id)
+             .where(Application.candidate_id == Candidate.id, ApplicationStage.completed_at >= start, ApplicationStage.completed_at < end,
+                    ApplicationStage.reopened_reason.is_(None), ApplicationStage.outcome.is_distinct_from(UNFIT_REAPPLYING))
+             .correlate(Candidate).scalar_subquery())
     return db.execute(
-        select(Candidate, inner.c.waiting_since, inner.c.done_at, agency_display_expression().label("agency"))
+        select(Candidate, inner.c.waiting_since, inner.c.done_at, agency_display_expression(require_assignment=True).label("agency"), moved)
         .join(inner, inner.c.cid == Candidate.id)
         .order_by(inner.c.done_at.is_not(None), inner.c.done_at.desc().nulls_last(), inner.c.waiting_since.is_(None),
                   inner.c.waiting_since.asc().nulls_last(), Candidate.created_at.desc(), Candidate.id)
         .limit(MAX_ROWS)).all()
 
 
-def _remarks(db, task_ids: list[str]) -> dict[str, dict]:
-    if not task_ids:
-        return {}
-    result: dict[str, dict] = {}
-    # The author's name rides along in the same statement (no separate read of the whole user table).
-    for body, name, at, task_id in db.execute(select(Remark.body, User.name, Remark.created_at, Remark.task_id)
-            .outerjoin(User, User.id == Remark.author_id)
-            .where(Remark.task_id.in_(task_ids)).order_by(Remark.created_at.desc(), Remark.id)):
-        entry = result.setdefault(task_id, {"body": body, "at": at, "by": name or "Unknown", "count": 0})
-        entry["count"] += 1
-    return result
+def _task_updates(db, candidate_ids, summary_key, summary_ids, *, now, tz=None):
+    """Latest remark/count for the editable cell, plus every note from this agency day, including finished tasks."""
+    start, end = day_bounds(agency_today(now, tz), tz)
+    recent = and_(Remark.created_at >= start, Remark.created_at < end)
+    query = (select(summary_key, Task.candidate_id, Task.application_id, Remark.id, Remark.body, User.name, Remark.created_at)
+             .select_from(Remark).join(Task, Task.id == Remark.task_id).outerjoin(User, User.id == Remark.author_id)
+             .where(Task.candidate_id.in_(candidate_ids), or_(summary_key.in_(summary_ids), recent))
+             .order_by(Remark.created_at.desc(), Remark.id))
+    latest = {}
+    daily = defaultdict(list)
+    for key, candidate_id, app_id, note_id, body, name, at in db.execute(query):
+        author = name or "Unknown"
+        if key in summary_ids:
+            summary = latest.setdefault(key, {"body": body, "at": at, "by": author, "count": 0})
+            summary["count"] += 1
+        if start <= at < end:
+            daily[candidate_id].append((app_id, {"id": note_id, "body": body, "at": at, "by": author}))
+    return latest, daily
+
+
+def _row_notes(daily, candidate_id, app_id):
+    """The candidate's initial-call notes and the notes on the placement shown in this row."""
+    return [note for placement, note in daily.get(candidate_id, ()) if placement is None or placement == app_id]
 
 
 def _first_text(values) -> str | None:
@@ -471,9 +488,9 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
         placement = next((p for p in mine if p[0].id in stage_tasks), mine[0] if mine else None)
         chosen[cand.id] = placement
         remark_tasks[cand.id] = (stage_tasks.get(placement[0].id) if placement else None) or call_tasks.get(cand.id)
-    remarks = _remarks(db, sorted({t for t in remark_tasks.values() if t}))
+    remarks, daily_notes = _task_updates(db, ids, Task.id, {t for t in remark_tasks.values() if t}, now=now, tz=tz)
     out = []
-    for cand, waiting, finished, agency in rows:
+    for cand, waiting, finished, agency, moved in rows:
         placement = chosen[cand.id]
         app, order, company, client, designation = placement if placement else (None, None, None, None, None)
         stage_no = app.current_stage if app else None
@@ -486,12 +503,13 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
             "stage": stage_no, "stageTitle": stage_by_no(stage_no).title if stage_no and 1 <= stage_no <= TOTAL_STAGES else None,
             "waiting": waiting is not None,
             "status": "done" if finished is not None else "open", "completedAt": finished,
+            "stageMovedAt": moved, "calledAt": cand.call_recorded_at if cand.call_called and cand.call_interested in ("yes", "no") else None,
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "agency": agency or None,
             "orderRef": order.ref if order else None, **payment_fields(app, facts),
             "referral": {"source": cand.source.value, "label": SOURCE_LABELS.get(cand.source.value, "Other"),
                          "detail": cand.source_detail if cand.source == Source.referral else None},
-            "remark": {"body": remark["body"], "at": remark["at"], "by": remark["by"], "count": remark["count"]} if remark else None,
+            "remark": remark, "todayNotes": _row_notes(daily_notes, cand.id, app.id if app else None),
         })
     return out
 
@@ -522,37 +540,32 @@ def fetch_follow_up(db, owner_ids) -> list:
     last = func.greatest(stage_at, remark_at, Application.draft_saved_at, Application.created_at).label("last_update")
     # When a stage was last finished (never a reopened one): the Tasks screen shows "Stage moved" for a placement moved today.
     moved_at = (select(func.max(ApplicationStage.completed_at)).where(ApplicationStage.application_id == Application.id,
-                                                                      ApplicationStage.reopened_reason.is_(None))
+                                                                      ApplicationStage.reopened_reason.is_(None),
+                                                                      ApplicationStage.outcome.is_distinct_from(UNFIT_REAPPLYING))
                 .correlate(Application).scalar_subquery().label("stage_moved_at"))
     return db.execute(
-        select(Application, Candidate, Order, Company, Client, Designation, last, moved_at, agency_display_expression().label("agency"))
+        select(Application, Candidate, Order, Company, Client, Designation, last, moved_at, agency_display_expression(require_assignment=True).label("agency"))
         .join(Candidate, Candidate.id == Application.candidate_id).join(Order, Order.id == Application.order_id)
         .join(Company, Company.id == Order.company_id).join(Client, Client.id == Company.client_id)
         .join(Designation, Designation.id == Order.designation_id)
         .where(*_follow_up_filter(owner_ids)).order_by(last.asc(), Application.id).limit(MAX_ROWS)).all()
 
 
-def load_follow_up(db, owner_ids, *, fetched: list | None = None, parallel: bool = False) -> list[dict]:
+def load_follow_up(db, owner_ids, *, now: datetime | None = None, fetched: list | None = None, parallel: bool = False) -> list[dict]:
     """The Follow-up screen's rows, oldest last update first. `fetched` is the result of `fetch_follow_up` when already read.
     `parallel=True` runs the three lookups side by side (see `load_rows`)."""
     rows = fetch_follow_up(db, owner_ids) if fetched is None else fetched
     if not rows:
         return []
-    app_ids = [app.id for app, *_ in rows]
-    # The newest remark written on any of the placement's tasks, the open stage task a new remark goes on, and the advance / review.
-    remark_query = (select(Task.application_id, Remark.body, User.name, Remark.created_at).select_from(Remark)
-                    .join(Task, Task.id == Remark.task_id).outerjoin(User, User.id == Remark.author_id)
-                    .where(Task.application_id.in_(app_ids)).order_by(Remark.created_at.desc(), Remark.id))
+    app_ids = {app.id for app, *_ in rows}
+    candidate_ids = {cand.id for _, cand, *_ in rows}
+    now = now or datetime.now(timezone.utc)
     task_query = (select(Task.application_id, Task.id).where(
         Task.application_id.in_(app_ids), Task.kind.in_([TaskKind.stage, TaskKind.remedical]),
         Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.created_at, Task.id))
-    lookups = (lambda s: s.execute(remark_query).all(), lambda s: s.execute(task_query).all(),
+    lookups = (lambda s: _task_updates(s, candidate_ids, Task.application_id, app_ids, now=now), lambda s: s.execute(task_query).all(),
                lambda s: s.execute(stage_facts_query(ApplicationStage.application_id.in_(app_ids))).all())
-    remark_rows, task_rows, fact_rows = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
-    latest: dict[str, dict] = {}
-    for application_id, body, name, at in remark_rows:
-        entry = latest.setdefault(application_id, {"body": body, "at": at, "by": name or "Unknown", "count": 0})
-        entry["count"] += 1
+    (latest, daily_notes), task_rows, fact_rows = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
     open_task: dict[str, str] = {}
     for application_id, task_id in task_rows:
         open_task.setdefault(application_id, task_id)
@@ -563,9 +576,10 @@ def load_follow_up(db, owner_ids, *, fetched: list | None = None, parallel: bool
             "id": app.id, "applicationId": app.id, "taskId": open_task.get(app.id), "candidateId": cand.id, "ownerId": cand.owner_id,
             "commencementDate": app.commencement_date.isoformat() if app.commencement_date else None,
             "stage": app.current_stage, "lastUpdateAt": last_update, "stageMovedAt": moved_at,
+            "calledAt": cand.call_recorded_at if cand.call_called and cand.call_interested in ("yes", "no") else None,
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "agency": agency or None, "orderRef": order.ref,
-            **payment_fields(app, facts), "remark": latest.get(app.id),
+            **payment_fields(app, facts), "remark": latest.get(app.id), "todayNotes": _row_notes(daily_notes, cand.id, app.id),
         })
     return out
 

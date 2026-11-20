@@ -236,6 +236,7 @@ def test_finishing_a_stage_through_the_real_workflow_moves_the_candidate_to_done
     assert ids(body) == ["c0", "c2", "u100", "c1"]  # the finished one sits at the bottom
     assert [i["status"] for i in body["items"]] == ["open", "open", "open", "done"]
     assert body["items"][-1]["completedAt"] is not None and body["items"][-1]["stage"] == 2  # now waiting on stage 2
+    assert body["items"][-1]["stageMovedAt"] == body["items"][-1]["completedAt"]
     assert body["summary"] == {"total": 4, "toWork": 3, "doneToday": 1}
     with desk.sessions() as db:
         assert db.scalar(select(func.count()).select_from(DailyWorkItem)) == 0  # no item rows are written any more
@@ -303,6 +304,7 @@ def test_a_candidate_matched_to_an_order_after_the_call_opens_the_stage_and_keep
     app_id = desk.client.post("/api/applications", json={"candidate_id": "u100", "order_id": "order"}).json()["id"]
     row = listing(desk, "asha")["items"][0]
     assert (row["applicationId"], row["stage"], row["client"], row["kind"], row["waiting"]) == (app_id, 1, "Gulf Builders", "stage", True)
+    assert row["stageMovedAt"] is None
 
 
 # ------------------------------------------------------------------ the supervisors' view

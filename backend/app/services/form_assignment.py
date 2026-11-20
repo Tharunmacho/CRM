@@ -203,7 +203,10 @@ def apply(db: Session, user: User, candidate_id: str, fields: dict) -> dict:
         if value != candidate.source:
             from app.services.form_options import ensure_allowed
             ensure_allowed(db, "candidate_source", value.value, current=candidate.source.value)
-            _audit(db, user, "source changed", candidate, {"from": candidate.source.value, "to": value.value})
+            meta = {"from": candidate.source.value, "to": value.value}
+            if candidate.source == Source.referral and candidate.source_detail:
+                meta["referral_detail"] = candidate.source_detail.strip()
+            _audit(db, user, "source changed", candidate, meta)
             candidate.source = value
             changed.append("source")
 

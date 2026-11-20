@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, AuditEntry, Candidate, Client, ClosureReason, Company, Designation, Order,
-    RemarkTemplate, Remark, Role, Source, Task, TaskKind, User,
+    ReferenceAgency, RemarkTemplate, Remark, Role, Source, Task, TaskKind, User,
 )
 from app.services import daily_work, tasks_export
 from test_database_naming import _migrate, schema_database
@@ -34,7 +34,7 @@ TUESDAY = datetime(2026, 11, 3, 3, 0, tzinfo=timezone.utc)  # 08:30 IST
 SEVEN = ["Visa in progress", "Visa stamping in progress", "Awaiting Gamca Medical", "Offer Accepted", "Offer Declined by Candidate",
          "PCC Pending", "Trial feedback pending"]
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-HEADER = ["S.No", "DOC", "Recruiter", "Job", "Client", "Country", "Candidate", "Care ID", "Agency", "Advance", "Stage", "Today", "Remark"]
+HEADER = ["S.No", "DOC", "Recruiter", "Job", "Client", "Country", "Candidate", "Care ID", "Agency", "Advance", "Stage", "Today", "Remark", "Notes"]
 
 
 def frozen(clock):
@@ -328,16 +328,25 @@ def test_only_admin_level_users_may_change_the_templates(desk):
 
 # ------------------------------------------------------------------ the agency of every row
 
-def test_every_row_carries_the_trackers_agency_text_from_the_rows_own_statement(desk):
+def test_every_row_carries_only_recorded_agency_names(desk):
     with desk.sessions() as db:
         db.add_all([
             Candidate(id="e1", ref="CND-e1", name="Email Agency", phone="9100000101", source=Source.email, source_detail="  Lotus Overseas ", owner_id="asha",
                       care_id="CI-101", created_at=TUESDAY - timedelta(days=20)),
             Candidate(id="e2", ref="CND-e2", name="Bulk Imported", phone="9100000102", source=Source.email, source_detail="Bulk import", owner_id="asha",
                       care_id="CI-102", created_at=TUESDAY - timedelta(days=20)),
-            Candidate(id="e3", ref="CND-e3", name="Machine Source", phone="9100000103", source=Source.walk_in, source_detail=None, owner_id="asha",
+            Candidate(id="e3", ref="CND-e3", name="Machine Source", phone="9100000103", source=Source.other, source_detail="Current candidate documents import 2026-11-12", owner_id="asha",
                       care_id="CI-103", created_at=TUESDAY - timedelta(days=20))])
         db.execute(text("UPDATE crm_candidates SET source = 'email', source_detail = 'Gulf Link' WHERE id = 'c2'"))   # a placement in Follow-up
+        db.add(ReferenceAgency(id="agency1", name="Contact", agency_name="Lotus Overseas"))
+        db.add(AuditEntry(entity_type="candidate", entity_id="c2", action="Application form: agency changed", meta={"to": "Gulf Link"}))
+        db.execute(text("UPDATE crm_candidates SET source_detail = 'Walked in at Kochi office' WHERE id = 'c5'"))
+        db.add_all([
+            AuditEntry(entity_type="candidate", entity_id="c5", action="Application form: source changed",
+                       meta={"from": "referral", "to": "walk_in"}),
+            AuditEntry(entity_type="candidate", entity_id="c5", action="Application form: source changed",
+                       meta={"from": "referral", "to": "walk_in", "referral_detail": "Previous Agency"}),
+        ])
         db.commit()
     daily = {i["candidateId"]: i for i in get(desk, "asha", "/api/daily-work").json()["items"]}
     assert daily["c1"]["agency"] == "Sigma Agency"                  # a referral
@@ -348,6 +357,10 @@ def test_every_row_carries_the_trackers_agency_text_from_the_rows_own_statement(
     rows = sheet(get(desk, "asha", "/api/daily-work/export?format=xlsx"))[1]
     assert {r[6]: r[8] for r in rows[1:]} == {"Bina Example": "Gulf Link", "Anil Sample": "Sigma Agency", "Email Agency": "Lotus Overseas",
                                             "Bulk Imported": "", "Machine Source": "", "Esha Made-up": "", "Chandra Invented": ""}
+    changed = desk.client.put("/api/candidates/c1/application-form/assignment", json={"source": "email"})
+    assert changed.status_code == 200, changed.text
+    daily = {i["candidateId"]: i for i in get(desk, "asha", "/api/daily-work").json()["items"]}
+    assert daily["c1"]["agency"] == "Sigma Agency"
 
 
 # ------------------------------------------------------------------ the Excel
@@ -366,7 +379,7 @@ def sheet(response):
             text_ = "".join(t.text or "" for t in cell.findall(".//m:t", ns))
             value = cell.find("m:v", ns)
             cells[letters] = text_ if cell.get("t") == "inlineStr" else (value.text if value is not None else "")
-        rows.append([cells.get(chr(65 + i), "") for i in range(13)])
+        rows.append([cells.get(chr(65 + i), "") for i in range(len(HEADER))])
     return workbook, rows, xml
 
 
@@ -387,14 +400,35 @@ def test_the_excel_has_the_screens_columns_and_rows_in_the_screens_order(desk):
     assert [r[0] for r in rows[1:]] == ["1", "2", "3", "4"]                    # S.No
     bina, anil, esha, chandra = rows[1:]
     assert bina[1:] == ["20-Dec-2026", "Asha", "Welder", "Gulf Builders", "Qatar", "Bina Example", "CI-002", "", "10k collected/25k",
-                        tasks_export.stage_text(5), "", "=cmd|' /C calc'!A0"]
+                        tasks_export.stage_text(5), "", "=cmd|' /C calc'!A0", ""]
     assert anil[1:] == ["05-Dec-2026", "Asha", "Welder", "Gulf Builders", "Qatar", "Anil Sample", "CI-001", "Sigma Agency", "",
-                        tasks_export.stage_text(1), "", ""]
+                        tasks_export.stage_text(1), "", "", ""]
     assert esha[11] == "Stage moved 09:30" and esha[1] == "" and esha[10].startswith("Stage 4 - ")
     assert chandra[10] == "Initial call" and chandra[11] == "Called 08:30" and chandra[4] == "" and chandra[1] == ""
     # no "Remark added" wording anywhere; the remark text is stored as text, never as a formula
     assert "Remark added" not in xml and "<f>" not in xml
     assert 'r="M2" s="7" t="inlineStr"' in xml
+
+
+@pytest.mark.parametrize(("candidate", "endpoint"), [("c1", "daily-work"), ("c2", "follow-up")])
+def test_notes_keep_every_update_today_across_stage_tasks(desk, candidate, endpoint):
+    app_id = f"a-{candidate}"
+    start, end = daily_work.day_bounds(TUESDAY.date(), TZ)
+    with desk.sessions() as db:
+        db.add(Task(id="earlier", kind=TaskKind.stage, title="Finished stage", candidate_id=candidate,
+                    application_id=app_id, stage=1, owner_id="asha", completed_at=TUESDAY))
+        db.flush()
+        for i, at in enumerate([start - timedelta(seconds=1), start, TUESDAY, TUESDAY, end]):
+            db.add(Remark(id=f"note-{i}", task_id="earlier", body=f"Update {i}", author_id="asha", created_at=at))
+        db.commit()
+    items = get(desk, "asha", f"/api/{endpoint}").json()["items"]
+    row = next(item for item in items if item["candidateId"] == candidate)
+    assert [n["body"] for n in row["todayNotes"]] == ["Update 2", "Update 3", "Update 1"]
+    assert all(n["by"] == "Asha" and n["id"] and n["at"] for n in row["todayNotes"])
+    assert all(not item["todayNotes"] for item in items if item["candidateId"] != candidate)
+    exported = sheet(get(desk, "asha", "/api/daily-work/export"))[1]
+    note_cell = next(r[-1] for r in exported[1:] if r[7] == row["candidateCareId"])
+    assert note_cell.splitlines() == ["08:30 Asha - Update 2", "08:30 Asha - Update 3", "00:00 Asha - Update 1"]
 
 
 def test_the_excel_follows_the_scoping_of_the_list(desk):

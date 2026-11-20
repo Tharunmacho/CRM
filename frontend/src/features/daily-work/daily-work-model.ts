@@ -6,6 +6,8 @@
 
 export type GoogleReview = 'obtained' | 'pending' | null
 
+export interface DailyNote { id: string; body: string; at: string; by: string }
+
 export interface DailyItem {
   /** The candidate id: one row per candidate. */
   id: string
@@ -23,6 +25,8 @@ export interface DailyItem {
   /** open: still to work; done: a stage was finished or the initial call answered today. */
   status: 'open' | 'done'
   completedAt: string | null
+  calledAt?: string | null
+  stageMovedAt?: string | null
   client: string | null
   clientContact: string | null
   /** The order's country, else (not matched yet) the candidate's preferred country from the application form. */
@@ -48,8 +52,9 @@ export interface DailyItem {
   /** Stage 10 Google review: obtained, pending (stage 10 or later, not obtained yet) or null (not applicable yet). */
   googleReview: GoogleReview
   referral: { source: string; label: string; detail: string | null }
-  /** The candidate's agency as the client tracker words it (the server's agency_display_expression); null when none. An older server sends nothing. */
+  /** The recorded agency, or null. Older servers may omit this field. */
   agency?: string | null
+  todayNotes?: DailyNote[]
   remark: { body: string; at: string; by: string; count: number } | null
   /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form (an older server sends nothing). */
   commencementDate?: string | null
@@ -93,6 +98,7 @@ export interface FollowUpItem {
   stage: number
   /** The latest of the last stage completed, the last remark, the last draft and the placement's creation. */
   lastUpdateAt: string
+  calledAt?: string | null
   /** When a stage of this placement was last finished (a reopened one never counts); null when none was. */
   stageMovedAt?: string | null
   client: string | null
@@ -107,7 +113,7 @@ export interface FollowUpItem {
   candidate: string
   candidateRef: string
   candidateCareId: string | null
-  /** The candidate's agency as the client tracker words it; null when none. An older server sends nothing. */
+  /** The recorded agency, or null. Older servers may omit this field. */
   agency?: string | null
   orderRef: string | null
   /** Advance the candidate paid (stage 9) on this placement; null when none is recorded. Never an invoice figure. */
@@ -116,6 +122,7 @@ export interface FollowUpItem {
   advanceCurrency: string | null
   /** Stage 10 Google review: obtained, pending (stage 10 or later, not obtained yet) or null (not applicable yet). */
   googleReview: GoogleReview
+  todayNotes?: DailyNote[]
   remark: { body: string; at: string; by: string; count: number } | null
   /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form. */
   commencementDate?: string | null
@@ -323,13 +330,11 @@ export function positionCell(item: Pick<DailyItem, 'position' | 'positionSource'
   return { text: item.position, source: 'order', hint: "The order's job" }
 }
 
-/**
- * The AGENCY column: the row's `agency`, the server's agency text (the client tracker's Ref: the referrer or the agency a candidate who
- * arrived by email and later got one is entered under; null/'' when there is none, so the screen shows a dash). Only an older server that
- * sends no `agency` at all falls back to what the row carries: the referrer's name, else how the CV arrived.
- */
-export const agencyLabel = (item: Pick<DailyItem, 'referral'> & { agency?: string | null }): string =>
-  (item.agency === undefined ? referralLabel(item.referral) : item.agency ?? '').trim()
+/** Older responses can identify an agency only through the explicitly recorded referrer. */
+export function agencyLabel(item: Pick<DailyItem, 'referral'> & { agency?: string | null }): string {
+  if (item.agency !== undefined) return item.agency?.trim() ?? ''
+  return item.referral.source === 'referral' ? item.referral.detail?.trim() ?? '' : ''
+}
 
 /** A client exists only through an order, so an unmatched candidate has none; say that instead of a bare dash. */
 export function clientCell(item: Pick<DailyItem, 'client' | 'kind'>): { text: string; hint: string } {
@@ -351,33 +356,26 @@ export function countryShort(name: string): string {
 /* ---------------------------------------------------------------- one list per recruiter: what was done today */
 
 /** What happened to a candidate today: the initial call was answered, a stage was finished, a remark was written. */
-export interface TodayWork { called: boolean; moved: boolean; remarked: boolean; /** When the stage was finished today (a Follow-up placement); the daily rows carry `completedAt`. */ movedAt?: string }
+export interface TodayWork { called: boolean; moved: boolean; remarked: boolean; calledAt?: string; movedAt?: string }
 
 export interface TaskRow extends DailyItem { today: TodayWork }
 
 export interface TaskColumn { key: string; title: string; width: number; left?: boolean; supervisor?: boolean; quiet?: boolean }
 
-/**
- * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), CLIENT (the name only), JOB,
- * CANDIDATE, Recruiter (supervisors only), AGENCY, STAGE, TODAY, REMARKS and the untitled actions cell. Every header is one short word
- * so it never wraps. Widths are the column plan in px: they add up to 1108px for a supervisor (1008px without the Recruiter column);
- * the table never scrolls sideways: its columns are those widths as percentages of the panel (columnLayout), so it fills the panel at any
- * width from 1080px (below that the Tasks list is a stack of cards). Every column is left-aligned (header and cells
- * share one left edge) except S NO (centred) and the actions (right-aligned: the 84px Open / Complete / View button, the 36px row menu
- * and the right padding).
- */
+/** Relative widths for the fixed-layout candidate table. Narrow panels use labelled cards. */
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
-  { key: 'no', title: 'S NO', width: 40 },
+  { key: 'no', title: 'S NO', width: 48 },
   { key: 'doc', title: 'DOC', width: 94, left: true },
   { key: 'client', title: 'CLIENT', width: 102, left: true },
   { key: 'position', title: 'JOB', width: 100, left: true },
   { key: 'candidate', title: 'CANDIDATE', width: 140, left: true },
-  { key: 'staff', title: 'Recruiter', width: 82, supervisor: true, left: true },
+  { key: 'staff', title: 'Recruiter', width: 118, supervisor: true, left: true },
   { key: 'agency', title: 'AGENCY', width: 80, left: true },
   { key: 'stage', title: 'STAGE', width: 120, left: true },
   { key: 'today', title: 'TODAY', width: 100, left: true },
   { key: 'remarks', title: 'REMARKS', width: 134, left: true },
-  { key: 'actions', title: 'Actions', width: 116, quiet: true },
+  { key: 'notes', title: 'NOTES', width: 140, left: true },
+  { key: 'actions', title: 'Actions', width: 150, quiet: true },
 ]
 
 /** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own). */
@@ -385,15 +383,12 @@ export const taskColumnsFor = (supervisor: boolean): TaskColumn[] => TASK_LIST_C
 
 export interface TodayChip { key: 'called' | 'moved'; text: string }
 
-/**
- * The chips of the TODAY column: "Called 10:30" and "Stage moved 10:45". A remark written today is NOT a chip (the remark itself is in the
- * REMARKS column and still counts for the cards, see `recruiterWork`). An empty list means nothing to show as a chip: the screen then
- * says "Nothing yet", or a quiet dash when only a remark was written today (`nothingYet`).
- */
+/** Activity times for calls and stage movement. The table adds the note time on a notes-only day. */
 export function todayChips(row: { today: TodayWork; completedAt: string | null }, timeZone?: string): TodayChip[] {
   const chips: TodayChip[] = []
-  if (row.today.called) chips.push({ key: 'called', text: `Called${row.completedAt ? ` ${clockTime(row.completedAt, timeZone)}` : ''}` })
-  const movedAt = row.completedAt || row.today.movedAt
+  const calledAt = row.today.calledAt || row.completedAt
+  if (row.today.called) chips.push({ key: 'called', text: `Called${calledAt ? ` ${clockTime(calledAt, timeZone)}` : ''}` })
+  const movedAt = row.today.movedAt || row.completedAt
   if (row.today.moved) chips.push({ key: 'moved', text: `Stage moved${movedAt ? ` ${clockTime(movedAt, timeZone)}` : ''}` })
   return chips
 }
@@ -428,7 +423,9 @@ export function exportFileName(day: string, person?: string): string {
 export function dayOf(iso: string | null | undefined, timeZone?: string): string {
   const date = new Date(iso ?? '')
   if (!Number.isFinite(date.getTime())) return ''
-  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
+  const parts = new Intl.DateTimeFormat('en', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date)
+  const part = (name: Intl.DateTimeFormatPartTypes) => parts.find((field) => field.type === name)?.value
+  return `${part('year')}-${part('month')}-${part('day')}`
 }
 
 /** A follow-up row (one per placement) in the shape of a daily row, so both lists share every cell. */
@@ -447,19 +444,28 @@ export function followUpAsDaily(item: FollowUpItem): DailyItem {
 export function taskRows(daily: DailyItem[], followUp: FollowUpItem[], today: string, timeZone?: string): TaskRow[] {
   const merged = new Map<string, DailyItem>()
   const movedToday = new Map<string, string>()
-  for (const item of daily) merged.set(item.candidateId, item)
+  const recordMove = (id: string, at?: string | null) => {
+    if (!at || dayOf(at, timeZone) !== today) return
+    const previous = movedToday.get(id)
+    if (!previous || Date.parse(at) > Date.parse(previous)) movedToday.set(id, at)
+  }
+  for (const item of daily) {
+    merged.set(item.candidateId, item)
+    recordMove(item.candidateId, item.stageMovedAt)
+  }
   for (const item of followUp) {
     if (!merged.has(item.candidateId)) merged.set(item.candidateId, followUpAsDaily(item))
     // A placement in Follow-up whose stage was finished today (stage 2 to 12) is "stage moved" today, like a finished prescreening.
-    if (item.stageMovedAt && dayOf(item.stageMovedAt, timeZone) === today) movedToday.set(item.candidateId, item.stageMovedAt)
+    recordMove(item.candidateId, item.stageMovedAt)
   }
   const rows = [...merged.values()].map((item): TaskRow => ({
     ...item,
     today: {
-      called: item.status === 'done' && item.kind === 'call',
-      moved: (item.status === 'done' && item.kind === 'stage') || movedToday.has(item.candidateId),
+      called: item.calledAt === undefined ? item.status === 'done' && item.kind === 'call' : !!item.calledAt && dayOf(item.calledAt, timeZone) === today,
+      calledAt: item.calledAt || undefined,
+      moved: movedToday.has(item.candidateId) || (item.stageMovedAt === undefined && item.status === 'done' && item.kind === 'stage'),
       movedAt: movedToday.get(item.candidateId),
-      remarked: !!item.remark && dayOf(item.remark.at, timeZone) === today,
+      remarked: !!item.todayNotes?.length || (!!item.remark && dayOf(item.remark.at, timeZone) === today),
     },
   }))
   const touched = (row: TaskRow) => (row.today.called || row.today.moved || row.today.remarked ? 1 : 0)

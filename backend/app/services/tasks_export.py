@@ -1,17 +1,17 @@
 """The Tasks page as an Excel sheet: the table the recruiter sees, with every detail, one row per candidate.
 
-    S.No | DOC | Recruiter | Job | Client | Country | Candidate | Care ID | Agency | Advance | Stage | Today | Remark
+    S.No | DOC | Recruiter | Job | Client | Country | Candidate | Care ID | Agency | Advance | Stage | Today | Remark | Notes
 
 The rows are the screen's own: the daily-work rows and the follow-up rows of `/api/daily-work` and `/api/follow-up` (same scoping), merged
 and ordered exactly like `taskRows` in frontend/src/features/daily-work/daily-work-model.ts (candidates nobody touched today first, then the
 ones with a stage waiting, then the furthest along; a candidate in both lists appears once, from the daily list).
 
 * DOC: the placement's date of commencement as DD-MMM-YYYY text (blank when none).
-* Agency: the row's `agency` (the client tracker's Ref column, `agency_display_expression`, read in the rows' own statement).
+* Agency: the recorded agency returned with the Tasks row.
 * Advance: the client tracker's Advance cell (`advance_text.advance_cell` over the stage-9 record); blank when none.
 * Stage: "Stage 10 - Visa arrival + Google review", or "Initial call" before a stage starts.
-* Today: "Called 10:45" / "Stage moved 10:45" (agency clock) when that happened today, else blank. Writing a remark is not listed here.
-* Remark: the newest remark on the row.
+* Today shows times for calls and stage movement, or the latest note time on a notes-only day.
+* Remark: the newest remark on the row. Notes lists all daily updates for today, newest first.
 Text is written as inline strings, which Excel never evaluates, so a value such as `=cmd|...` stays text.
 """
 from __future__ import annotations
@@ -25,9 +25,9 @@ from app.domain.stages import TOTAL_STAGES, stage_by_no
 from app.services import agency_settings, daily_work, lead_xlsx
 from app.services.advance_text import advance_cell
 
-COLUMNS = ("S.No", "DOC", "Recruiter", "Job", "Client", "Country", "Candidate", "Care ID", "Agency", "Advance", "Stage", "Today", "Remark")
+COLUMNS = ("S.No", "DOC", "Recruiter", "Job", "Client", "Country", "Candidate", "Care ID", "Agency", "Advance", "Stage", "Today", "Remark", "Notes")
 SHEET_NAME = "Tasks"
-WIDTHS = [7, 14, 18, 24, 24, 16, 30, 12, 18, 22, 36, 20, 50]
+WIDTHS = [7, 14, 18, 24, 24, 16, 30, 12, 18, 22, 36, 20, 50, 60]
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
@@ -56,14 +56,17 @@ def merge_rows(daily: list[dict], follow: list[dict], today: str) -> list[dict]:
     for item in follow:
         if item["candidateId"] not in merged:
             merged[item["candidateId"]] = {**item, "kind": "stage", "waiting": False, "status": "open", "completedAt": None}
-        if item.get("stageMovedAt") and _day(item["stageMovedAt"]) == today:
-            moved_today[item["candidateId"]] = item["stageMovedAt"]
+    for item in (*daily, *follow):
+        at = item.get("stageMovedAt")
+        if at and _day(at) == today:
+            cid = item["candidateId"]
+            moved_today[cid] = max(at, moved_today.get(cid, at))
     rows = []
     for item in merged.values():
-        called = item["status"] == "done" and item["kind"] == "call"
-        moved = (item["status"] == "done" and item["kind"] == "stage") or item["candidateId"] in moved_today
-        remarked = bool(item.get("remark")) and _day(item["remark"]["at"]) == today
-        rows.append({**item, "called": called, "moved": moved, "moved_at": moved_today.get(item["candidateId"]),
+        called = _day(item["calledAt"]) == today if "calledAt" in item else item["status"] == "done" and item["kind"] == "call"
+        moved = item["candidateId"] in moved_today or ("stageMovedAt" not in item and item["status"] == "done" and item["kind"] == "stage")
+        remarked = bool(item.get("todayNotes")) or (bool(item.get("remark")) and _day(item["remark"]["at"]) == today)
+        rows.append({**item, "called": called, "moved": moved, "remarked": remarked, "moved_at": moved_today.get(item["candidateId"]),
                      "touched": 1 if called or moved or remarked else 0})
     # list.sort is stable, like the screen's: the merge order breaks ties.
     rows.sort(key=lambda r: (r["touched"], -int(bool(r["waiting"])), -(r["stage"] or 0)))
@@ -73,9 +76,12 @@ def merge_rows(daily: list[dict], follow: list[dict], today: str) -> list[dict]:
 def today_text(row: dict) -> str:
     parts = []
     if row["called"]:
-        parts.append(" ".join(p for p in ("Called", _clock(row.get("completedAt"))) if p))
+        parts.append(" ".join(p for p in ("Called", _clock(row.get("calledAt") or row.get("completedAt"))) if p))
     if row["moved"]:
-        parts.append(" ".join(p for p in ("Stage moved", _clock(row.get("completedAt") or row.get("moved_at"))) if p))
+        parts.append(" ".join(p for p in ("Stage moved", _clock(row.get("moved_at") or row.get("completedAt"))) if p))
+    if not parts and row.get("remarked"):
+        note = next(iter(row.get("todayNotes") or []), row.get("remark") or {})
+        parts.append(f"Note {_clock(note.get('at'))}".strip())
     return ", ".join(parts)
 
 
@@ -108,11 +114,12 @@ def table(db, daily: list[dict], follow: list[dict], today: str) -> list[list]:
     out = [list(COLUMNS)]
     for number, row in enumerate(rows, 1):
         remark = (row.get("remark") or {}).get("body") or ""
+        notes = "\n".join(f"{_clock(note['at'])} {note['by']} - {note['body']}" for note in row.get("todayNotes", []))
         out.append([cell(v) for v in (
             number, doc_text(row.get("commencementDate")), owners.get(row.get("ownerId")) or "", row.get("position") or "",
             row.get("client") or "", row.get("country") or "", row.get("candidate") or "", row.get("candidateCareId") or "",
             row.get("agency") or "", advance_cell(facts.get(row.get("applicationId")), currency) or "",
-            stage_text(row.get("stage")), today_text(row), remark.strip())])
+            stage_text(row.get("stage")), today_text(row), remark.strip(), notes)])
     return out
 
 
