@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import ts from 'typescript'
 
 const source = await readFile(new URL('../src/screens/tasks/doc-input.tsx', import.meta.url), 'utf8')
-const pure = source.slice(source.indexOf('/** "2026-11-19"'), source.indexOf('/**\n * The DOC (date of commencement) typed'))
+const pure = source.slice(source.indexOf('/** "2026-11-19"'), source.lastIndexOf('/**', source.indexOf('export function DocInput')))
 const { outputText } = ts.transpileModule(pure, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
 const { docToText, docFromText, shapeDocText } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 
