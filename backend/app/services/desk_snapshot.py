@@ -20,7 +20,7 @@ from app.services.document_identity import rejected_expression
 from app.core.roles import ADMIN_LEVEL_ROLES
 from app.db.models import (
     AgencySettings, Application, ApplicationStage, Attachment, Candidate, Client, ClientStaff, Company,
-    Currency, Designation, JobCategory, Notification, Order, Remark, Role, Task, TodoItem, User,
+    Currency, Designation, HIDDEN_EMAIL_DOMAINS, JobCategory, Notification, Order, Remark, Role, Task, TodoItem, User,
 )
 from app.services import agency_settings
 from app.services.notification_scope import visible_notifications
@@ -116,7 +116,7 @@ def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = 
         # Use the candidates' SQL snapshot, so a completion between bootstrap
         # and the first browser poll cannot be mistaken for an initial baseline.
         revision_expression().label("ingestionRevision"),
-        _rows("users", _fields(User, UserOut)),
+        _rows("users", _fields(User, UserOut).add_columns(or_(*(User.email.like(f"%@{domain}") for domain in HIDDEN_EMAIL_DOMAINS)).label("deleted"))),
         _rows("clients", _fields(Client, ClientOut).add_columns(client_staff_ids())),
         _rows("companies", _fields(Company, CompanyOut)),
         _rows("designations", _fields(Designation, DesignationOut)),

@@ -475,3 +475,17 @@ def test_the_whole_request_stays_within_a_small_statement_budget(env):
     assert len(counted) <= 28, len(counted)  # measured 26; it was 41 before this change (tombstone, one query per table)
     quiet = statements(env, lambda: delete(env, "admin", "d"))
     assert len(quiet) <= 10, len(quiet)
+
+
+def test_the_desk_snapshot_flags_the_former_user_and_old_tombstones_so_no_list_shows_them(env):
+    """The browser hides every account the snapshot marks deleted (it still reads their name for history); the flag must come from SQL."""
+    assert delete(env, "admin", "a").status_code == 200   # creates the "Former user" system account
+    with env.engine.begin() as connection:   # an old tombstone left by the previous delete
+        connection.execute(text("UPDATE auth_users SET name = 'B Person (former user)', email = 'deleted-b@deleted.invalid', active = false WHERE id = 'b'"))
+    from app.services.desk_snapshot import snapshot_statement
+    with env.factory() as db:
+        row = db.execute(snapshot_statement("admin", compact=True)).mappings().one()
+    people = row["users"]
+    flagged = sorted(person["name"] for person in people if person.get("deleted"))
+    assert flagged == ["B Person (former user)", "Former user"]
+    assert all(not person.get("deleted") for person in people if person["id"] in {"admin", "admin2", "md", "c", "d"})
