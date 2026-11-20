@@ -129,8 +129,7 @@ def run(db: Session, user: User, body: dict) -> dict | tuple[bytes, int]:
         raise fail(403, "forbidden_role", "Only an admin or MD can delete leads.")
     if action == "assign" and not is_admin_level(user):
         raise fail(403, "forbidden_role", "Only an admin or MD can assign leads.")
-    if action == "export" and not supervisor:
-        raise fail(403, "forbidden_role", "Only an admin or MD can export leads.")
+    # `export` is open to every signed-in person: `export_selected` narrows it to the leads they may see (a recruiter gets only the leads allocated to them).
 
     target_status = "not_interested" if action == "not_interested" else body.get("status")
     owner_id = body.get("ownerId")

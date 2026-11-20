@@ -192,7 +192,7 @@ def lead_columns(campaign: list[str] = Query(default=[]), form: list[str] = Quer
 
 @router.get("/export.{fmt}")
 def export(fmt: Literal["csv", "xlsx"], filters: dict = Depends(lead_filters), sort: str = "created", direction: Literal["asc", "desc"] = "desc",
-           db: Session = Depends(get_db), user: User = Depends(supervisors)):
+           db: Session = Depends(get_db), user: User = Depends(current_user)):
     body, media_type, name = lead_sheet.export_leads(db, user, filters, fmt, sort, direction)
     return Response(body, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "private, no-store"})
 

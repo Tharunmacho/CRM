@@ -183,8 +183,11 @@ def test_staff_may_only_change_the_status_of_their_own_leads_and_an_md_reaches_e
     mine = all_ids(env, owner="a")
     assert len(mine) == 4 and len(ids) == 7
     act_as(env, "a")
-    for action, extra in (("assign", {"ownerId": "a"}), ("delete", {}), ("export", {})):
+    for action, extra in (("assign", {"ownerId": "a"}), ("delete", {})):
         assert bulk(env, action=action, ids=mine, **extra).status_code == 403, action
+    # A recruiter may export, and only the leads allocated to them come out (the other three of the seven never resolve).
+    own_export = bulk(env, action="export", ids=ids)
+    assert own_export.status_code == 200 and own_export.headers["x-lead-count"] == "4"
     mixed = bulk(env, action="status", status="contacted", ids=ids)
     assert mixed.status_code == 200 and mixed.json()["updated"] == 4 and mixed.json()["skippedReasons"] == [{"code": "not_yours", "count": 3, "message": "not assigned to you"}]
     by_filter = bulk(env, action="status", status="interested", filter={"owner": "unassigned"}, expectedCount=4)

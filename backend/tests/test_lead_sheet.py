@@ -676,10 +676,17 @@ def test_gate_never_locks_anyone_and_ownership_still_applies(env):
 
 # ------------------------------------------------------------------ export
 
-def test_export_is_supervisor_only_filtered_and_formula_safe(env):
+def test_export_is_filtered_formula_safe_and_a_recruiter_gets_only_their_own_leads(env):
     imported(env, [lead_row(1), lead_row(2, full_name="=cmd|' /C calc'!A0"), lead_row(3, full_name="+SUM(1)")])
     act_as(env, "a")
-    assert env.client.get("/api/leads/export.csv").status_code == 403 and env.client.get("/api/leads/export.xlsx").status_code == 403
+    # A recruiter may download the sheet (to show the MD): the file holds only the leads allocated to them (none here yet).
+    mine = env.client.get("/api/leads/export.csv")
+    assert mine.status_code == 200 and env.client.get("/api/leads/export.xlsx").status_code == 200
+    assert len(list(csv.reader(io.StringIO(mine.content.decode("utf-8-sig"))))) == 1, "header only: nothing is allocated to this recruiter"
+    env.db.execute(text("UPDATE crm_leads SET owner_id = 'a' WHERE name LIKE '%00001'")); env.db.commit()
+    act_as(env, "a")
+    allocated = list(csv.reader(io.StringIO(env.client.get("/api/leads/export.csv").content.decode("utf-8-sig"))))
+    assert len(allocated) == 2 and "Test Lead 00001" in {r[allocated[0].index("Name")] for r in allocated[1:]}
     act_as(env, "admin")
     exported = env.client.get("/api/leads/export.csv", params={"q": "@example.test"})
     rows = list(csv.reader(io.StringIO(exported.content.decode("utf-8-sig"))))

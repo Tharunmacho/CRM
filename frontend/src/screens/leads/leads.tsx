@@ -252,12 +252,13 @@ export default function LeadsPage() {
       <PageHeader
         title="Lead sheet"
         description="People who responded to your ads. Call them, collect their updated resume, and turn them into candidates."
-        actions={supervisor ? (
+        actions={(
           <>
+            {/* Every signed-in person may export the leads they can see: a recruiter gets only the leads allocated to them (the server narrows the file), an admin or MD gets the whole filtered sheet. */}
             <Button variant="secondary" icon={<Download className="h-4 w-4" />} disabled={exporting || total === 0} onClick={() => void exportExcel()}>{exporting ? 'Preparing…' : 'Export'}</Button>
-            <Button variant="primary" icon={<Upload className="h-4 w-4" />} onClick={() => setUploading(true)}>Upload leads</Button>
+            {supervisor && <Button variant="primary" icon={<Upload className="h-4 w-4" />} onClick={() => setUploading(true)}>Upload leads</Button>}
           </>
-        ) : undefined}
+        )}
       />
 
       <GateBanner state={gateMode} gate={gate} />
