@@ -558,16 +558,25 @@ def summary(db: Session, user: User, scope: str | None = None) -> dict:
 _FACET_SETS = {0b011111: "campaign", 0b101111: "form", 0b110111: "position", 0b111011: "country", 0b111101: "platform", 0b111110: "owner"}
 
 
+_FACETS_SQL = (
+    "WITH g AS (SELECT GROUPING(campaign_name, form_name, position_applied, country_interest, platform, owner_id) AS g, "
+    "campaign_name, form_name, position_applied, country_interest, platform, owner_id, count(*) AS n FROM crm_leads "
+    "WHERE :everyone OR owner_id = :me GROUP BY GROUPING SETS ((campaign_name), (form_name), (position_applied), (country_interest), "
+    "(platform), (owner_id))) SELECT g.g, g.campaign_name, g.form_name, g.position_applied, g.country_interest, g.platform, g.owner_id, g.n, u.name "
+    "FROM g LEFT JOIN auth_users u ON u.id = g.owner_id")
+
+
 def facets(db: Session, user: User) -> dict:
     # Filter choices come only from the leads the viewer may see (staff: their own). ONE scan of the leads counts all six lists
-    # (grouping sets); six passes over a materialised copy of the table took several times longer on a big sheet.
-    rows = db.execute(text(
-        "WITH g AS (SELECT GROUPING(campaign_name, form_name, position_applied, country_interest, platform, owner_id) AS g, "
-        "campaign_name, form_name, position_applied, country_interest, platform, owner_id, count(*) AS n FROM crm_leads "
-        "WHERE :everyone OR owner_id = :me GROUP BY GROUPING SETS ((campaign_name), (form_name), (position_applied), (country_interest), "
-        "(platform), (owner_id))) SELECT g.g, g.campaign_name, g.form_name, g.position_applied, g.country_interest, g.platform, g.owner_id, g.n, u.name "
-        "FROM g LEFT JOIN auth_users u ON u.id = g.owner_id"),
-        {"everyone": sees_all_leads(user), "me": user.id}).all()
+    # (grouping sets); six passes over a materialised copy of the table took several times longer on a big sheet. The status choices
+    # (one more grouped count and the template list) are read at the same moment, so the whole answer is ONE round trip.
+    from app.services.parallel_reads import parallel_reads
+    params = {"everyone": sees_all_leads(user), "me": user.id}
+    rows, status_counts, templates = parallel_reads(
+        db,
+        lambda session: session.execute(text(_FACETS_SQL), params).all(),
+        lambda session: _status_counts(session, params),
+        lambda session: status_templates.list_templates(session, include_hidden=True))
     found = []
     for grouping, campaign, form, position, country, platform, owner_id, count, owner_name in rows:
         kind = _FACET_SETS[grouping]
@@ -582,8 +591,15 @@ def facets(db: Session, user: User) -> dict:
             out["owners"].append({"id": owner_id, "name": value, "count": count})
         elif len(out[plural[kind]]) < 300:
             out[plural[kind]].append(value)
-    out["statuses"] = status_options(db, user)
+    out["statuses"] = _status_choices(status_counts, templates)
     return out
+
+
+def _status_counts(session, params: dict) -> list:
+    """(status code, lower-cased template name or None, the name as a lead holds it, leads) in ONE grouped statement."""
+    return session.execute(text(
+        "SELECT status, lower(status_label), min(status_label), count(*) FROM crm_leads WHERE :everyone OR owner_id = :me "
+        "GROUP BY status, lower(status_label)"), params).all()
 
 
 def status_options(db: Session, user: User) -> list[dict]:
@@ -593,21 +609,33 @@ def status_options(db: Session, user: User) -> list[dict]:
     as it), then the status templates (built-in templates in their order, then the rest A-Z; `count` = leads holding that name), then
     any name leads still hold whose template is gone (so it can still be filtered). `kind` is `builtin` or `template`; a hidden template
     is listed only while a lead holds it. A filter value is the code for a built-in and the name for a template."""
-    counts = dict(db.execute(text("SELECT status, count(*) FROM crm_leads WHERE :everyone OR owner_id = :me GROUP BY status"),
-                             {"everyone": sees_all_leads(user), "me": user.id}).all())
-    held = {key: int(n) for key, n in db.execute(text(
-        "SELECT lower(status_label), count(*) FROM crm_leads WHERE status_label IS NOT NULL AND (:everyone OR owner_id = :me) GROUP BY 1"),
-        {"everyone": sees_all_leads(user), "me": user.id}).all()}
+    from app.services.parallel_reads import parallel_reads
+    params = {"everyone": sees_all_leads(user), "me": user.id}
+    rows, templates = parallel_reads(db, lambda session: _status_counts(session, params),
+                                     lambda session: status_templates.list_templates(session, include_hidden=True))
+    return _status_choices(rows, templates)
+
+
+def _status_choices(rows, templates) -> list[dict]:
+    """The choice list from the grouped counts and the template rows (no query)."""
+    counts: dict[str, int] = {}
+    held: dict[str, int] = {}
+    names: dict[str, str] = {}
+    for code, key, original, n in rows:
+        counts[code] = counts.get(code, 0) + int(n)
+        if key is not None:
+            held[key] = held.get(key, 0) + int(n)
+            names.setdefault(key, original)
     options = [{"value": code, "label": STATUS_LABELS[code], "count": int(counts.get(code, 0)), "kind": "builtin"} for code in LEAD_STATUSES]
     listed = set()
-    for row in status_templates.list_templates(db, include_hidden=True):
+    for row in templates:
         n = held.get(row.name.lower(), 0)
         listed.add(row.name.lower())
         if row.active or n:
             options.append({"value": row.name, "label": row.name, "tone": row.tone, "count": n, "kind": "template", "builtin": row.builtin})
     for key, n in sorted(held.items()):   # a deleted template's name still on leads: the original spelling is on the lead
         if key not in listed:
-            name = db.scalar(select(Lead.status_label).where(func.lower(Lead.status_label) == key).limit(1))
+            name = names[key]
             options.append({"value": name, "label": name, "tone": "neutral", "count": n, "kind": "template", "builtin": False})
     return options
 

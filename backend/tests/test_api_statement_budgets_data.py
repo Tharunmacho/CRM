@@ -202,7 +202,7 @@ def cases(ids):
         ("leads list 100 + search", "GET", "/api/leads?page_size=100&q=lead%20person", {}, 2),
         ("leads list filtered + extra cols", "GET", "/api/leads?status=new&campaign=Campaign%202&extra=*&page_size=10&page=1", {}, 2),
         ("leads summary", "GET", "/api/leads/summary", {}, 2),
-        ("leads facets", "GET", "/api/leads/facets", {}, 2),
+        ("leads facets", "GET", "/api/leads/facets", {}, 4),  # sign-in + the grouped lists + the status counts + the template list, read side by side
         ("leads columns", "GET", "/api/leads/columns", {}, 2),
         ("lead detail", "GET", f"/api/leads/{ids.lead}", {}, 5),
         ("lead batches", "GET", "/api/leads/batches", {}, 3),
