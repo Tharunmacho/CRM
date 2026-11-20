@@ -61,16 +61,22 @@ def _update_summary(state: dict, result: dict, page: int, kind: str) -> None:
         holder["pagesSorted"] = sum(1 for entry in holder.get("pages", []) if entry.get("kind"))
 
 
-def _identity_page(state: dict, page: int, kind: str) -> None:
-    """The saved inspection says the page is this identity document, so the reading that is queued sends it as such (no OCR again)."""
+def _place_page(state: dict, page: int, kind: str) -> None:
+    """Use the reviewed placement when restoring the local read and when rebuilding the files."""
     report = (state.get("output") or {}).get("inspection") or state.get("inspection")
     if not isinstance(report, dict) or not isinstance(report.get("pages"), list):
         return
     for entry in report["pages"]:
         if entry.get("page_number") == page:
-            entry.update(status="read", document_type=kind, also=[], inherited=False, reason="Chosen by a person.")
+            entry.update(status="read", document_type=kind if kind in IDENTITY else "unknown", also=[], inherited=False, reason="Chosen by a person.")
     for name in ("resume", "passport", "aadhaar"):
         report[name + "_pages"] = [e["page_number"] for e in report["pages"] if e.get("status") == "read" and (e.get("document_type") == name or name in e.get("also", []))]
+    if "document_pages" in report:
+        for name, numbers in report["document_pages"].items():
+            report["document_pages"][name] = sorted({n for n in numbers if n != page} | ({page} if name == kind else set()))
+        report.get("supporting_pages", {}).pop(str(page), None)
+        if kind not in IDENTITY:
+            report.setdefault("supporting_pages", {})[str(page)] = kind
     report["unread_pages"] = [e["page_number"] for e in report["pages"] if e.get("status") == "unread"]
     report["unknown_pages"] = [e["page_number"] for e in report["pages"] if e.get("status") == "read" and e.get("document_type") == "unknown"]
     report["complete"] = not report["unread_pages"] and not report["unknown_pages"]
@@ -136,8 +142,9 @@ def correct_page(db, user, job_id: str, page: int, kind: str, settings) -> dict:
             else:
                 saved["pages"][str(page)] = {"kind": kind, "confidence": 1.0, "reason": "Chosen by a person.", "inherited": False,
                                              "overrides_identity": True, "alongside_identity": False}
-        if kind in IDENTITY:
-            _identity_page(state, page, kind)
+        was_sent = page in ((state.get("output") or {}).get("coverage") or {}).get("pages", {}).get("sent", [])
+        _place_page(state, page, kind)
+        if kind in application_form.READ_SLOTS or was_sent:
             output = state.get("output")
             if isinstance(output, dict):
                 state.pop("output", None)

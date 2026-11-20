@@ -4,7 +4,7 @@ All text is synthetic. Each case records a lesson from real bundles, written wit
 """
 import pytest
 
-from app.integrations.ocr.classification import _DATES, classify_page, classify_pages
+from app.integrations.ocr.classification import _DATES, classify_page, classify_pages, passport_plan
 from test_ocr_classification import AADHAAR, CV, PASSPORT
 
 FILLER = "Stamp seal ref 12 34 56 78 90 blotted ink unreadable corner"
@@ -213,6 +213,36 @@ def test_trade_and_service_job_titles_count_as_career_evidence(role):
 
 LONE_PASSPORT_BACK = "Name of Father / Legal Guardian  TEST PARENT\nsome faint printed text lines here"
 LONE_AADHAAR = "Enrolment No: 1234/12345/12345\nPlease keep this slip safe with you at all times."
+
+
+@pytest.mark.parametrize("reverse_order", [True, False])
+@pytest.mark.parametrize("back", [
+    "Faint captions\nAddress\nExample village\nPIN:600001,TAMIL NADU,INDIA\nZ1234567\n14/03/2009",
+    "Faint captions\n123456\nFICTIONAL TEST FAMILY\nEXAMPLE STREET\nPIN:600001,TAMIL NADU,INDIA",
+])
+def test_faint_but_corroborated_address_page_is_filed_and_selected_for_extraction(back, reverse_order):
+    front = PASSPORT + "\nFICTIONAL TEST FAMILY"
+    pair = [back, front] if reverse_order else [front, back]
+    pages = [CV, *pair, "Certificate of employment. This is to certify that the employee worked at our company."]
+    found = classify_pages(pages)
+    assert [p.document_type for p in found[1:3]] == ["passport", "passport"]
+    assert not any(p.inherited for p in found[1:3])
+    assert passport_plan([(n, pages[n - 1], found[n - 1].inherited, 0.9) for n in (2, 3)]).pages == [2, 3]
+
+
+@pytest.mark.parametrize("address", [
+    "Candidate contact sheet\n123456\nANOTHER HOUSEHOLD\nPIN:600001,TAMIL NADU,INDIA",
+    "Hospital contact details\nFICTIONAL TEST FAMILY\nPIN:600001,TAMIL NADU,INDIA",
+    "123456\nFICTIONAL TEST FAMILY\nDate of birth 02/05/1992\nPIN:600001,TAMIL NADU,INDIA",
+])
+def test_address_and_proximity_do_not_select_an_unrelated_page_for_passport_extraction(address):
+    pages = [PASSPORT + "\nFICTIONAL TEST FAMILY", address, CV]
+    assert classify_pages(pages)[1].document_type != "passport"
+
+
+def test_a_competing_identity_front_does_not_adopt_a_postal_page():
+    address = "123456\nFICTIONAL TEST FAMILY\nEXAMPLE ADDRESS\nPIN:600001,TAMIL NADU,INDIA"
+    assert classify_pages([AADHAAR, address, PASSPORT + "\nFICTIONAL TEST FAMILY"])[1].document_type == "unknown"
 
 
 def test_lone_passport_marker_is_adopted_when_the_bundle_holds_a_proven_passport_pages_away():

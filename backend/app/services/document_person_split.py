@@ -371,7 +371,8 @@ def _attach_group(db, bundle, group, candidate, user, settings):
         kinds = {"source_bundle": [page["pageNumber"] for page in selections]}
         for page in selections:
             if page["kind"] != "source_bundle":
-                kinds.setdefault(page["kind"], []).append(page["pageNumber"])
+                slot = {"education": "education_certificate", "experience": "experience_certificate"}.get(page["kind"], page["kind"])
+                kinds.setdefault(slot, []).append(page["pageNumber"])
         for kind, numbers in kinds.items():
             payload = _pdf_subset(settings, sources[source_id], numbers)
             digest = hashlib.sha256(payload).hexdigest()
@@ -389,19 +390,19 @@ def _attach_group(db, bundle, group, candidate, user, settings):
                 "sourceId": source_id, "sourceHash": sources[source_id]["hash"], "pages": sorted(numbers), "slot": kind, "attachmentId": attachment.id}))
 
 
-EXTRACTABLE = ("resume", "passport", "aadhaar")
+READER_MODE = {"resume": "resume", "education": "resume", "passport": "passport", "aadhaar": "aadhaar"}
 
 
 def _group_signature(pages):
-    return hashlib.sha256(repr(sorted((p["sourceId"], p["pageNumber"], p["kind"]) for p in pages if p["kind"] in EXTRACTABLE)).encode()).hexdigest()
+    return hashlib.sha256(repr(sorted((p["sourceId"], p["pageNumber"], p["kind"]) for p in pages if p["kind"] in READER_MODE)).encode()).hexdigest()
 
 
 def _group_pdfs(settings, bundle, pages):
     """One PDF per document kind holding exactly the pages the reviewer assigned to it."""
     sources = {source["id"]: source for source in bundle.sources}
     result = {}
-    for kind in EXTRACTABLE:
-        chosen = [p for p in pages if p["kind"] == kind]
+    for kind in dict.fromkeys(READER_MODE.values()):
+        chosen = [p for p in pages if READER_MODE.get(p["kind"]) == kind]
         if not chosen:
             continue
         with fitz.open() as merged:

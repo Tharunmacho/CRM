@@ -136,6 +136,11 @@ def test_two_people_atomic_commit_correct_pages_tasks_and_replay(env):
         for candidate in candidates:
             own = [item for item in attachments if item.entity_id == candidate.id]
             assert {item.slot for item in own} == {"source_bundle", "resume"}
+            from app.services.application_form import build_form
+            page_file = next(item for item in own if item.slot == "source_bundle")
+            for viewer in (env.admin, env.other):
+                sources = build_form(db, candidate.id, db.get(User, viewer))["originalFiles"]
+                assert [(item["attachmentId"], item["url"]) for item in sources] == [(page_file.id, f"/api/files/{page_file.id}")]
             for attachment in own:
                 with fitz.open(stream=read_bytes(env.settings, attachment.object_key), filetype="pdf") as source:
                     assert source.page_count == 1
@@ -564,6 +569,19 @@ def test_reviewed_group_keeps_compatible_passport_as_a_normal_document():
     assert fields["skills"] == ["Wiring"] and conflicts == []
     assert {"resume", "passport"} <= set(raw) and "quarantined_passport" not in raw
     assert not any("kept as evidence but not used" in warning for warning in warnings)
+
+
+def test_reviewed_person_sends_only_their_resume_and_education_together(monkeypatch):
+    original = pdf("CV page", "Medical report", "Degree certificate", "Another person's CV")
+    monkeypatch.setattr(subject, "read_bytes", lambda settings, key: original)
+    bundle = SimpleNamespace(sources=[{"id": "packet", "pdf_key": "packet.pdf",
+                                       "pdf_hash": hashlib.sha256(original).hexdigest()}])
+    chosen = [{"sourceId": "packet", "pageNumber": number, "kind": kind}
+              for number, kind in [(3, "education"), (1, "resume"), (2, "other")]]
+    groups = subject._group_pdfs(None, bundle, chosen)
+    assert set(groups) == {"resume"}
+    with fitz.open(stream=groups["resume"], filetype="pdf") as merged:
+        assert [page.get_text().strip() for page in merged] == ["CV page", "Degree certificate"]
 
 
 def test_confirmed_people_are_read_by_the_normal_extraction_and_reviewer_values_win(env, monkeypatch):

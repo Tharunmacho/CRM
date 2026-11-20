@@ -39,6 +39,7 @@ from collections.abc import Callable
 import contextvars
 from copy import deepcopy
 from dataclasses import dataclass, field
+import functools
 import hashlib
 import json
 import logging
@@ -77,7 +78,7 @@ log = logging.getLogger("crm.reading")
 # The short id of the file being read (first characters of its hash), for the log lines of this reading.
 _FILE = READING_FILE
 PIPELINE_VERSION = "local-pages-v2"  # v2: jobs are sent as prepared files, so v1 keys (other bytes) must not be reused
-INSPECTION_VERSION = "2026.11.12-orientation-job-continuations"
+INSPECTION_VERSION = "mixed-bundle-passport-address-v2"
 _MODELS = {"resume": ResumeResponse, "passport": PassportResponse, "aadhaar": AadhaarResponse}
 _PENDING = {"queued", "running"}
 # The wall clock a job's age is measured with (stored, so it survives a worker restart); replaceable in tests.
@@ -1410,13 +1411,13 @@ def _finish(state: dict, save: Callable[[dict], None], report: dict, extractions
 
 def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save, settings, designations,
                unsaved: bool = False, finalize: bool = True, classified: dict | None = None,
-               degrade: bool = False, final_attempt: bool = False):
+               degrade: bool = False, final_attempt: bool = False, keep_local_files: bool = False):
     """Send each kind's pages to Veris (resuming checkpointed jobs), validate coverage and map
     the fields. Returns (extractions, warnings, every_kind_covered, reasons_to_review).
 
     With ``degrade``, a kind that ended in a terminal provider failure does not fail the file while another kind was
     read: it is named in the reasons to review (and the warnings) and the others are mapped. Nothing read at all
-    still raises. ``final_attempt`` says no automatic attempt is left, so any failure is terminal.
+    still raises unless the caller can file the locally identified pages for review. ``final_attempt`` says no automatic attempt is left.
 
     With ``finalize`` the state is saved once at the end; a caller that saves right after (``_finish``) passes False."""
     extractions: dict = {}
@@ -1459,7 +1460,7 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
     _without_skipped(state, selected_by_kind, final, parts, classified or {})
     lost = {_mode(key) for key in failures or {}}
     if lost:
-        if not any(payload is not None for key, payload in payloads.items() if _mode(key) not in lost):
+        if not keep_local_files and not any(payload is not None for key, payload in payloads.items() if _mode(key) not in lost):
             raise _first_failure(state, failures)  # nothing usable was read: the failure is not hidden
         for kind in sorted(lost, key=_order):
             review.append(_failed_notice(kind, next((_reason_for(state, key) for key in failures if _mode(key) == kind), None)))
@@ -2058,7 +2059,7 @@ def _settle_probes(inspected, probes: dict, classified: dict, extractions: dict,
 def extract_attachment(
     data: bytes, *, state: dict, save: Callable[[dict], None], settings,
     designations: list[str] | None = None, partial: bool = True, ignore_decorative: bool = False,
-    final_attempt: bool = False, expected_kind: str | None = None,
+    final_attempt: bool = False, expected_kind: str | None = None, candidate_filing: bool = False,
 ) -> dict:
     """Inspect every page and read the kinds found (see ``_extract_attachment``), logging one summary line for the file."""
     started = time.monotonic()
@@ -2066,7 +2067,7 @@ def extract_attachment(
     try:
         result = _extract_attachment(
             data, state=state, save=save, settings=settings, designations=designations, partial=partial,
-            ignore_decorative=ignore_decorative, final_attempt=final_attempt, expected_kind=expected_kind)
+            ignore_decorative=ignore_decorative, final_attempt=final_attempt, expected_kind=expected_kind, candidate_filing=candidate_filing)
         _summary(state, result, started)
         return result
     except (ExtractionPending, ExtractionFailure) as exc:
@@ -2076,10 +2077,50 @@ def extract_attachment(
         end()
 
 
+extract_candidate_attachment = functools.partial(extract_attachment, candidate_filing=True)
+
+
+def _candidate_page_plan(inspected, previous: dict, fresh: bool, corrections: dict) -> tuple[dict, dict]:
+    """Choose filing groups from local evidence and the recruiter's recorded page corrections."""
+    from app.services.bulk_candidate_import import _content_kinds
+    if fresh:
+        guesses = _content_kinds(inspected)
+        inspected.content_kinds = guesses
+        supporting = {str(number): guess.kind for number, guess in guesses.items()}
+        documents = {kind: [n for n in inspected._pages_of(kind) if str(n) not in supporting] for kind in _IDENTITY_KINDS}
+    else:
+        documents = deepcopy(previous["document_pages"])
+        supporting = dict(previous["supporting_pages"])
+    for page in inspected.pages:
+        number = page.page_number
+        kind = (corrections.get(str(number)) or {}).get("kind")
+        if not kind:
+            continue
+        supporting.pop(str(number), None)
+        for pages in documents.values():
+            if number in pages:
+                pages.remove(number)
+        if kind in documents:
+            documents[kind] = sorted([*documents[kind], number])
+        else:
+            supporting[str(number)] = kind
+    return documents, supporting
+
+
+def _restrict_saved_jobs(state: dict, allowed: dict) -> None:
+    """Archive page sets from older routing rules before a worker can resume or submit them."""
+    jobs = state.get("provider_jobs", {})
+    for key, record in list(jobs.items()):
+        pages = set(record.get("selected_pages") or [])
+        if _mode(key) not in allowed or not pages.issubset(allowed[_mode(key)]):
+            state.setdefault("provider_job_history", {}).setdefault(key, []).append(jobs.pop(key))
+            state.get("partial_extractions", {}).pop(_mode(key), None)
+
+
 def _extract_attachment(
     data: bytes, *, state: dict, save: Callable[[dict], None], settings,
     designations: list[str] | None = None, partial: bool = True, ignore_decorative: bool = False,
-    final_attempt: bool = False, expected_kind: str | None = None,
+    final_attempt: bool = False, expected_kind: str | None = None, candidate_filing: bool = False,
 ) -> dict:
     """Inspect every page and resume recorded résumé/passport/Aadhaar jobs.
 
@@ -2125,10 +2166,13 @@ def _extract_attachment(
         "document_timeout": settings.ocr_document_timeout_seconds,
     }
     signature = hashlib.sha256(json.dumps(
-        {"version": PIPELINE_VERSION, "inspection_version": INSPECTION_VERSION, **options}, sort_keys=True,
+        {"version": PIPELINE_VERSION, "inspection_version": INSPECTION_VERSION, **options,
+         **({"candidate_filing": 1} if candidate_filing else {})}, sort_keys=True,
     ).encode()).hexdigest()
     inspected = None
-    if same_source and state.get("person_detection_version") == 1 and state.get("inspection_signature") == signature and isinstance(state.get("inspection"), dict):
+    previous = state.get("inspection") or {}
+    can_restore = not candidate_filing or ("document_pages" in previous and "supporting_pages" in previous)
+    if can_restore and same_source and state.get("person_detection_version") == 1 and state.get("inspection_signature") == signature and isinstance(state.get("inspection"), dict):
         try:
             # Unread pages may be a time limit or a hiccup, so only a report whose gaps
             # are classification gaps is trusted in place of reading the file again.
@@ -2155,7 +2199,7 @@ def _extract_attachment(
             inspected = page_sort.inspect_resumable(data, settings, state=state)
             if inspected is None:
                 inspected = _inspect_and_send_early(
-                    data, options, state=state, save=save, settings=settings, source_hash=source_hash, early=partial)
+                    data, options, state=state, save=save, settings=settings, source_hash=source_hash, early=partial and not candidate_filing)
             evidence = _identity_evidence(inspected.pages)
             state["person_detection_version"] = 1
             state["inspection_version"] = INSPECTION_VERSION
@@ -2165,6 +2209,12 @@ def _extract_attachment(
     except InspectionError as exc:
         raise _unreadable(exc) from None
     report = inspected.to_dict()
+    document_pages = {kind: report[kind + "_pages"] for kind in _IDENTITY_KINDS}
+    supporting_reasons = {}
+    if candidate_filing:
+        document_pages, supporting = _candidate_page_plan(inspected, previous, fresh_inspection, state.get("page_corrections") or {})
+        supporting_reasons = {int(n): f"Classified locally as {kind.replace('_', ' ')}." for n, kind in supporting.items()}
+        report.update(document_pages=document_pages, supporting_pages=supporting)
     # What the local reader saw on pages that Veris will not be sent (unreadable by Veris, or not identified) is kept
     # with the saved inspection, never thrown away, so a person can still read it. It is not part of the report
     # returned to callers.
@@ -2185,8 +2235,7 @@ def _extract_attachment(
         # even on a visit that restores the inspection without its text.
         patterns = {
             kind: _local_patterns(kind, chr(10).join(inspected.pages[n - 1].text for n in pages))
-            for kind, pages in (("resume", inspected.resume_pages), ("passport", inspected.passport_pages), ("aadhaar", inspected.aadhaar_pages))
-            if pages
+            for kind, pages in document_pages.items() if pages
         }
         state["local_patterns"] = {kind: value for kind, value in patterns.items() if value}
         # Pages the local reading could only read once turned: sent upright (see integrations/ocr/payload.py).
@@ -2194,10 +2243,13 @@ def _extract_attachment(
     if state.get("splitSuggested"):
         warnings.append("This document contains different candidate identities. Open Review people and pages before saving any candidate.")
         return _finish(state, save, report, {}, "needs_review", warnings)
+    if candidate_filing and not partial and (inspected.unread_pages or set(inspected.unknown_pages) - supporting_reasons.keys()):
+        warnings.append("Some pages are unread or unclassified. Review the document before extraction.")
+        return _finish(state, save, report, {}, "needs_review", warnings)
     # No page identified, but the person chose the slot: the pages the local check could not identify are shown to the reader
     # as that kind (see _expected_probe_pages). A restored inspection holds no text, so the saved plan is kept as it was.
     expected: dict[str, list[int]] = {}
-    if partial and expected_kind in _EXPECTED_KINDS and not inspected.has_classified_pages:
+    if not candidate_filing and partial and expected_kind in _EXPECTED_KINDS and not inspected.has_classified_pages:
         if fresh_inspection or "probe_plan" not in state:
             expected = _expected_probe_pages(inspected, expected_kind)
         else:
@@ -2205,20 +2257,22 @@ def _extract_attachment(
     # No page identified and no slot chosen, but some page looks like a passport or an Aadhaar page that the local check could not
     # read: those pages are sent to the reader as that kind (see _probe_pages); a restored inspection keeps the saved plan.
     suspects_only: dict[str, list[int]] = {}
-    if partial and not expected and not inspected.has_classified_pages:
+    if not candidate_filing and partial and not expected and not inspected.has_classified_pages:
         if fresh_inspection or "probe_plan" not in state:
             suspects_only = _probe_pages(inspected)
         else:
             suspects_only = {kind: list(pages) for kind, pages in (state.get("probe_plan") or {}).items() if pages}
-    if not inspected.complete and not (partial and (inspected.has_classified_pages or expected or suspects_only)):
+    if not candidate_filing and not inspected.complete and not (partial and (inspected.has_classified_pages or expected or suspects_only)):
         warnings.append("Some pages are unread or unclassified. Review the document before extraction.")
         return _finish(state, save, report, {}, "needs_review", warnings)
 
-    classified = {
-        "resume": inspected.resume_pages, "passport": inspected.passport_pages,
-        "aadhaar": inspected.aadhaar_pages,
-    }
-    if not partial:
+    classified = {kind: list(pages) for kind, pages in document_pages.items()}
+    if candidate_filing:
+        education = [int(n) for n, kind in report["supporting_pages"].items() if kind == "education_certificate"]
+        classified["resume"] = sorted({*classified["resume"], *education})
+        _restrict_saved_jobs(state, classified)
+        state.update(probe_plan={}, suspected_pages={})
+    if candidate_filing or not partial:
         probes = {}
     elif expected:
         probes = expected
@@ -2234,8 +2288,8 @@ def _extract_attachment(
         probes = {kind: list(pages) for kind, pages in state["probe_plan"].items()}
     suspected = {} if expected else {kind: list(pages) for kind, pages in (state.get("suspected_pages") or {}).items() if pages}
     passport_pages, narrowed = _plan_passport(state, inspected, fresh_inspection)
-    if passport_pages:
-        classified["passport"] = passport_pages
+    if passport_pages and (not candidate_filing or narrowed):
+        classified["passport"] = [n for n in passport_pages if n in classified["passport"]]
     if narrowed:
         probes = {kind: pages for kind, pages in probes.items() if kind != "passport"}  # nothing is added to a narrowed attempt
     selected_by_kind = {kind: sorted({*pages, *probes.get(kind, [])}) for kind, pages in classified.items()}
@@ -2243,6 +2297,13 @@ def _extract_attachment(
     for kind in classified:
         classified[kind] = [page for page in classified[kind] if page not in payload_drops]
     if not any(selected_by_kind.values()):
+        if candidate_filing:
+            uncertain = set(report["unknown_pages"]) - supporting_reasons.keys()
+            coverage, _, _ = _coverage(report, {}, {}, settings=settings, page_reasons=supporting_reasons, hinted=uncertain)
+            gaps = coverage["pages"]["unresolved"]
+            if gaps:
+                warnings.append(f"Check pages {_ranges(gaps)} in the original file before filing them.")
+            return _finish(state, save, report, {}, "needs_review" if gaps else "ignored", warnings, coverage=coverage)
         warnings.append("No résumé, passport or Aadhaar pages were identified.")
         return _finish(state, save, report, {}, "ignored", warnings)
     status = "complete"
@@ -2252,7 +2313,8 @@ def _extract_attachment(
         probed_pages = {p for pages in probes.values() for p in pages}
         # A page that is really unreadable, or that reads like an identity document but was not shown to the reader, keeps its
         # warning, with the page numbers and what to do about it.
-        hinted = {int(number) for number, text in held.items() if identity_hint(text)} & set(inspected.unknown_pages)
+        hinted = (set(inspected.unknown_pages) - supporting_reasons.keys() if candidate_filing else
+                  {int(number) for number, text in held.items() if identity_hint(text)} & set(inspected.unknown_pages))
         gaps = sorted((set(inspected.unread_pages) | hinted) - probed_pages)
         if gaps:
             warnings.append(
@@ -2267,7 +2329,7 @@ def _extract_attachment(
     extractions, notices, covered, review = _run_kinds(
         selected_by_kind, inspected, report, source_hash, state=state, save=save,
         settings=settings, designations=designations, unsaved=fresh_inspection, finalize=False, classified=classified,
-        degrade=True, final_attempt=final_attempt,
+        degrade=True, final_attempt=final_attempt, keep_local_files=candidate_filing,
     )
     warnings.extend(notices)
     if not covered:
@@ -2296,6 +2358,7 @@ def _extract_attachment(
             extractions[kind]["source"]["local_inspection"] = {**report, "selected_pages": list(selected_by_kind[kind])}
     page_reasons = {page: f"Not sent: {reason}." for page, reason in payload_drops.items()}
     page_reasons.update(_passport_reasons(state, inspected, set(selected_by_kind["passport"])))
+    page_reasons.update(supporting_reasons)
     coverage, issues, shown = _coverage(report, selected_by_kind, extractions, settings=settings, probes=probes, review=review,
                                         page_reasons=page_reasons, hinted=hinted)
     warnings.extend([*issues, *shown])

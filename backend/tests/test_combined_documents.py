@@ -18,6 +18,58 @@ needs_tesseract = pytest.mark.skipif(inspection.find_tesseract(None) is None, re
 FORMS = ["native", pytest.param("scan", marks=needs_tesseract)]
 
 
+def test_candidate_packet_sends_education_with_resume_and_files_them_separately(combined):
+    from test_document_extraction import pdf
+    from test_kind_classifier import EXPERIENCE, MEDICAL, SSLC
+    from test_ocr_classification import CV, PASSPORT, AADHAAR
+
+    # A packet of 25 pages. The provider must see just the slices identified locally.
+    data = pdf(CV, CV + "\nPrevious employment", PASSPORT, AADHAAR, SSLC,
+               *(f"{MEDICAL}\nSheet {n}" for n in range(19)), EXPERIENCE)
+    output = combined.extract(data, candidate_filing=True)
+    report = output["inspection"]
+    assert combined.plan() == {"resume": [1, 2, 5], "passport": [3], "aadhaar": [4]}
+    assert report["document_pages"] == {"resume": [1, 2], "passport": [3], "aadhaar": [4]}
+    assert report["supporting_pages"]["5"] == "education_certificate"
+    assert set(map(int, report["supporting_pages"])) == set(range(5, 26))
+    assert len(combined.veris.submissions) == 3
+    again = combined.extract(data, candidate_filing=True)
+    assert again["inspection"]["document_pages"] == report["document_pages"]
+    assert len(combined.veris.submissions) == 3
+
+
+def test_candidate_keeps_local_page_groups_when_the_reader_cannot_read_any_fields(combined):
+    from test_document_extraction import pdf
+    from test_ocr_classification import PASSPORT
+    from test_veris_handoff import unreadable
+
+    combined.veris.script[("passport", 0)] = "failed"
+    combined.veris.errors[("passport", 0)] = unreadable(False)
+    output = combined.extract(pdf(PASSPORT), candidate_filing=True)
+
+    assert output["status"] == "needs_review"
+    assert output["inspection"]["document_pages"]["passport"] == [1]
+    assert output["extractions"] == {}
+    assert output["coverage"]["failed"]
+
+
+def test_reviewed_education_page_is_read_with_resume_and_later_placement_is_respected(combined):
+    from test_document_extraction import pdf, UNCLASSIFIED
+    from test_ocr_classification import CV
+
+    data = pdf(CV, UNCLASSIFIED)
+    combined.state["page_corrections"] = {"2": {"kind": "education_certificate"}}
+    accepted = combined.extract(data, candidate_filing=True)
+    assert combined.plan() == {"resume": [1, 2]}
+    assert accepted["inspection"]["document_pages"]["resume"] == [1]
+    assert accepted["inspection"]["supporting_pages"] == {"2": "education_certificate"}
+
+    combined.state["page_corrections"] = {"2": {"kind": "medical"}}
+    corrected = combined.extract(data, candidate_filing=True)
+    assert combined.plan() == {"resume": [1]}
+    assert corrected["inspection"]["supporting_pages"] == {"2": "medical"}
+
+
 @pytest.fixture
 def combined(monkeypatch):
     settings = SimpleNamespace(

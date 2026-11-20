@@ -656,6 +656,35 @@ def _lone_marker(kind: str, text: str) -> bool:
     return _aadhaar_structure(text)
 
 
+_PRINTED_PIN = re.compile(r"^\s*PIN(?:\s*CODE)?\s*[:.-]\s*[1-9]\d{5}\s*[,;]\s*([^\n,;]{2,40})\s*[,;]\s*INDIA\b", re.I | re.M)
+_PREVIOUS_PASSPORT = re.compile(r"^\s*[A-Z][ \t]*\d{7}[ \t]*\r?\n[ \t]*\d{2}[/.-]\d{2}[/.-]\d{4}\b", re.I | re.M)
+_PAGE_SERIAL = re.compile(r"^[ \t]*\d{6,8}[ \t]*$", re.M)
+
+
+def _corroborated_passport_back(text: str, fronts: Sequence[str]) -> bool:
+    """Poor scans can lose the family/old-passport captions but retain the printed address block."""
+    if not fronts or _RESUME_DETAILS.search(text):
+        return False
+    pin = _PRINTED_PIN.search(text)
+    if not pin or not _INDIAN_STATES.fullmatch(pin[1].strip()):
+        return False
+    if re.search(r"\baddress\b", text[:pin.start()], re.I) and _PREVIOUS_PASSPORT.search(text, pin.end()):
+        return True
+    # With no legible caption, require the serial above the address and two words
+    # on a preceding line also present on the adjacent passport's identity page.
+    prefix = text[:pin.start()]
+    serial = _PAGE_SERIAL.search(prefix)
+    if not serial:
+        return False
+    common = {"NAME", "FATHER", "MOTHER", "ADDRESS", "PASSPORT", "INDIA", "INDIAN", "GIVEN", "SURNAME", "GUARDIAN"}
+    family_lines = [set(re.findall(r"\b[A-Z]{4,}\b", line)) - common for line in prefix[serial.end():].splitlines()]
+    for front in fronts:
+        front_words = set(re.findall(r"\b[A-Z]{4,}\b", front.upper()))
+        if any(len(words & front_words) >= 2 for words in family_lines):
+            return True
+    return False
+
+
 def classify_pages(texts: Sequence[str]) -> list[PageClassification]:
     """Grow resume seeds through evidenced, contiguous continuation pages."""
     result = [classify_page(text) for text in texts]
@@ -683,12 +712,20 @@ def classify_pages(texts: Sequence[str]) -> list[PageClassification]:
         seed, continuation, _, _ = _signals(text)
         if seed or continuation or _other_evidence(text) or _is_passport(text) or _is_aadhaar(text):
             continue
-        neighbors = settled[max(0, index - 1):index] + settled[index + 1:index + 2]
+        adjacent = [i for i in (index - 1, index + 1) if 0 <= i < len(settled)]
+        neighbors = [settled[i] for i in adjacent]
         known = {kind for page in neighbors for kind in _kinds(page)}
+        if known == {"passport"}:
+            fronts = [texts[i] for i in adjacent if settled[i].document_type == "passport" and not settled[i].also]
+            if _corroborated_passport_back(text, fronts):
+                result[index] = PageClassification("passport", 0.85, "Printed passport address block corroborated by the adjoining passport.")
+                continue
         # Any other document beside it (a resume, a certificate) makes the side ambiguous.
         if len(known) != 1 or any(page.document_type in {"resume", "other"} for page in neighbors):
             continue
         kind = next(iter(known))
+        if kind == "passport" and _RESUME_DETAILS.search(text):
+            continue
         result[index] = PageClassification(
             kind, 0.6, f"Assigned to the adjoining {kind} document; no content of its own identified it.",
             inherited=True,
