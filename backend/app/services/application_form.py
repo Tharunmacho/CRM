@@ -1169,6 +1169,7 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
     candidate = db.get(Candidate, job.candidate_id)
     settings = get_settings()
     taken: set[str] = set()
+    own_field_pieces: list[splitting.StoredPiece] = []
     superseded = False
     for kind in (documents if local else [*extractions, *(["other"] if other_document is not None else [])]):
         document = documents.get(kind)
@@ -1236,6 +1237,10 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
         superseded = superseded or own_slot
         if kind == "other" and notes is not None and pages:
             notes.append(f"{_pages_text(pages).capitalize()} of this file {'was' if len(pages) == 1 else 'were'} filed under Other documents.")
+        elif local and kind not in IDENTITY_SLOTS and pages:
+            own_field_pieces.append(splitting.StoredPiece(kind, label, row.file_name, pages, row))
+    if notes is not None and own_field_pieces:
+        notes.append(splitting.filing_message(own_field_pieces))   # medical, offer, visa ... say where their pages went, as before
     recognized = bool(set(documents) - {"other"}) if local else any(kind in fx.SLOT_KINDS and kind in documents for kind in extractions)
     own_pages = (documents.get(source.slot) or {}).get("selected_pages")
     partial = bool(own_pages) and isinstance(whole, int) and len(own_pages) < whole

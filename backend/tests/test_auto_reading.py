@@ -24,7 +24,7 @@ from sqlalchemy.orm import undefer
 from app.api.routers import candidate_import, files as files_router
 from app.db.models import Attachment, AuditEntry, Candidate, DocumentExtractionJob, Role
 from app.integrations.ocr import inspection
-from app.services import application_form, document_splitting as splitting, intake_documents, manual_extraction
+from app.services import application_form, document_extraction, document_splitting as splitting, intake_documents, manual_extraction
 from app.services import form_extraction as fx
 from app.services.document_storage import put_bytes, read_bytes
 from ocr_synthetic import composite_pdf
@@ -116,18 +116,28 @@ def bytes_of(env, row) -> bytes:
     return read_bytes(env.settings, row.object_key)
 
 
-def install_reader(monkeypatch, calls=None):
+def install_reader(monkeypatch, calls=None, submissions=None):
     """The online reader, faked: the local reading of the file is the real one (kept by the job like the real run does, so the pages are not
-    read again), what the reader answers for the resume, passport and Aadhaar pages is fixed."""
+    read again). The pages go to the reader the way a candidate's packet is submitted (`candidate_filing`): the local page plan decides the
+    groups, the education pages ride with the resume in ONE resume-mode submission, passport and Aadhaar are their own. Every submission
+    is recorded in `submissions` as (mode, pages); what the reader answers for the three modes is fixed."""
     def extract(data, *, state, save, **kwargs):
         if calls is not None:
             calls.append(hashlib.sha256(data).hexdigest())
-        report = inspection.inspect_document(data, max_pages=300, page_timeout=20, document_timeout=600).to_dict()
+        inspected = inspection.inspect_document(data, max_pages=300, page_timeout=20, document_timeout=600)
+        report = inspected.to_dict()
+        documents, supporting = document_extraction._candidate_page_plan(inspected, {}, True, {})
+        report.update(document_pages=documents, supporting_pages=supporting)
         state.update(source_sha256=hashlib.sha256(data).hexdigest(), inspection=deepcopy(report))
         save(state)
-        extractions = {kind: {"fields": {}, "raw": raw, "selected_pages": report[kind + "_pages"],
-                              "source": {"local_inspection": {"selected_pages": report[kind + "_pages"]}, "selected_pages": report[kind + "_pages"]}}
-                       for kind, raw in RAW.items() if report.get(kind + "_pages")}
+        sent = {kind: list(pages) for kind, pages in documents.items() if pages}
+        if "resume" in sent:
+            sent["resume"] = sorted({*sent["resume"], *(int(n) for n, kind in supporting.items() if kind == "education_certificate")})
+        if submissions is not None:
+            submissions.extend((kind, pages) for kind, pages in sent.items())
+        extractions = {kind: {"fields": {}, "raw": RAW[kind], "selected_pages": pages,
+                              "source": {"local_inspection": {"selected_pages": pages}, "selected_pages": pages}}
+                       for kind, pages in sent.items()}
         return {"status": "complete", "inspection": report, "warnings": [], "coverage": {"complete": True, "pages": {"not_sent": []}},
                 "extractions": extractions}
     monkeypatch.setattr(manual_extraction, "extract_attachment", extract)
@@ -240,7 +250,8 @@ def test_one_call_queues_at_most_the_cap_and_says_more_are_waiting(world, monkey
 
 def test_a_stored_bundle_is_read_and_every_page_lands_in_its_own_field(world, monkeypatch):
     calls: list[str] = []
-    install_reader(monkeypatch, calls)
+    submissions: list[tuple[str, list[int]]] = []
+    install_reader(monkeypatch, calls, submissions)
     whole = bundle(BUNDLE, NOTE)                                       # + one page nothing recognises (page 12)
     store(world, "resume", "Alex_Example-Resume.pdf", whole)           # imported earlier, never read
     assert read_pending(world).json()["queued"] == 1
@@ -275,22 +286,32 @@ def test_a_stored_bundle_is_read_and_every_page_lands_in_its_own_field(world, mo
         assert job.draft[application_form.OTHERS_FILED]
     assert any("Medical" in note and "were filed in their own fields" in note for note in notes)
     assert "Page 12 was filed under Other documents (not recognised as a resume page)." in notes
-    # the education certificate is read like any upload to its field: queued once, for the reader
-    [education] = [job for job in jobs(world) if job.draft["applicationForm"]["slot"] == "education_certificate"]
-    assert education.status == "pending" and education.kind == "resume"
+    # what the provider was sent: ONE resume-mode submission with the resume pages AND the education page (1, 2 and 6), the passport pages and
+    # the Aadhaar page each on their own; nothing else (offer, visa, medical, police, ticket, the note) is ever submitted
+    assert sorted(submissions) == [("aadhaar", [5]), ("passport", [3, 4]), ("resume", [1, 2, 6])]
+    # the education certificate rode with the resume: it is filed in its own field and has no reading of its own queued
+    assert [job.draft["applicationForm"]["slot"] for job in jobs(world)] == ["resume"]
 
 
 def test_the_same_bundle_is_never_filed_twice(world, monkeypatch):
-    install_reader(monkeypatch)
+    calls: list[str] = []
+    submissions: list[tuple[str, list[int]]] = []
+    install_reader(monkeypatch, calls, submissions)
     store(world, "resume", "Alex_Example-Resume.pdf", bundle())
     read_pending(world)
     run_worker(world)
     before = {slot: [row.id for row in rows] for slot, rows in slots(world).items()}
+    sent = sorted(submissions)
+    assert sent == [("aadhaar", [5]), ("passport", [3, 4]), ("resume", [1, 2, 6])] and len(calls) == 1
     again = read_pending(world).json()
     assert again["queued"] == 0 and again["filed"] == [] and again["changed"] is False
-    run_worker(world)                                                   # only the education certificate's own reading is left
+    assert run_worker(world) == []                                      # nothing is left for a worker: the education pages were read with the resume
     after = {slot: [row.id for row in rows] for slot, rows in slots(world).items()}
-    assert after == before
+    assert after == before and sorted(submissions) == sent and len(calls) == 1 and len(jobs(world)) == 1   # no second (paid) reading
+    # a genuinely new page is still read: a separate education certificate uploaded afterwards is queued once
+    store(world, "education_certificate", "Degree.pdf", composite_pdf(["certificate"]))
+    assert read_pending(world).json()["queued"] == 1 and read_pending(world).json()["queued"] == 0
+    assert [job.draft["applicationForm"]["slot"] for job in jobs(world)] == ["resume", "education_certificate"]
 
 
 def read_job(env, whole, *, slot="resume", identity_mismatch=False, name="Alex_Example-Resume.pdf"):

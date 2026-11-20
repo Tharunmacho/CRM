@@ -1409,7 +1409,8 @@ def find_duplicate(db: Session, uploads: list[Upload], identity: "IdentityRead |
             "message": f"Already in the CRM as {candidate.care_id or candidate.ref} · {candidate.name} ({strength}: {wording})"}
 
 
-def add_documents(db: Session, user: User, candidate: Candidate, uploads: list[Upload], written: list[str], settings) -> list[dict]:
+def add_documents(db: Session, user: User, candidate: Candidate, uploads: list[Upload], written: list[str], settings,
+                  duplicates: list | None = None) -> list[dict]:
     """File these uploads into an EXISTING candidate (the "Add these documents" choice for a duplicate): each as the next version of
     its document field, never overwriting; a file (or, for a PDF, every page of it) the field already holds is "already filed" and
     skipped; the scan the pages were cut from is kept under Source document evidence. Only documents are written: the candidate's
@@ -1425,7 +1426,8 @@ def add_documents(db: Session, user: User, candidate: Candidate, uploads: list[U
     person = splitting._person(candidate, "")
     answer: list[dict] = []
     packet_files: list[tuple[Upload, Attachment]] = []
-    previously_filed: set[bytes] = set()
+    # A scan with a page that repeats a page of another file of this import is read as its new cut files, never as one packet.
+    previously_filed: set[bytes] = {item.source for item in duplicates or [] if item.source is not None}
     for upload in sorted(uploads, key=lambda item: (item.kinds == [SOURCE_BUNDLE], item.path.lower())):
         digest = hashlib.sha256(upload.data).hexdigest()
         extension = PurePosixPath(upload.path.replace("\\", "/")).suffix.lower()
@@ -1518,7 +1520,7 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
         if existing is not None and not (on_duplicate == "import_anyway" and existing["strength"] == "possible"):
             if on_duplicate == "add_documents":
                 target = db.get(Candidate, existing["candidateId"])
-                filed = add_documents(db, user, target, uploads, written, settings)
+                filed = add_documents(db, user, target, uploads, written, settings, duplicates)
                 return {"status": "documents_added", "action": "skip", "folder": folder, **existing, "documents": filed,
                         "issues": [{"level": "info", "message": f"{existing['message']}. Documents were added to it ({sum(1 for f in filed if f['added'])} filed, "
                                                                 f"{sum(1 for f in filed if f['alreadyFiled'])} already there); nothing else of the candidate was changed."}]}
@@ -1631,7 +1633,9 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
             stored[kind] = attachment
             packet_files.append((upload, attachment))
     db.flush()
-    _register_import_packets(db, candidate, packet_files, set())
+    # A scan with a page that repeats a page already filed (the standalone resume and the same pages inside the packet) is not read as
+    # one packet: that would send the repeated pages to the paid reader a second time. Its new pages are read as their own cut files.
+    _register_import_packets(db, candidate, packet_files, {item.source for item in duplicates or [] if item.source is not None})
     # The import only SPLITS the files into their documents and stores them. Reading them (OCR) starts when a person asks for
     # it (Extract details on the candidate's form, or "Read the documents" on the Import screen), never by itself.
     result = {"candidateId": candidate.id, "ref": candidate.ref, "careId": candidate.care_id, "name": candidate.name, "action": plan["action"], "issues": plan["issues"],

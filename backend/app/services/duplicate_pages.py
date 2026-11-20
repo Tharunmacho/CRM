@@ -466,6 +466,7 @@ class Skipped:
     why: str
     keeper: Any = None            # the Upload the kept pages went into
     original_kept: bool = True    # the file they are in is stored whole, as received (Source document evidence)
+    source: bytes | None = field(default=None, repr=False)   # the whole scan the skipped pages are in: it must not be read as one packet
 
     def message(self) -> str:
         many = len(set(self.pages)) > 1
@@ -607,5 +608,5 @@ def _dedupe(uploads: list, settings: Any, budget: float) -> tuple[list, DedupeRe
             skipped.append(Skipped(
                 kind=kind, label=bulk.KIND_LABELS.get(kind, kind), file=doc.label, pages=[doc.numbers[item[0]] for item in items],
                 same_as_file=other_doc.label, same_as_pages=list(dict.fromkeys(other_doc.numbers[item[1]] for item in items)), why=why,
-                keeper=placed.get((other, items[0][1], kind))))
+                keeper=placed.get((other, items[0][1], kind)), source=source))
     return result + list(bundles.values()), DedupeReport(skipped)
