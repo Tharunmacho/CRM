@@ -11,7 +11,7 @@ nullable and older code ignores them. The downgrade drops them. The models decla
 from alembic import op
 
 revision = "0054_soft_delete_files_fb"  # (alembic_version holds 32 characters)
-down_revision = "0052_speed_indexes_tasks"  # 0053 (remark soft delete) was not in the tree when this was written; the orchestrator re-chains
+down_revision = "0053_remark_soft_delete"  # chained after the notes soft delete
 branch_labels = None
 depends_on = None
 
