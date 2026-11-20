@@ -207,7 +207,7 @@ def test_put_replaces_the_team_and_staff_but_keeps_what_it_does_not_mention(env)
 
 
 @pytest.mark.parametrize("staff_ids,fragment", [
-    (["nobody"], "not a CRM user"), (["gone"], "deactivated"), (["admin"], "only recruiters or managers"),
+    (["nobody"], "not a CRM user"), (["gone"], "deactivated"), (["admin"], "only recruiters or MDs"),
 ])
 def test_staff_ids_must_be_active_staff_or_managers(env, staff_ids, fragment):
     rejected = env.client.post("/api/clients", json={"name": "N", "company": {"name": "C"}, "staffIds": ["s1", *staff_ids]})

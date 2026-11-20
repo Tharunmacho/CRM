@@ -97,8 +97,8 @@ def test_receipts_enforce_assignment_and_application_scope(ledger):
     other_app, _ = prepare(ledger, candidate="second-candidate")
     assert ledger.client.get(endpoint(), params={"applicationId": other_app}).status_code == 404
     assert ledger.client.post(endpoint(), params={"applicationId": app}, json=body(applicationId=other_app)).status_code == 422
-    # Neither another recruiter, the owning recruiter nor a manager may see or record receipts.
-    for user_id, role in (("other", Role.staff), ("staff", Role.staff), ("manager", Role.manager)):
+    # Neither another recruiter nor the owning recruiter may see or record receipts (an MD, stored as manager, is admin-level and may: see below).
+    for user_id, role in (("other", Role.staff), ("staff", Role.staff)):
         as_user(ledger, user_id, role)
         assert ledger.client.get(endpoint()).status_code == 403
         assert ledger.client.post(endpoint(), json=body()).status_code == 403
@@ -150,7 +150,7 @@ def test_admin_void_retains_original_receipt_and_excludes_it_from_totals(ledger)
     data = received(ledger)
     entry = data["payments"][0]
     url = endpoint() + f"/{entry['id']}/void"
-    for user_id, role in (("staff", Role.staff), ("manager", Role.manager)):
+    for user_id, role in (("staff", Role.staff),):   # an MD (manager) is admin-level, so only a recruiter is refused
         as_user(ledger, user_id, role)
         assert ledger.client.post(url, json={"reason": "Entered in error"}).status_code == 403
     as_user(ledger, "admin", Role.admin)
@@ -236,7 +236,7 @@ def test_finance_summary_distinguishes_agreed_invoiced_received_and_authorized_t
     # The admin sees every candidate's totals whoever owns it; nobody else sees any.
     assert ledger.client.get("/api/invoices/finance-summary").json()["totals"]["agreedTotal"] == "17700.00"
     as_user(ledger, "manager", Role.manager)
-    assert ledger.client.get("/api/invoices/finance-summary").status_code == 403
+    assert ledger.client.get("/api/invoices/finance-summary").status_code == 200   # an MD sees the finance summary like an admin
 
 
 def test_missing_fee_summary_never_invents_a_balance_or_payment(ledger):

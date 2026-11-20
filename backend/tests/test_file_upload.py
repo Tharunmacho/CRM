@@ -301,7 +301,7 @@ def test_having_entered_the_candidate_no_longer_allows_uploading_once_someone_el
     refused = post_file(environment, b"%PDF-1.7 document")
 
     assert refused.status_code == 403
-    assert "Only they, a manager or an admin" in refused.json()["detail"]
+    assert "Only they, an MD or an admin" in refused.json()["detail"]
 
 
 def test_candidate_upload_is_for_the_assigned_recruiter_a_manager_or_an_admin(upload_environment):

@@ -303,14 +303,14 @@ def test_a_staff_member_imports_for_themselves_whatever_the_sheet_says(env):
         assert db.get(Candidate, result["candidateId"]).owner_id == "other"
 
 
-def test_a_manager_imports_for_themselves_too_only_the_admin_chooses_the_recruiter(env):
+def test_an_md_is_admin_level_and_chooses_the_recruiter_like_the_admin(env):
     with env.sessions() as db:
         db.add(User(id="mgr", name="Mgr", email="mgr@example.test", role=Role.manager, active=True))
         db.commit()
     env.actor = SimpleNamespace(id="mgr", role=Role.manager, name="Mgr")
     result = send(env, "Jay", ["Resume.pdf"], {"phone": "9876500011", "recruiter": "staff@example.test"})
     with env.sessions() as db:
-        assert db.get(Candidate, result["candidateId"]).owner_id == "mgr"
+        assert db.get(Candidate, result["candidateId"]).owner_id == "staff"   # an MD (manager) is admin-level: the recruiter named in the sheet is honoured
 
 
 def test_check_matches_sheet_rows_to_folders_and_reports_unmatched_rows(env):

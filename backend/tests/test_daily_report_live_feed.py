@@ -87,7 +87,7 @@ def test_every_lead_action_publishes_one_leads_event(lead_env, listening):
 def test_lead_events_do_not_carry_lead_ids_to_a_manager_or_recruiter():
     payload = {"t": ["leads"], "ids": {"leads": ["lead-1"]}, "at": 1}
     assert change_feed.visible_to(payload, "admin", "u")["ids"] == {"leads": ["lead-1"]}
-    assert change_feed.visible_to(payload, "manager", "u") == {"topics": ["leads"], "at": 1}
+    assert change_feed.visible_to(payload, "manager", "u") == change_feed.visible_to(payload, "admin", "u")   # an MD (manager) is admin-level
     assert change_feed.visible_to(payload, "staff", "u") == {"topics": ["leads"], "at": 1}
 
 
