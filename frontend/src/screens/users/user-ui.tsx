@@ -6,6 +6,7 @@ import { cn } from '@/shared/lib/cn'
 import { Badge } from '@/shared/ui/display'
 import { Button, Field, Input } from '@/shared/ui/primitives'
 import { FormSection as SharedFormSection } from '@/shared/ui/form-section'
+import { csvCell, plainServerText } from '@/features/staff/user-text'
 
 export const roleLabels: Record<Role, string> = ROLE_LABELS
 export const roleBlurbs: Record<Role, string> = {
@@ -14,8 +15,9 @@ export const roleBlurbs: Record<Role, string> = {
   staff: 'Recruiter. Gets new candidates and does the tasks.',
 }
 
+/** The server's own sentence in plain words (the technical "Value error" lead-in of a form check is dropped). */
 export const failureText = (error: unknown) =>
-  error instanceof Error ? error.message : 'We could not save that. Try again.'
+  error instanceof Error ? plainServerText(error.message) : 'We could not save that. Try again.'
 
 export function initialsOf(name: string) {
   const parts = name.replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(Boolean)
@@ -43,11 +45,7 @@ export function FormSection({ icon, title, hint, children, columns = true }: {
 
 /** Downloads rows already on screen as a CSV file (no request is made). */
 export function downloadRows(filename: string, header: string[], rows: (string | number)[][]) {
-  const cell = (value: string | number) => {
-    const text = String(value ?? '')
-    return /[",\r\n]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text
-  }
-  const body = [header, ...rows].map((row) => row.map(cell).join(',')).join('\r\n')
+  const body = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n')
   const url = URL.createObjectURL(new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = url

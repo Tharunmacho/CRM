@@ -66,6 +66,15 @@ def _commit(db: Session) -> None:
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, 'An account with this email already exists. Refresh the page and try again.')
+    _forget_signins()
+
+
+def _forget_signins() -> None:
+    """Empty the sign-in memo AFTER the commit. The memo is also emptied when the account statement runs, but on a hosted database the
+    commit lands a few hundred milliseconds later, and a request from the person's own open tab in that gap would put the old session
+    back for up to 30 s: a deleted, deactivated or signed-out person must be refused at once."""
+    from app.core.deps import forget_signins
+    forget_signins()
 
 
 def _check_email(users: list[User], email: str, except_id: str | None = None) -> None:
@@ -101,15 +110,18 @@ def create_user(db: Session, actor: User, values: dict) -> User:
     return user
 
 
-def _transfer(db: Session, actor: User, user: User, users: list[User], target_id: str | None, open_count: int | None = None) -> tuple[dict, list, list]:
+def _transfer(db: Session, actor: User, user: User, users: list[User], target_id: str | None, open_count: int | None = None,
+              *, with_leads: bool = True) -> tuple[dict, list, list]:
+    """Hand a recruiter's candidates, open tasks and (unless the caller hands them over itself) leads to one other recruiter."""
     candidates = list(db.scalars(select(Candidate).where(Candidate.owner_id == user.id).order_by(Candidate.id).with_for_update()))
     if open_count is None:  # a caller that has just counted them passes the number and saves a round trip
         open_count = db.scalar(select(func.count()).select_from(Task).where(
             Task.owner_id == user.id, Task.completed_at.is_(None), Task.cancelled_at.is_(None))) or 0
-    if not candidates and not open_count:
+    lead_ids = list(db.scalars(select(Lead.id).where(Lead.owner_id == user.id).order_by(Lead.id))) if with_leads else []
+    if not candidates and not open_count and not lead_ids:
         return {'candidates': 0, 'tasks': 0}, [], []
     if not target_id:
-        raise HTTPException(422, 'Choose a recruiter to take over all of this person\'s candidates and open tasks.')
+        raise HTTPException(422, 'Choose a recruiter to take over all of this person\'s candidates, open tasks and leads.')
     target = _find(users, target_id)
     from app.services.attendance_availability import unavailable_staff_ids
     if target.id == user.id or not target.active or target.role != Role.staff or target.on_leave or target.id in unavailable_staff_ids(db):
@@ -137,7 +149,10 @@ def _transfer(db: Session, actor: User, user: User, users: list[User], target_id
             meta={'fromOwnerId': task.owner_id, 'toOwnerId': target.id}))
         task.owner_id = target.id
         moved += 1
-    return {'candidates': len(candidates), 'tasks': moved, 'toUserId': target.id}, [
+    if lead_ids:  # a lead of someone who can no longer work it would sit with a closed account: it goes to the same recruiter
+        from app.services import lead_sheet
+        lead_sheet.apply_owner_changes(db, actor, {target.id: lead_ids}, {target.id: target.name}, bulk=True)
+    return {'candidates': len(candidates), 'tasks': moved, 'leads': len(lead_ids), 'toUserId': target.id}, [
         (candidate.id, candidate.name, user.id, target.id) for candidate in candidates], task_only_changes
 
 
@@ -165,7 +180,8 @@ def update_user(db: Session, actor: User, user_id: str, values: dict) -> User:
     transfer = None
     ownership_changes = []
     task_only_changes = []
-    if not next_active or (user.role == Role.staff and next_role != Role.staff):
+    deactivating = user.active and not next_active  # an account that is already off is only edited: nothing more to move
+    if deactivating or (user.role == Role.staff and next_role != Role.staff):
         transfer, ownership_changes, task_only_changes = _transfer(db, actor, user, users, target_id)
     revoke = not next_active or next_role != user.role or values.get('email', user.email) != user.email
     from app.services.candidate_review import eligible_for_assignment
@@ -180,7 +196,7 @@ def update_user(db: Session, actor: User, user_id: str, values: dict) -> User:
         notify_task_assignment_changes(db, task_only_changes, actor_id=actor.id, actor_name=actor.name, how=how, users=users)
     revoked = _revoke(db, user) if revoke else 0
     if changes or transfer:
-        _audit(db, actor, user, 'User updated' if next_active else 'User deactivated',
+        _audit(db, actor, user, 'User deactivated' if deactivating else 'User updated',
                {'changes': changes, 'transfer': transfer, 'revokedSessions': revoked})
     _commit(db)
     if became_eligible:
@@ -332,7 +348,7 @@ def delete_user(db: Session, actor: User, user_id: str, reassign_to: str | None 
         if recipient.id == person.id or not recipient.active or recipient.role != Role.staff or recipient.on_leave or unavailable:
             raise HTTPException(422, 'Choose a different active recruiter who is not on leave.')
         if moves_candidates_or_tasks:
-            transfer, ownership_changes, task_only_changes = _transfer(db, actor, person, users, reassign_to, owned['openTasks'])
+            transfer, ownership_changes, task_only_changes = _transfer(db, actor, person, users, reassign_to, owned['openTasks'], with_leads=False)
     elif moves_candidates_or_tasks:
         from app.services.candidate_unassign import unassign_candidates
         # The assignment cursor is already locked by `_directory`: this transaction is serialised with every assignment.
@@ -374,6 +390,7 @@ def delete_user(db: Session, actor: User, user_id: str, reassign_to: str | None 
         db.expunge(person)
         db.execute(delete(User).where(User.id == person.id).execution_options(synchronize_session=False))
         db.commit()
+        _forget_signins()
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, 'This account cannot be deleted because other records still depend on it. Deactivate it instead.')

@@ -101,6 +101,8 @@ def read_reporting_data(db, filters: Filters | None = None, zone=None):
     collections = []
     for name, (model, names) in fields.items():
         columns = [getattr(model, field) for field in names.split()]
+        if name == "users":  # the hidden "Former user" account keeps resolving old names but is never listed or counted
+            columns.append(_hidden_user().label("hidden"))
         if filters is not None and name == "stages":
             columns = [func.json_build_object("result", model.data["result"], "amount", model.data["amount"],
                 "currency", model.data["currency"], "advanceStatus", model.data["advanceStatus"]).label("data") if field.key == "data" else field for field in columns]
@@ -131,6 +133,11 @@ def read_reporting_data(db, filters: Filters | None = None, zone=None):
     mail = mail.subquery("mail_sources")
     collections.append(select(func.json_agg(func.row_to_json(mail.table_valued()), type_=JSON)).scalar_subquery().label("mailSources"))
     return {key: rows or [] for key, rows in db.execute(select(*collections)).mappings().one().items()}
+
+
+def _hidden_user():
+    """SQL: this account is the "Former user" system account or an old tombstone (never a person to list)."""
+    return or_(*(m.User.email.like(f"%@{domain}") for domain in m.HIDDEN_EMAIL_DOMAINS))
 
 
 def sees_team(user):
@@ -167,7 +174,7 @@ def read_dashboard_data(db, user, staff_id=None, zone=None, now=None):
     }
     collections = []
     for name, (model, names) in fields.items():
-        query = select(*(getattr(model, field) for field in names.split()))
+        query = select(*(getattr(model, field) for field in names.split()), *((_hidden_user().label("hidden"),) if name == "users" else ()))
         if name == "applications":
             query = query.where(m.Application.id.in_(apps))
         elif name == "tasks":
@@ -443,6 +450,7 @@ def report_data(data, user, filters: Filters, zone=None, now=None):
     staff_ids = {u["id"] for u in users.values() if value(u["role"]) == "staff" and staff_matches(u["id"])}
     staff_ids.update(t["owner_id"] for t in completed if t["owner_id"])
     staff_ids.update(e["owner_id"] for e in events if e["owner_id"])
+    staff_ids -= {uid for uid, u in users.items() if u.get("hidden")}
     for uid in sorted(staff_ids, key=lambda key: users.get(key, {}).get("name", key)):
         own_durations = [d["hours"] for d in durations if d["ownerId"] == uid]
         staff.append({"id": uid, "name": users.get(uid, {}).get("name", "Former user"),
@@ -532,7 +540,7 @@ def report_data(data, user, filters: Filters, zone=None, now=None):
         "options": {"clients": [{"id": r["id"], "label": r["name"]} for r in clients.values() if not option_owner or r["id"] in client_ids],
                     "orders": [{"id": r["id"], "label": r["ref"]} for r in option_orders],
                     "designations": [{"id": r["id"], "label": r["title"]} for r in designations.values() if not option_owner or r["id"] in designation_ids],
-                    "staff": [{"id": r["id"], "label": r["name"]} for r in users.values() if not option_owner or r["id"] == option_owner]},
+                    "staff": [{"id": r["id"], "label": r["name"]} for r in users.values() if not r.get("hidden") and (not option_owner or r["id"] == option_owner)]},
         "pipeline": pipeline, "staff": staff, "stageHours": stage_hours, "sources": sources,
         "accounts": source_accounts, "orders": order_rows,
         "rejections": [{"stage": stage, "reason": reason, "label": REASONS.get(reason, reason), "count": count}
@@ -587,7 +595,7 @@ def dashboard_data(data, user, staff_id=None, zone=None, now=None):
         {d["id"]: d for d in data["designations"]}, _effective_stages(data["stages"]), scope, inside)
     active_apps = [a for a in apps if value(a["status"]) == "active"]
     return {"generatedAt": now.isoformat(), "timezone": zone, "date": today.isoformat(), "staffId": scope,
-            "staffOptions": [{"id": u["id"], "label": u["name"]} for u in users.values()] if sees_team(user) else [],
+            "staffOptions": [{"id": u["id"], "label": u["name"]} for u in users.values() if not u.get("hidden")] if sees_team(user) else [],
             "today": {"total": len(today_candidates), **{key: sum(value(c["source"]) == key for c in today_candidates) for key in SOURCE_LABELS}},
             "taskCounts": {"open": len(scoped_task_rows), "dueToday": sum(t["dueToday"] for t in scoped_task_rows),
                            "overdue": sum(t["overdue"] for t in scoped_task_rows), "escalated": sum(t["escalated"] for t in scoped_task_rows),

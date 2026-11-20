@@ -13,7 +13,7 @@ import { RolePill, UserAvatar, failureText } from './user-ui'
 interface AuditRow {
   id: string; actorId: string | null; action: string; target: string | null
   entityType: string | null; entityId: string | null; at: string
-  meta: { changes?: Record<string, { before: unknown; after: unknown }>; transfer?: { candidates: number; tasks: number } | null; revokedSessions?: number }
+  meta: { changes?: Record<string, { before: unknown; after: unknown }>; transfer?: { candidates: number; tasks: number; leads?: number } | null; revokedSessions?: number }
 }
 interface AuditPage { items: AuditRow[]; nextBefore: string | null }
 
@@ -22,8 +22,8 @@ const fieldLabels: Record<string, string> = {
   role: 'Role', name: 'Name', email: 'Email', phone: 'Phone',
 }
 const show = (value: unknown) => value === null || value === undefined || value === '' ? 'None' : typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value)
-const toneOf = (action: string) => /deactivat/i.test(action) ? 'is-red' : /created/i.test(action) ? 'is-green' : /password|session|logout/i.test(action) ? 'is-amber' : 'is-blue'
-const iconOf = (action: string) => /deactivat/i.test(action) ? <UserX size={14} /> : /created/i.test(action) ? <UserPlus size={14} />
+const toneOf = (action: string) => /deactivat|deleted/i.test(action) ? 'is-red' : /created/i.test(action) ? 'is-green' : /password|session|logout/i.test(action) ? 'is-amber' : 'is-blue'
+const iconOf = (action: string) => /deactivat|deleted/i.test(action) ? <UserX size={14} /> : /created/i.test(action) ? <UserPlus size={14} />
   : /password/i.test(action) ? <KeyRound size={14} /> : /session|logout/i.test(action) ? <LogOut size={14} /> : <Pencil size={14} />
 
 export function AuditHistory({ user, onClose }: { user: User; onClose: () => void }) {
@@ -64,7 +64,7 @@ export function AuditHistory({ user, onClose }: { user: User; onClose: () => voi
           {row.target && <p className="uv-tl-target">{self ? 'Record: ' : 'Account: '}{row.target}</p>}
           {row.meta.changes && Object.keys(row.meta.changes).length > 0 && <dl className="uv-changes">{Object.entries(row.meta.changes).map(([key, change]) => <div key={key}>
             <dt>{fieldLabels[key] ?? key.replaceAll('_', ' ')}</dt><dd><s>{key === 'role' ? roleLabel(String(change.before ?? '')) || 'None' : show(change.before)}</s><span aria-label="changed to">to</span><b>{key === 'role' ? roleLabel(String(change.after ?? '')) || 'None' : show(change.after)}</b></dd></div>)}</dl>}
-          {row.meta.transfer && <p className="uv-tl-meta">Moved {row.meta.transfer.candidates} {row.meta.transfer.candidates === 1 ? 'candidate' : 'candidates'} and {row.meta.transfer.tasks} open {row.meta.transfer.tasks === 1 ? 'task' : 'tasks'}.</p>}
+          {row.meta.transfer && <p className="uv-tl-meta">Moved {row.meta.transfer.candidates} {row.meta.transfer.candidates === 1 ? 'candidate' : 'candidates'} and {row.meta.transfer.tasks} open {row.meta.transfer.tasks === 1 ? 'task' : 'tasks'}{row.meta.transfer.leads ? ` and ${row.meta.transfer.leads} ${row.meta.transfer.leads === 1 ? 'lead' : 'leads'}` : ''}.</p>}
           {typeof row.meta.revokedSessions === 'number' && <p className="uv-tl-meta">{row.meta.revokedSessions} {row.meta.revokedSessions === 1 ? 'session' : 'sessions'} signed out.</p>}
           <p className="uv-tl-actor">{self ? 'Performed by ' : 'Changed by '}{actor}</p>
         </li>

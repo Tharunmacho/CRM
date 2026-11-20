@@ -37,6 +37,11 @@ def _forget_signins_on_account_writes(conn, cursor, statement, parameters, conte
         _AUTH_CACHE.clear()
 
 
+def forget_signins() -> None:
+    """Empty the sign-in memo now (account administration calls this right after its commit, see user_admin)."""
+    _AUTH_CACHE.clear()
+
+
 def _snapshot(user: User) -> dict:
     return {attr.key: getattr(user, attr.key) for attr in inspect(User).column_attrs}
 

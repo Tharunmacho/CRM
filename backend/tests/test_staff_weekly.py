@@ -597,3 +597,14 @@ def test_report_uses_the_real_clock_when_none_is_given(desk):
     with desk.sessions() as db:
         data = staff_weekly.build_report(db, None, None, TZ)
     assert data["range"]["isCurrent"] and data["staff"]
+
+
+def test_the_hidden_former_user_is_never_a_row_of_the_weekly_report(desk):
+    with desk.sessions() as db:
+        db.add(User(id="former", name="Former user", email="former-user@system.invalid", role=Role.staff, active=False))
+        db.flush()
+        db.add(StaffAttendanceSession(user_id="former", checked_in_at=ist(MONDAY, 9), checked_out_at=ist(MONDAY, 17),
+                                      checkin_request_key="in-former", checkout_request_key="out-former"))
+        db.commit()
+    ids = [p["id"] for p in report(desk)["staff"]]
+    assert "former" not in ids and "asha" in ids

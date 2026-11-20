@@ -31,6 +31,27 @@ def _role_word(value):
     return value
 
 
+def _clean_phone(value):
+    """Blank means "no phone" (stored as nothing); otherwise 5 to 15 digits with an optional country code, spaces or punctuation."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError('Enter a valid phone number.')
+    value = re.sub(r'\s+', ' ', value).strip()
+    if not value:
+        return None
+    if not re.fullmatch(r'[0-9+\-().\s/]+', value) or not 5 <= len(re.sub(r'\D', '', value)) <= 15:
+        raise ValueError('Enter a valid phone number: 5 to 15 digits, with an optional country code.')
+    return value
+
+
+def _usable_password(value):
+    """The person choosing a password decides its length (owner's rule); only a blank or all-space password is refused. Never trimmed."""
+    if isinstance(value, str) and not value.strip():
+        raise ValueError('Enter a password.')
+    return value
+
+
 class UserFields(Wire):
     model_config = ConfigDict(extra='forbid')
     name: str = Field(min_length=1, max_length=160)
@@ -51,6 +72,11 @@ class UserFields(Wire):
     def name_text(cls, value):
         return value.strip() if isinstance(value, str) else value
 
+    @field_validator('phone', mode='before')
+    @classmethod
+    def phone_text(cls, value):
+        return _clean_phone(value)
+
     @field_validator('email', mode='before')
     @classmethod
     def email_text(cls, value):
@@ -64,6 +90,11 @@ class UserFields(Wire):
 
 class CreateUserIn(UserFields):
     password: str = Field(min_length=1, max_length=128)
+
+    @field_validator('password', mode='before')
+    @classmethod
+    def password_text(cls, value):
+        return _usable_password(value)
 
 
 class UpdateUserIn(Wire):
@@ -87,6 +118,11 @@ class UpdateUserIn(Wire):
     def name_text(cls, value):
         return UserFields.name_text(value)
 
+    @field_validator('phone', mode='before')
+    @classmethod
+    def phone_text(cls, value):
+        return _clean_phone(value)
+
     @field_validator('email', mode='before')
     @classmethod
     def email_text(cls, value):
@@ -96,6 +132,11 @@ class UpdateUserIn(Wire):
 class PasswordIn(Wire):
     model_config = ConfigDict(extra='forbid')
     password: str = Field(min_length=1, max_length=128)
+
+    @field_validator('password', mode='before')
+    @classmethod
+    def password_text(cls, value):
+        return _usable_password(value)
 
 
 @router.get('', response_model=list[UserOut])

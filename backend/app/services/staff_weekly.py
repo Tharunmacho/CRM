@@ -106,7 +106,7 @@ def _hours(secs) -> float:
 # ------------------------------------------------------------------ reads (batch 1)
 
 def _scope(ids_column, staff_id):
-    sub = select(m.User.id).where(m.User.role == m.Role.staff)
+    sub = select(m.User.id).where(m.User.role == m.Role.staff, m.not_deleted_user())  # never the hidden "Former user" account
     if staff_id:
         sub = sub.where(m.User.id == staff_id)
     return ids_column.in_(sub)
@@ -137,7 +137,7 @@ def _read_all(db, start, end, first, last, now, staff_id):
 
     def users(session):
         query = select(m.User.id, m.User.name, m.User.email, m.User.active, m.User.created_at, m.User.updated_at
-                       ).where(m.User.role == m.Role.staff)
+                       ).where(m.User.role == m.Role.staff, m.not_deleted_user())
         if staff_id:
             query = query.where(m.User.id == staff_id)
         return session.execute(query.order_by(func.lower(m.User.name), m.User.id)).all()

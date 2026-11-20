@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowRightLeft, KeyRound, RotateCw, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
@@ -37,8 +37,22 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
   const own = user?.id === store.me.id
   const owned = user ? store.candidates.filter((c) => c.ownerId === user.id).length : 0
   const tasks = user ? store.tasks.filter((t) => t.ownerId === user.id && !t.completedAt && !t.cancelledAt).length : 0
-  const transfers = !!user && (!form.active || (user.role === 'staff' && form.role !== 'staff')) && (owned > 0 || tasks > 0)
-  const blocked = transfers && (availability.loading || !!availability.error || !replacementValid)
+  // Work only moves when an account is switched off now, or a Recruiter stops being one (the server applies the same rule).
+  const moving = !!user && ((user.active && !form.active) || (user.role === 'staff' && form.role !== 'staff'))
+  // The desk does not carry leads, so what the person holds is asked once from the server (the same count the delete dialog shows).
+  const [held, setHeld] = useState<{ candidates: number; openTasks: number; leads: number } | null>(null)
+  const [heldFailed, setHeldFailed] = useState(false)
+  useEffect(() => {
+    if (!moving || !user || held || heldFailed) return
+    let live = true
+    api.get<{ candidates: number; openTasks: number; leads: number }>('/users/' + user.id + '/delete-summary')
+      .then((value) => { if (live) setHeld(value) }).catch(() => { if (live) setHeldFailed(true) })
+    return () => { live = false }
+  }, [moving, user, held, heldFailed])
+  const leads = held?.leads ?? 0
+  const transfers = moving && (owned > 0 || tasks > 0 || leads > 0)
+  const holdingsPending = moving && !held && !heldFailed
+  const blocked = holdingsPending || (transfers && (availability.loading || !!availability.error || !replacementValid))
   const isStaff = form.role === 'staff'
   const close = () => { if (!busy) onClose() }
 
@@ -54,12 +68,15 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
     if (!user && (!form.password || form.password !== form.confirmation)) {
       setError(form.password ? 'The two passwords are not the same.' : 'Enter a password for this person.'); return
     }
-    if (blocked) { setError('Choose a recruiter who is free to take over the candidates and open tasks.'); return }
+    if (holdingsPending) { setError('Checking what this person still holds. Try again in a moment.'); return }
+    if (blocked) { setError('Choose a recruiter who is free to take over the candidates, open tasks and leads.'); return }
     setBusy(true); setError('')
     const { confirmation, password, reassignToUserId, ...fields } = form
-    const payload = { ...fields, name: form.name.trim(), email: form.email.trim().toLowerCase(), phone: form.phone.trim(),
+    const payload: Record<string, unknown> & { name: string; email: string } = { ...fields, name: form.name.trim(), email: form.email.trim().toLowerCase(), phone: form.phone.trim(),
       receivesAutoAssign: isStaff && form.active && form.receivesAutoAssign,
       onLeave: isStaff && form.onLeave }
+    // A phone that was not touched is not sent again, so an old number in an unusual format never blocks an unrelated edit.
+    if (user && form.phone.trim() === (user.phone || '').trim()) delete payload.phone
     try {
       if (user) await api.patch('/users/' + user.id, { ...payload, ...(transfers ? { reassignToUserId } : {}) })
       else await api.post('/users', { ...payload, password })
@@ -94,14 +111,14 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
           </FormSection>
           <FormSection icon={<ShieldCheck size={18} />} title="Access" hint="The role decides what this person can see and do">
             <Field label="Role" hint={own ? 'Your own role cannot be changed.' : roleBlurbs[form.role]} className="sm:col-span-2">
-              <Select value={form.role} disabled={busy || own} onChange={(e) => set('role', e.target.value as Role)}>{ROLE_ORDER.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</Select>
+              <Select value={form.role} disabled={busy || own} onChange={(e) => { const next = e.target.value as Role; setForm((current) => ({ ...current, role: next, ...(next === 'staff' && user && user.role !== 'staff' ? { receivesAutoAssign: true } : {}) })) }}>{ROLE_ORDER.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</Select>
             </Field>
             {!user && <>
               <PasswordPair className="sm:col-span-2" label="Initial password" disabled={busy} password={form.password} confirmation={form.confirmation} generated={generated}
                 onPassword={(value) => set('password', value)} onConfirmation={(value) => set('confirmation', value)} onGenerate={useGenerated} />
             </>}
             <div className="uv-toggle sm:col-span-2">
-              <Switch label="Account active" description="Inactive accounts cannot sign in." checked={form.active} disabled={busy || own} onChange={(value) => set('active', value)} />
+              <Switch label="Account active" description="Inactive accounts cannot sign in." checked={form.active} disabled={busy || own} onChange={(value) => setForm((current) => ({ ...current, active: value, ...(value && user && !user.active ? { receivesAutoAssign: true } : {}) }))} />
             </div>
           </FormSection>
           <FormSection icon={<RotateCw size={18} />} title="New candidates" hint="Only used while automatic assignment is on" columns={false}>
@@ -117,6 +134,7 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
             <div className="uv-transfer-counts">
               <div><strong>{owned}</strong><span>{owned === 1 ? 'candidate' : 'candidates'}</span></div>
               <div><strong>{tasks}</strong><span>open {tasks === 1 ? 'task' : 'tasks'}</span></div>
+              {leads > 0 && <div><strong>{leads}</strong><span>{leads === 1 ? 'lead' : 'leads'}</span></div>}
             </div>
             <p className="uv-note">Everything moves to one recruiter. Existing due times and history are kept.</p>
             {availability.loading && <p role="status" className="uv-note">Checking who is free to take over…</p>}
@@ -126,7 +144,8 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
             </Select></Field>
             {availability.data && !replacementOptions.length && <p role="status" className="uv-warn">No one is free to take over. Check who is available before you deactivate this account.</p>}
             <div><Button size="sm" disabled={busy || availability.loading} onClick={availability.refresh}>Refresh</Button></div>
-          </> : <p className="uv-note">This person has no candidates or open tasks, so nothing needs to be moved.</p>}
+          </> : holdingsPending ? <p role="status" className="uv-note">Checking what this person still holds…</p>
+            : <p className="uv-note">This person has no candidates, open tasks or leads, so nothing needs to be moved.</p>}
         </FormSection>}
         {user && !deactivate && <p className="uv-note"><KeyRound className="inline h-3.5 w-3.5" aria-hidden="true" /> If you change the role or email, this person is signed out everywhere. Deactivating removes access straight away.</p>}
         {error && <p role="alert" className="uv-error">{error}</p>}

@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from test_database_naming import schema_database
 
 from app.core.security import SESSION_COOKIE, hash_password, verify_password
-from app.db.models import AssignmentPointer, AttendanceHRRequest, AttendanceCalendarDay, AuditEntry, Base, Candidate, CandidateStatus, ClientStaff, Notification, Role, Session as LoginSession, Source, Task, TaskEvent, TaskKind, User, StaffPresenceInterval
+from app.db.models import AssignmentPointer, AttendanceHRRequest, AttendanceCalendarDay, AuditEntry, Base, Candidate, CandidateStatus, ClientStaff, Lead, Notification, Role, Session as LoginSession, Source, Task, TaskEvent, TaskKind, User, StaffPresenceInterval
 from auto_assign import round_robin_on  # noqa: F401  (fixture: the waiting sweep after an account change is opt-in)
 import pytest as _pytest
 
@@ -30,7 +30,8 @@ def env(request):
     metadata = MetaData()
     for table in Base.metadata.sorted_tables:
         table.to_metadata(metadata)
-    models = [User, LoginSession, AssignmentPointer, Candidate, Task, TaskEvent, AuditEntry, StaffPresenceInterval, AttendanceHRRequest, AttendanceCalendarDay, Notification, ClientStaff]
+    models = [User, LoginSession, AssignmentPointer, Candidate, Task, TaskEvent, AuditEntry, StaffPresenceInterval, AttendanceHRRequest, AttendanceCalendarDay, Notification, ClientStaff, Lead]
+    metadata.tables[Lead.__tablename__].indexes.clear()  # the lead table's PostgreSQL-only indexes (NULLS LAST) are not needed here
     for model in models:
         for column in metadata.tables[model.__tablename__].columns:
             if isinstance(column.type, JSONB): column.type = JSON()
