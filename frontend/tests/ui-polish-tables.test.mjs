@@ -11,7 +11,7 @@ const src = (relative) => readFile(path.join(root, 'src', relative), 'utf8')
 test('every table follows one set of rules: 44 px header, single-line uppercase 11.5px labels, 56 px rows, 14 px side padding', async () => {
   const travelled = await css('travelled.css')
   assert.match(travelled, /\.tv-table th \{[^}]*position: sticky;[^}]*height: 44px;[^}]*padding: 0 8px;[^}]*font-size: 11\.5px;[^}]*text-transform: uppercase;[^}]*white-space: nowrap;/)
-  assert.match(travelled, /\.tv-table td \{[^}]*height: 60px; padding: 8px;[^}]*vertical-align: middle;/)
+  assert.match(travelled, /\.tv-table td \{[^}]*height: 56px; padding: 8px;[^}]*vertical-align: middle;/)
   const jobs = await css('jobs-simple.css')
   assert.match(jobs, /\.js-jobs-table \.ui-data-table\.is-grid thead th \{ height: 44px; padding: 0 14px; font-size: 11\.5px;[^}]*text-transform: uppercase; white-space: nowrap; \}/)
   assert.match(jobs, /\.js-jobs-table \.ui-data-table\.is-grid tbody td \{ height: 56px; padding: 8px 14px; vertical-align: middle;/)

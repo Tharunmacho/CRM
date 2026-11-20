@@ -6,7 +6,7 @@ const read = (relative) => readFile(new URL(`../src/${relative}`, import.meta.ur
 
 test('Travelled is a fit table with the Tasks look: no scroll, light column lines, 6px frame, cards under 900px', async () => {
   const css = await read('styles/travelled.css')
-  assert.match(css, /\.tv-table-wrap \{ max-height: 72vh; overflow-x: hidden;/, 'no sideways scroll')
+  assert.match(css, /\.tv-table-wrap \{ max-height: max\(360px, calc\(100dvh - 380px\)\); overflow-x: hidden;/, 'no sideways scroll')
   assert.match(css, /\.tv-table \{ width: 100%; min-width: 0; table-layout: fixed;/)
   assert.doesNotMatch(css, /min-width: 820px/)
   assert.doesNotMatch(css, /overflow-wrap: anywhere/, 'words wrap at spaces, never mid-word')

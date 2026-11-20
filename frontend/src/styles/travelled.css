@@ -1,41 +1,74 @@
 /*
- * Travelled: the same flat cards as Reports (12px radius, 1px hairline, no shadows), one filter card, a row of
- * clickable breakdowns and the list. Colours are the palette's tokens, so light and dark both follow the theme.
- * Below 900px the table turns into one card per candidate (each cell carries its own label).
+ * Travelled: the list comes first. A title with one slim line of totals, ONE toolbar row (search, Period, Client, Country, Agency, More filters),
+ * a row of chips only while a filter is on, a folded "Breakdown", then the table with its pager. Colours are the palette's tokens, so light and
+ * dark both follow the theme. Controls are 40px like the rest of the site (44px on touch screens).
+ * Up to 768px the toolbar is the search box and one Filters button (a bottom sheet); below 900px the table turns into one card per candidate.
  */
 .tv { min-width: 0; font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif; }
 .tv :is(button, input, select) { font-family: inherit; }
 .tv > * { min-width: 0; }
+.tv .workspace-page-header { margin-bottom: 14px; }
 .tv-card { min-width: 0; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); box-shadow: none; }
 .tv-body { display: grid; gap: 16px; min-width: 0; transition: opacity .15s; }
 .tv-body.is-stale { opacity: .6; }
-.tv > .tv-card, .tv > .tv-alert { margin-bottom: 16px; }
+.tv > .tv-alert { margin-bottom: 12px; }
 
-/* Filters */
-.tv-quick { display: flex; flex-wrap: wrap; gap: 8px; padding: 20px 20px 0; }
-.tv-quick-btn, .tv-toggle { min-height: 32px; padding: 0 14px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); color: var(--text-main); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background .12s, border-color .12s; }
-.tv-quick-btn:hover, .tv-toggle:hover { background: var(--tint-2); }
-.tv-quick-btn.is-on, .tv-toggle.is-on { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); font-weight: 600; }
-.tv-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; padding: 16px 20px 20px; }
-.tv-filter-grid label { display: grid; gap: 4px; min-width: 0; font-size: 12.5px; font-weight: 600; line-height: 16px; color: var(--text-muted); }
-.tv-filter-note { margin: 0; padding: 0 20px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
-.tv-search-row { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 12px; min-width: 0; }
-.tv-search-row .tv-search { flex: 1; }
-.tv-search-row .tv-toggle { min-height: 40px; }
-.tv-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--border-main); }
-.tv-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; max-width: 100%; padding: 0 10px; border: 1px solid var(--border-main); border-radius: 999px; background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); color: var(--text-main); font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* One slim line of totals under the title */
+.tv-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 0; padding: 0; list-style: none; }
+.tv-stats li { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 30px; padding: 0 12px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+.tv-stats li svg { color: var(--primary); }
+.tv-stats strong { font-weight: 600; color: var(--text-main); }
+
+/* The toolbar: one row, it wraps when the screen is narrow */
+.tv-toolbar { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.tv-search { display: flex; align-items: center; flex: 2 1 140px; gap: 8px; min-width: 140px; height: 40px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-muted); }
+.tv-search:focus-within { border-color: var(--primary); outline: 2px solid rgba(var(--primary-rgb), .14); outline-offset: 0; }
+.tv-search svg { flex: none; }
+.tv-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; font-size: 14px; color: var(--text-main); }
+.tv-search input::placeholder { color: var(--text-light); }
+.tv-search input::-webkit-search-cancel-button { display: none; }
+.tv-sel { flex: 1 1 132px; min-width: 132px; max-width: 220px; }
+:is(.tv-sel, .tv-field) .custom-select { display: block; width: 100%; }
+:is(.tv-sel, .tv-field) .custom-select-trigger { width: 100%; height: 40px; min-height: 40px; padding-inline: 12px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); font-size: 13.5px; box-shadow: none; }
+.tv-more-wrap { flex: none; }
+.tv-more-toggle { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); font-size: 13px; font-weight: 500; color: var(--text-main); white-space: nowrap; cursor: pointer; transition: background .12s, border-color .12s; }
+.tv-more-toggle:hover { border-color: var(--border-hover); background: var(--tint-1); }
+.tv-more-toggle.is-open { background: var(--tint-2); }
+.tv-more-toggle.has-count { border-color: color-mix(in srgb, var(--primary) 45%, var(--border-control)); }
+.tv-more-toggle.is-open .tv-chevron { transform: rotate(180deg); }
+.tv-chevron { transition: transform .15s; color: var(--text-muted); }
+.tv-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--primary); font-size: 11.5px; font-weight: 600; line-height: 1; color: var(--on-primary); }
+
+/* More filters: a popover under the toolbar (a bottom sheet on a phone) */
+.tv-more-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; box-sizing: border-box; width: min(520px, 100%); padding: 16px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); box-shadow: 0 10px 35px rgba(0, 0, 0, .14); }
+.tv-more-panel > header { display: none; }
+.tv-more-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; align-items: end; }
+.tv-field { display: grid; gap: 4px; min-width: 0; }
+.tv-field > span { font-size: 12.5px; font-weight: 600; line-height: 16px; color: var(--text-muted); }
+.tv-field .ui-input { width: 100%; height: 40px; font-size: 13.5px; border-radius: 8px; background: var(--bg-card); }
+.tv-more-panel > footer { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-main); }
+.tv-toggle { display: inline-flex; align-items: center; justify-content: center; grid-column: 1 / -1; gap: 6px; height: 40px; padding: 0 14px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font-size: 13.5px; font-weight: 500; transition: background .12s, border-color .12s; }
+.tv-toggle:hover { background: var(--tint-2); }
+.tv-toggle.is-on { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); font-weight: 600; }
+.tv-backdrop { display: none; }
+
+/* The chips row (only while a filter is on) and the Breakdown switch */
+.tv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 32px; margin-bottom: 10px; }
+.tv-chips { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.tv-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; max-width: 100%; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--bg-card)); border-radius: 999px; background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); color: var(--text-main); font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tv-chip:hover { background: color-mix(in srgb, var(--primary) 16%, var(--bg-card)); }
-.tv-clear { min-height: 30px; padding: 0 8px; font-size: 13px; font-weight: 500; color: var(--primary); }
+.tv-clear { min-height: 28px; padding: 0 8px; font-size: 13px; font-weight: 500; color: var(--primary); }
 .tv-clear:hover { text-decoration: underline; }
-.tv :is(.tv-chip, .tv-clear, .tv-more, .tv-crumbs button, .tv-bars button, .tv-quick-btn, .tv-toggle):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.tv-breakdown-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; margin-left: auto; padding: 0 8px 0 4px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; }
+.tv-breakdown-toggle:hover { background: var(--tint-2); color: var(--text-main); }
+.tv-breakdown-toggle[aria-expanded='true'] .tv-chevron { transform: rotate(90deg); }
+.tv :is(.tv-chip, .tv-clear, .tv-more, .tv-crumbs button, .tv-bars button, .tv-toggle, .tv-more-toggle, .tv-breakdown-toggle, .tv-sheet-close):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 .tv-alert { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 16px; border: 1px solid color-mix(in srgb, var(--error-ink) 35%, var(--border-main)); border-radius: 12px; background: color-mix(in srgb, var(--error-ink) 7%, var(--bg-card)); color: var(--error-ink); font-size: 14px; }
 .tv-alert > span { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .tv-alert button { font-weight: 600; text-decoration: underline; }
 
-/* Breakdowns */
-.tv-breakdown-panel > summary { padding: 6px 2px; color: var(--primary); font-size: 13px; font-weight: 500; cursor: pointer; }
-.tv-breakdown-panel[open] > summary { margin-bottom: 10px; }
+/* Breakdowns (folded away until the Breakdown switch is opened) */
 .tv-breakdowns { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 16px; align-items: start; }
 .tv-break { padding: 20px; }
 .tv-break > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 10px; }
@@ -46,10 +79,10 @@
 .tv-crumbs .is-here { color: var(--text-main); font-weight: 600; }
 .tv-none { padding: 10px 0 6px; font-size: 13px; color: var(--text-muted); }
 .tv-bars { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.tv-bars button { display: grid; grid-template-columns: minmax(64px, 38%) minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 3px 8px; border-radius: 8px; text-align: left; font-size: 13px; color: var(--text-main); transition: background .12s; }
+.tv-bars button { display: grid; grid-template-columns: minmax(72px, 44%) minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 3px 8px; border-radius: 8px; text-align: left; font-size: 13px; color: var(--text-main); transition: background .12s; }
 .tv-bars button:hover { background: var(--tint-2); }
 .tv-bars button.is-chosen { background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); font-weight: 600; }
-.tv-bar-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-bar-label { min-width: 0; line-height: 1.3; overflow-wrap: break-word; }
 .tv-bar-track { display: block; height: 8px; border-radius: 999px; background: var(--tint-2); overflow: hidden; }
 .tv-bar-track i { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
 .tv-bar-count { min-width: 1.5em; text-align: right; font-weight: 600; }
@@ -59,16 +92,17 @@
 .tv-more:hover { text-decoration: underline; }
 
 /* The list: the SAME look as the approved Tasks table. table-layout fixed at 100% of its frame (no sideways scroll), header 44px / 11.5px / 600 uppercase on one
-   line with 8px side padding, rows of at least 60px with every cell centred, a faint var(--table-line) line under every row and a LIGHT var(--table-column-line)
-   between body columns. Words wrap at spaces (a link or a name is never cut); under 900px the rows are labelled cards. */
-.tv-table-wrap { max-height: 72vh; overflow-x: hidden; overflow-y: auto; }
+   line with 8px side padding, rows of at least 56px with every cell centred, a faint var(--table-line) line under every row and a LIGHT var(--table-column-line)
+   between body columns. Words wrap at spaces (a link or a name is never cut); under 900px the rows are labelled cards. The box is as tall as the screen allows
+   (the header stays in sight while the rows scroll) and the pager sits right under it. */
+.tv-table-wrap { max-height: max(360px, calc(100dvh - 380px)); overflow-x: hidden; overflow-y: auto; }
 .tv-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
-.tv-c-date { width: 11%; } .tv-c-who { width: 20%; } .tv-c-client { width: 15%; } .tv-c-country { width: 9%; }
-.tv-c-job { width: 14%; } .tv-c-agency { width: 12%; } .tv-c-docs { width: 10%; } .tv-c-recruiter { width: 9%; }
+.tv-c-date { width: 13%; } .tv-c-who { width: 16%; } .tv-c-client { width: 13%; } .tv-c-country { width: 11%; }
+.tv-c-job { width: 12%; } .tv-c-agency { width: 11%; } .tv-c-docs { width: 13%; } .tv-c-recruiter { width: 11%; }
 .tv-table td { overflow-wrap: break-word; }
 .tv-table th { position: sticky; top: 0; z-index: 2; box-sizing: border-box; height: 44px; padding: 0 8px; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); text-align: left; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 16px; text-transform: uppercase; color: var(--on-primary); white-space: nowrap; overflow: hidden; text-overflow: clip; }
 .tv-table th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
-.tv-table td { box-sizing: border-box; height: 60px; padding: 8px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: middle; text-align: left; color: var(--text-main); }
+.tv-table td { box-sizing: border-box; height: 56px; padding: 8px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: middle; text-align: left; color: var(--text-main); }
 .tv-table td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
 .tv-table tbody tr:last-child td { border-bottom: var(--table-line-width) solid var(--table-line); }
 .tv-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
@@ -77,67 +111,84 @@
 .tv-table a:hover { text-decoration: underline; }
 .tv-who a { font-weight: 600; }
 .tv-who .cid-chip { display: flex; width: fit-content; margin-top: 4px; }
+/* the chip says only the ID (the column is the candidate's; the full words stay for screen readers and the tooltip) */
+.tv-who .cid-chip > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.tv-who .cid-chip { position: relative; padding-inline: 8px; }
 .tv-muted { color: var(--text-muted); }
-.tv-docs { display: inline-flex; flex-direction: column; font-variant-numeric: tabular-nums; font-weight: 600; cursor: default; }
-.tv-docs small { margin-top: 1px; font-size: 11.5px; font-weight: 500; }
-.tv-docs.is-short, .tv-docs.is-short small { color: var(--warning-ink, #9a5b00); }
-.tv-doc-details > summary { cursor: pointer; }
+.tv-docs { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; font-weight: 600; cursor: default; }
+.tv-docs.is-done { color: var(--success-ink); }
+.tv-docs.is-short { color: var(--warning-ink, #9a5b00); cursor: pointer; }
+.tv-doc-details > summary { list-style: none; }
+.tv-doc-details > summary::-webkit-details-marker { display: none; }
+.tv-doc-details[open] > summary svg { transform: rotate(180deg); }
 .tv-doc-details ul { min-width: 170px; margin: 8px 0; padding-left: 16px; font-size: 12px; line-height: 1.6; }
 .tv-doc-details > a { font-size: 12px; }
-.tv-doc-details > summary:focus-visible, .tv-breakdown-panel > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
-.tv-hint { margin-left: 8px; font-size: 12px; font-weight: 400; opacity: .8; }
-.tv-foot { padding: 12px 16px; border-top: 1px solid var(--border-main); font-size: 13px; color: var(--text-muted); }
+.tv-doc-details > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.tv-hint { font-size: 12.5px; font-weight: 400; color: var(--text-muted); }
+.tv-table .tv-hint { color: var(--text-muted); font-weight: 400; }
+.tv-table-card .db-foot { padding: 12px 2px 0; border-top: 0; }
+.tv-table-card .db-pagesize { width: 140px; }
+.tv-table-card .db-pager-num { display: inline-grid; place-items: center; min-width: 34px; height: 34px; padding: 0 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; }
+.tv-table-card .db-pager-num:hover { border-color: var(--border-hover); background: var(--tint-1); color: var(--text-main); }
+.tv-table-card .db-pager-num.is-on { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); font-weight: 700; color: var(--primary); }
+.tv-table-card .db-pager-gap { padding: 0 2px; color: var(--text-muted); }
+.tv-table-card .db-pager-go { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); }
+.tv-table-card .db-pager-go input { width: 58px; height: 34px; padding: 0 8px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); font: inherit; font-size: 13px; color: var(--text-main); }
+.tv-table-card .db-pager :is(.db-pager-num, .db-pager-btn):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.tv-foot { margin: 6px 2px 0; font-size: 13px; color: var(--text-muted); }
 
+@media (max-width: 1279px) {
+  .tv-table th { padding: 0 6px; letter-spacing: .02em; }
+  .tv-table td { padding: 8px 6px; }
+}
 @media (max-width: 1100px) {
   .tv-breakdowns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tv-date { grid-column: 1 / -1; }
-  .tv-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-@media (max-width: 720px) {
-  .tv-quick { padding: 14px 16px 0; }
-  .tv-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px 16px; gap: 12px; }
-  .tv-filter-note { padding: 0 16px 14px; }
-  .tv-search-row { flex-wrap: wrap; align-items: stretch; }
-  .tv-search-row .tv-search { flex-basis: 100%; }
-  .tv-chips { padding: 10px 16px 14px; }
-  .tv-breakdowns { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 420px) {
-  .tv-filter-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* Touch screens: 40px targets, 8px apart, 16px fields (no zoom on focus), cards that never push the page wider. */
+/* Touch screens and tablets: 44px targets, 16px fields (no zoom on focus), cards that never push the page wider. */
 @media (max-width: 1023px), (pointer: coarse) {
-  .tv-quick-btn, .tv-toggle, .tv-search-row .tv-toggle { min-height: 44px; }
-  .tv-chip { min-height: 44px; }
-  .tv-clear, .tv-more { min-height: 44px; }
+  .tv-search, .tv-more-toggle, .tv-toggle, :is(.tv-sel, .tv-field) .custom-select-trigger, .tv-field .ui-input { height: 44px; min-height: 44px; }
+  .tv-chip, .tv-clear, .tv-more, .tv-breakdown-toggle { min-height: 44px; }
+  .tv-stats li { height: 34px; }
   .tv-crumbs button, .tv-crumbs .is-here { min-height: 44px; display: inline-flex; align-items: center; padding: 2px 8px; }
   .tv-bars button { min-height: 44px; }
-  .tv-breakdown-panel > summary { display: flex; align-items: center; min-height: 44px; }
   .tv-doc-details > summary { display: inline-flex; align-items: center; min-height: 44px; }
-  .tv-filter-grid :is(input, select, textarea, .ui-input, .custom-select-trigger, .date-picker-trigger) { font-size: 16px; }
-  .tv-filter-grid :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { min-height: 44px; }
-}
-@media (max-width: 720px) {
-  .tv { overflow-x: clip; }
-  .tv-alert { padding: 10px 12px; }
-  .tv-break { padding: 14px 16px 12px; }
-  .tv-toggle { width: 100%; justify-content: center; }
-  .tv-foot { padding: 12px 16px; }
-  .tv-doc-details ul { min-width: 0; }
-}
-@media (max-width: 420px) {
-  .tv-quick { gap: 8px; }
-  .tv-quick-btn { flex: 1 1 calc(50% - 4px); justify-content: center; }
-  .tv-bars.is-days { grid-template-columns: minmax(0, 1fr); }
-}
-
-/* Tablets and phones: links inside the table are 44 px tall targets. */
-@media (max-width: 1023px), (pointer: coarse) {
+  .tv-search input, .tv-field :is(input, select) { font-size: 16px; }
   .tv-table { font-size: 14px; }
   .tv-table a { display: inline-flex; align-items: center; min-height: 44px; }
   .tv-table small { font-size: 12.5px; }
 }
+
+/* Phone: the toolbar is the search box and a Filters button; the totals scroll sideways in their own row; the filters open as a bottom sheet. */
+@media (max-width: 768px) {
+  .tv { overflow-x: clip; }
+  .tv .workspace-header-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; gap: 8px; }
+  .tv .workspace-header-actions .ui-button { min-width: 0; padding-inline: 6px; font-size: 13px; }
+  .tv .workspace-header-actions .ui-button svg { display: none; }
+  .tv-stats { flex-wrap: nowrap; margin-inline: -16px; padding: 0 16px 2px; overflow-x: auto; scrollbar-width: none; }
+  .tv-stats::-webkit-scrollbar { display: none; }
+  .tv-search { flex: 1 1 0; min-width: 0; }
+  .tv-more-wrap { flex: none; }
+  .tv-backdrop { position: fixed; inset: 0; z-index: 79; display: block; background: rgba(0, 0, 0, .42); }
+  .tv-more-panel { position: fixed; top: auto; right: 0; bottom: 0; left: 0; z-index: 80; width: auto; max-height: 86dvh; overflow-y: auto; padding: 0 16px 16px; border-width: 1px 0 0; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 35px rgba(0, 0, 0, .22); overscroll-behavior: contain; }
+  .tv-more-panel > header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; margin: 0 -16px 12px; padding: 12px 16px; border-bottom: 1px solid var(--border-main); background: var(--bg-card); }
+  .tv-more-panel > header h2 { font-size: 16px; font-weight: 600; color: var(--text-main); }
+  .tv-sheet-close { display: inline-grid; place-items: center; width: 44px; height: 44px; margin-right: -10px; border-radius: 10px; color: var(--text-muted); }
+  .tv-sheet-close:hover { background: var(--tint-2); color: var(--text-main); }
+  .tv-more-panel > footer { position: sticky; bottom: -16px; margin: 14px -16px -16px; padding: 12px 16px; background: var(--bg-card); }
+  .tv-breakdowns { grid-template-columns: minmax(0, 1fr); }
+  .tv-break { padding: 14px 16px 12px; }
+  .tv-alert { padding: 10px 12px; }
+  .tv-doc-details ul { min-width: 0; }
+  .tv-table-card .db-foot { padding-inline: 0; }
+  .tv-table-card .db-pager { flex-wrap: wrap; }
+}
+@media (max-width: 480px) {
+  .tv-more-grid { grid-template-columns: minmax(0, 1fr); }
+  .tv-bars.is-days { grid-template-columns: minmax(0, 1fr); }
+}
+body.tv-sheet-open { overflow: hidden; }
 
 /* the outer frame: the scroll box around the table, the same thin frame as the Tasks table (tokens: theme.css); the card around it gives up its own border.
    Under 900px the rows are cards: no frame, each card keeps its single thin border. */
@@ -146,21 +197,33 @@
   :root:root .tv-table-wrap .tv-table thead th { border-top-width: 0; }
 }
 :root:root .tv-table-card { border-color: var(--table-line); }
-@media (min-width: 900px) { :root:root .tv-table-card { border-color: transparent; } }
+@media (min-width: 900px) { :root:root .tv-table-card { border-color: transparent; background: transparent; } }
 
 /* under 900px (a phone or a narrow tablet) every row is a labelled card with one thin 6px border, words wrap at spaces */
 @media (max-width: 899px) {
+  .tv-table-wrap { max-height: none; overflow: visible; }
   .tv-table { min-width: 0; table-layout: auto; }
   .tv-table colgroup { display: none; }
   .tv-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .tv-table, .tv-table tbody, .tv-table tr, .tv-table td { display: block; }
+  .tv-table, .tv-table tbody, .tv-table td { display: block; }
   :root:root:root .tv-table { overflow: visible; border: 0; border-radius: 0; }
-  .tv-table tr { padding: 12px 16px; }
-  :root:root .tv-table td { height: auto; padding: 8px 0; border: 0; font-size: 14px; }
-  .tv-table td::before { content: attr(data-label); display: block; margin-bottom: 1px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
-  .tv-table td { overflow-wrap: break-word; }
-  .tv-table td::before { margin-bottom: 2px; }
-  .tv-table a { display: inline-flex; align-items: center; min-height: 44px; }
-  .tv-table .tv-hint { margin-left: 4px; }
+  .tv-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; padding: 12px 16px; }
+  :root:root .tv-table td { height: auto; padding: 6px 0; border: 0; font-size: 14px; }
+  .tv-table td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
+  .tv-table td { min-width: 0; overflow-wrap: break-word; }
+  .tv-table td:nth-child(2) { grid-column: 1 / -1; order: 0; }
+  .tv-table td:nth-child(2)::before { display: none; }
+  .tv-table td:nth-child(1) { order: 1; }
+  .tv-table td:nth-child(4) { order: 2; }
+  .tv-table td:nth-child(3) { grid-column: 1 / -1; order: 3; }
+  .tv-table td:nth-child(5) { grid-column: 1 / -1; order: 4; }
+  .tv-table td:nth-child(6) { order: 5; }
+  .tv-table td:nth-child(8) { order: 6; }
+  .tv-table td:nth-child(7) { grid-column: 1 / -1; order: 7; }
+  .tv-table a { display: inline-flex; align-items: center; min-height: 32px; }
+  .tv-table .tv-hint { margin-left: 0; }
+  .tv-table td small { margin-top: 0; }
+  :root:root .tv-table td { padding: 4px 0; }
+  .tv-who .cid-chip { margin-top: 0; }
   .tv-table tr { border: var(--table-line-width) solid var(--table-line); border-radius: var(--table-frame-radius, 6px); margin: 0 0 12px; }
 }

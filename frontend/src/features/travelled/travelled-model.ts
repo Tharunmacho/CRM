@@ -327,3 +327,64 @@ export function exportName(filters: TravelledFilters, format: 'xlsx' | 'csv'): s
   const part = filters.undated ? 'date-not-recorded' : filters.year ? [filters.year, filters.month, filters.day].filter(Boolean).join('-') : 'all'
   return `travelled-${part}.${format}`
 }
+
+/* ------------------------------------------------------------------ the Period choice */
+
+/** What the one Period select shows: every date, a ready range, the undated view, or a date the person typed in "More filters". */
+export type PeriodValue = 'all' | QuickKey | 'undated' | 'custom'
+
+export function periodValue(filters: TravelledFilters, today: string): PeriodValue {
+  if (filters.undated) return 'undated'
+  if (!dateSummary(filters)) return 'all'
+  return activeQuick(filters, today) || 'custom'
+}
+
+/** Pick a Period. "Custom" changes nothing by itself (the person fills the dates in "More filters"); the others replace every date part. */
+export function choosePeriod(filters: TravelledFilters, value: PeriodValue, today: string): TravelledFilters {
+  if (value === 'custom') return filters
+  if (value === 'all') return drillTo(filters, '')
+  if (value === 'undated') return filters.undated ? filters : toggleUndated(filters)
+  return activeQuick(filters, today) === value ? filters : toggleQuick(filters, value, today)
+}
+
+/**
+ * How many of the filters behind "More filters" are on: Year, Month, exact Travel date, a From / To range (only when the Period select
+ * does not already say it, i.e. a "Custom" date), Job / order and Missing documents only.
+ */
+export function moreFilterCount(filters: TravelledFilters, today: string): number {
+  const dates = periodValue(filters, today) === 'custom' ? [filters.year, filters.month, filters.day, filters.from || filters.to].filter(Boolean).length : 0
+  return dates + (filters.order ? 1 : 0) + (filters.incomplete ? 1 : 0)
+}
+
+/** Every filter on except the search words (the phone's "Filters" button counts these; the search box is always in sight). */
+export function filterCount(filters: TravelledFilters): number {
+  return activeChips(filters).filter(chip => chip.key !== 'q').length
+}
+
+/* ------------------------------------------------------------------ pages of the list */
+
+export const PAGE_SIZE_CHOICES = [10, 25, 50, 100] as const
+export const DEFAULT_PAGE_SIZE = 25
+/** A phone shows one card per candidate, so until the person picks a size it starts with fewer of them. */
+export const PHONE_PAGE_SIZE = 10
+
+/** The size a page starts with: the person's own saved choice, else 25 (10 on a phone). */
+export function startingPageSize(saved: number | null, phone: boolean): number {
+  return saved && (PAGE_SIZE_CHOICES as readonly number[]).includes(saved) ? saved : phone ? PHONE_PAGE_SIZE : DEFAULT_PAGE_SIZE
+}
+
+export interface PageWindow { page: number; pageCount: number; pageSize: number; total: number; from: number; to: number }
+
+/** Which slice of a list that is already fully loaded a page shows. A page past the end falls back to the last one; an empty list has one empty page. */
+export function pageWindow(total: number, page: number, pageSize: number): PageWindow {
+  const size = Math.max(1, Math.floor(pageSize) || DEFAULT_PAGE_SIZE)
+  const count = Math.max(0, Math.floor(total) || 0)
+  const pageCount = Math.max(1, Math.ceil(count / size))
+  const safe = Math.min(Math.max(0, Math.floor(page) || 0), pageCount - 1)
+  return { page: safe, pageCount, pageSize: size, total: count, from: count === 0 ? 0 : safe * size + 1, to: Math.min(count, (safe + 1) * size) }
+}
+
+export function pageRows<T>(rows: readonly T[], page: number, pageSize: number): T[] {
+  const slice = pageWindow(rows.length, page, pageSize)
+  return rows.slice(slice.from === 0 ? 0 : slice.from - 1, slice.to)
+}

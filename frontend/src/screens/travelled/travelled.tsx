@@ -1,37 +1,49 @@
-import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Building2, ChevronRight, Download, FileSpreadsheet, Globe2, Loader2, Plane, RefreshCw, Users, X } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { AlertCircle, Check, ChevronDown, ChevronRight, Download, FileSpreadsheet, Loader2, Plane, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Input, Select } from '@/shared/ui/primitives'
 import { EmptyState, PageHeader, StatusPill } from '@/shared/ui/display'
 import { SnapshotState } from '@/shared/ui/page-loading'
-import { SummaryCards } from '@/shared/ui/workspace'
+import { cn } from '@/shared/lib/cn'
+import { Pager } from '@/features/candidates/components/db-parts'
+import { readPageSize, savePageSize } from '@/features/candidates/pager-model'
+import { useMediaQuery } from '@/features/application-form/use-media-query'
 import { downloadTravelled, useTravelled } from '@/features/travelled/travelled-api'
 import {
-  EMPTY_FILTERS, MONTH_NAMES, activeChips, activeQuick, agencyToday, barPercent, chooseTravelDate, clearChip, dateBarLabel, dateLevel, dateSummary, documentsLabel,
-  documentsTitle, drillTo, filtersFromParams, formatTravelDay, monthName, queryFor, quickRanges, setFilter,
-  toggleFilter, toggleIncomplete, toggleQuick, toggleUndated, withChosen,
-  type TravelledFilterKey, type TravelledFilters, type TravelledResult, type TravelledRow,
+  EMPTY_FILTERS, MONTH_NAMES, PAGE_SIZE_CHOICES, activeChips, agencyToday, barPercent, choosePeriod, chooseTravelDate, clearChip, dateBarLabel, dateLevel,
+  dateSummary, documentsLabel, documentsTitle, drillTo, filterCount, filtersFromParams, formatTravelDay, monthName, moreFilterCount, pageRows, periodValue, queryFor, quickRanges,
+  setFilter, startingPageSize, toggleFilter, toggleIncomplete, withChosen,
+  type PeriodValue, type TravelledFilterKey, type TravelledFilters, type TravelledResult, type TravelledRow,
 } from '@/features/travelled/travelled-model'
+import '@/styles/data-bank-v2.css'
 import '@/styles/travelled.css'
 import '@/styles/touch-targets.css'
 import { TravellerIdChip } from '@/features/candidates/components/candidate-id-chip'
 
 const SHOWN = 6
+const BREAKDOWN_KEY = 'crm-travelled-breakdown'
+/** The phone layout: the toolbar is the search box and one Filters button, the rest lives in a bottom sheet. */
+const PHONE = '(max-width: 768px)'
 
 type Options = TravelledResult['options']
 const NO_OPTIONS: Options = { years: [], months: [], undated: 0, clients: [], agencies: [], countries: [], orders: [] }
 
+const readBreakdownOpen = () => { try { return window.localStorage.getItem(BREAKDOWN_KEY) === 'open' } catch { return false } }
+const saveBreakdownOpen = (open: boolean) => { try { window.localStorage.setItem(BREAKDOWN_KEY, open ? 'open' : 'closed') } catch { /* the choice lasts until the page closes */ } }
+
 /**
  * Who has travelled, when, for which client and through which agency. Every choice is in the address
- * (?year=2026&month=05&client=...), so a view can be bookmarked or sent to someone. Clicking a bar of a breakdown
- * narrows the list to it; clicking it again widens it.
+ * (?year=2026&month=05&client=...), so a view can be bookmarked or sent to someone. The table comes first: one slim line of totals above it,
+ * one toolbar row (search, Period, Client, Country, Agency, More filters) and, only when a filter is on, a row of chips. The breakdowns are
+ * folded away until asked for; clicking a bar narrows the list to it, clicking it again widens it.
  */
 export default function TravelledPage() {
   const store = useStore()
   const [params, setParams] = useSearchParams()
   const filters = filtersFromParams(params)
   const apply = (next: TravelledFilters, replace = false) => setParams(new URLSearchParams(queryFor(next)), { replace })
+  const phone = useMediaQuery(PHONE)
 
   const { data: fresh, error, refresh, refreshing } = useTravelled(filters, store.me.id)
   // Keep the previous list on screen (dimmed) while a new choice loads, so the page does not jump.
@@ -72,58 +84,128 @@ export default function TravelledPage() {
   const today = agencyToday()
   const years = withChosen([...new Set([today.slice(0, 4), ...options.years.map(String)])].sort().reverse(), filters.year)
   const otherYears = Array.from({ length: 111 }, (_, index) => String(2100 - index)).filter(year => !years.includes(year))
-  const quick = activeQuick(filters, today)
+  const period = periodValue(filters, today)
   const travelDate = filters.year && filters.month && filters.day ? `${filters.year}-${filters.month}-${filters.day}` : ''
+  const countries = data ? data.summary.byCountry.filter(item => item.country !== 'Not recorded').length : 0
+  const agencies = data ? data.summary.byAgency.filter(item => item.agency !== 'Not recorded').length : 0
   const busy = refreshing || (stale && !error)
+
+  // More filters (desktop popover, phone bottom sheet) and the folded breakdown.
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreButton = useRef<HTMLButtonElement>(null)
+  const morePanel = useRef<HTMLDivElement>(null)
+  const [breakdownOpen, setBreakdownOpen] = useState(readBreakdownOpen)
+  const toggleBreakdown = () => setBreakdownOpen(open => { saveBreakdownOpen(!open); return !open })
+  const badge = phone ? filterCount(filters) : moreFilterCount(filters, today)
+  useEffect(() => {
+    if (!moreOpen) return undefined
+    const inside = (target: EventTarget | null) => target instanceof Element && !!(morePanel.current?.contains(target) || moreButton.current?.contains(target) || target.closest('.custom-select-popup'))
+    const outside = (event: PointerEvent) => { if (!inside(event.target)) setMoreOpen(false) }
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || document.querySelector('.custom-select-popup')) return
+      event.preventDefault(); setMoreOpen(false); moreButton.current?.focus()
+    }
+    const frame = requestAnimationFrame(() => Array.from(morePanel.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), [tabindex="0"]') ?? []).find(item => item.getClientRects().length > 0)?.focus({ preventScroll: true }))
+    document.addEventListener('pointerdown', outside)
+    document.addEventListener('keydown', key)
+    return () => { cancelAnimationFrame(frame); document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', key) }
+  }, [moreOpen])
+  useEffect(() => { if (!phone) return undefined; document.body.classList.toggle('tv-sheet-open', moreOpen); return () => document.body.classList.remove('tv-sheet-open') }, [phone, moreOpen])
+
+  // The list is read whole; pages are slices of it (no new request when the page or the size changes).
+  const [pageSize, setPageSize] = useState(() => startingPageSize(readPageSize('travelled', PAGE_SIZE_CHOICES), phone))
+  const [page, setPage] = useState(0)
+  useEffect(() => { setPage(0) }, [filterQuery])
+
+  const periodField = <Select aria-label="Period" value={period} onChange={event => {
+    const value = event.target.value as PeriodValue
+    if (value === 'custom') setMoreOpen(true); else apply(choosePeriod(filters, value, today))
+  }}>
+    <option value="all">All dates</option>
+    {quickRanges(today).map(range => <option key={range.key} value={range.key}>{range.label}</option>)}
+    <option value="undated">Date not recorded{options.undated ? ` (${options.undated})` : ''}</option>
+    <option value="custom">{period === 'custom' ? `Custom: ${dateSummary(filters)}` : 'Custom…'}</option>
+  </Select>
+  const clientField = <Select aria-label="Client" value={filters.client} onChange={event => set('client', event.target.value)}><option value="">All clients</option>{withChosen(options.clients, filters.client).map(name => <option key={name} value={name}>{name}</option>)}</Select>
+  const countryField = <Select aria-label="Country" value={filters.country} onChange={event => set('country', event.target.value)}><option value="">All countries</option>{withChosen(options.countries, filters.country).map(name => <option key={name} value={name}>{name}</option>)}</Select>
+  const agencyField = <Select aria-label="Agency" value={filters.agency} onChange={event => set('agency', event.target.value)}><option value="">All agencies</option>{withChosen(options.agencies, filters.agency).map(name => <option key={name} value={name}>{name}</option>)}</Select>
 
   return <div className="tv" aria-busy={busy}>
     <PageHeader title="Travelled" actions={<>
       <Button size="sm" icon={<RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />} disabled={refreshing} onClick={refresh}>{refreshing ? 'Refreshing' : 'Refresh'}</Button>
       <Button size="sm" disabled={!data || !!exporting} icon={exporting === 'xlsx' ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />} onClick={() => void exportFile('xlsx')}>{exporting === 'xlsx' ? 'Preparing Excel…' : 'Export Excel'}</Button>
       <Button size="sm" disabled={!data || !!exporting} icon={exporting === 'csv' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} onClick={() => void exportFile('csv')}>{exporting === 'csv' ? 'Preparing CSV…' : 'Export CSV'}</Button>
-    </>} />
+    </>}>
+      {data && <ul className="tv-stats" aria-label="Totals for this list">
+        <li><Plane size={14} aria-hidden="true" /><strong className="tnum">{data.total.toLocaleString()}</strong> Travelled</li>
+        <li><strong className="tnum">{data.summary.byClient.length.toLocaleString()}</strong> {data.summary.byClient.length === 1 ? 'Client' : 'Clients'}</li>
+        <li><strong className="tnum">{countries.toLocaleString()}</strong> {countries === 1 ? 'Country' : 'Countries'}</li>
+        <li><strong className="tnum">{agencies.toLocaleString()}</strong> {agencies === 1 ? 'Agency' : 'Agencies'}</li>
+      </ul>}
+    </PageHeader>
 
-    <section className="tv-card tv-filters" aria-label="Filters">
-      <div className="tv-quick" role="group" aria-label="Quick dates">
-        <Button size="sm" onClick={clearAll}>Show all candidates</Button>
-        <button type="button" className={!dateSummary(filters) ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={!dateSummary(filters)} onClick={() => apply(drillTo(filters, ''))}>All dates</button>
-        {quickRanges(today).map(range => <button key={range.key} type="button" className={quick === range.key ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={quick === range.key}
-          title={`${formatTravelDay(range.from)} to ${formatTravelDay(range.to)}`} onClick={() => apply(toggleQuick(filters, range.key, today))}>{range.label}</button>)}
-        <button type="button" className={filters.undated ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={!!filters.undated} onClick={() => apply(toggleUndated(filters))}>Date not recorded{options.undated ? ` (${options.undated})` : ''}</button>
+    <section className="tv-toolbar" aria-label="Filters">
+      <label className="tv-search">
+        <Search size={16} aria-hidden="true" />
+        <input type="search" aria-label="Search candidate, client or job" placeholder="Search" value={search} onChange={event => setSearch(event.target.value)} />
+      </label>
+      {!phone && <>
+        <div className="tv-sel">{periodField}</div>
+        <div className="tv-sel">{clientField}</div>
+        <div className="tv-sel">{countryField}</div>
+        <div className="tv-sel">{agencyField}</div>
+      </>}
+      <div className="tv-more-wrap">
+        <button ref={moreButton} type="button" className={cn('tv-more-toggle', moreOpen && 'is-open', badge > 0 && 'has-count')} aria-expanded={moreOpen} aria-haspopup="dialog" aria-controls="tv-more-panel" onClick={() => setMoreOpen(open => !open)}>
+          <SlidersHorizontal size={15} aria-hidden="true" />
+          {phone ? 'Filters' : 'More filters'}
+          {badge > 0 && <span className="tv-count tnum" aria-label={`${badge} ${badge === 1 ? 'filter' : 'filters'} on`}>{badge}</span>}
+          <ChevronDown size={15} aria-hidden="true" className="tv-chevron" />
+        </button>
+        {moreOpen && <>
+          {phone && <div className="tv-backdrop" aria-hidden="true" onClick={() => setMoreOpen(false)} />}
+          <div ref={morePanel} id="tv-more-panel" className="tv-more-panel" role="dialog" aria-label={phone ? 'Filters' : 'More filters'}>
+            {phone && <header><h2>Filters</h2><button type="button" className="tv-sheet-close" aria-label="Close filters" onClick={() => { setMoreOpen(false); moreButton.current?.focus() }}><X size={18} aria-hidden="true" /></button></header>}
+            <div className="tv-more-grid">
+              {phone && <>
+                <Field label="Period">{periodField}</Field>
+                <Field label="Client">{clientField}</Field>
+                <Field label="Country">{countryField}</Field>
+                <Field label="Agency">{agencyField}</Field>
+              </>}
+              <Field label="Year"><Select aria-label="Year" searchable value={filters.year} onChange={event => set('year', event.target.value)}><option value="">All years</option><optgroup label="Current and recorded years">{years.map(year => <option key={year} value={year}>{year}</option>)}</optgroup><optgroup label="Other years">{otherYears.map(year => <option key={year} value={year}>{year}</option>)}</optgroup></Select></Field>
+              <Field label="Month"><Select aria-label="Travel month" value={filters.month} disabled={!filters.year} onChange={event => set('month', event.target.value)}><option value="">{filters.year ? 'All months' : 'Choose a year'}</option>{MONTH_NAMES.map((name, index) => <option key={name} value={String(index + 1).padStart(2, '0')}>{name}</option>)}</Select></Field>
+              <Field label="Travel date"><Input type="date" aria-label="Travel date" min="1990-01-01" max="2100-12-31" value={travelDate} onChange={event => apply(chooseTravelDate(filters, event.target.value))} /></Field>
+              <Field label="Job / order"><Select aria-label="Job or order" value={filters.order} onChange={event => set('order', event.target.value)}><option value="">All jobs / orders</option>{filters.order && !orders.some(order => order.id === filters.order) && <option value={filters.order}>Selected order</option>}{orders.map(order => <option key={order.id} value={order.id}>{order.job || 'Job'} · {order.ref || order.client}{!filters.client ? ` · ${order.client}` : ''}</option>)}</Select></Field>
+              <button type="button" className={filters.incomplete ? 'tv-toggle is-on' : 'tv-toggle'} aria-pressed={!!filters.incomplete} onClick={() => apply(toggleIncomplete(filters))}>
+                {filters.incomplete && <Check size={14} aria-hidden="true" />}Missing documents only
+              </button>
+            </div>
+            <footer>
+              {chips.length > 0 && <button type="button" className="tv-clear" onClick={clearAll}>Clear all</button>}
+              <Button size="sm" variant="primary" onClick={() => { setMoreOpen(false); moreButton.current?.focus() }}>Done</Button>
+            </footer>
+          </div>
+        </>}
       </div>
-      <div className="tv-filter-grid">
-        <label>Year<Select aria-label="Year" searchable value={filters.year} onChange={e => set('year', e.target.value)}><option value="">All years</option><optgroup label="Current and recorded years">{years.map(year => <option key={year} value={year}>{year}</option>)}</optgroup><optgroup label="Other years">{otherYears.map(year => <option key={year} value={year}>{year}</option>)}</optgroup></Select></label>
-        <label>Month<Select aria-label="Travel month" value={filters.month} disabled={!filters.year} onChange={e => set('month', e.target.value)}><option value="">{filters.year ? 'All months' : 'Choose a year'}</option>{MONTH_NAMES.map((name, index) => <option key={name} value={String(index + 1).padStart(2, '0')}>{name}</option>)}</Select></label>
-        <label>Travel date<Input type="date" aria-label="Travel date" min="1990-01-01" max="2100-12-31" value={travelDate} onChange={e => apply(chooseTravelDate(filters, e.target.value))} /></label>
-        <label>Client<Select aria-label="Client" value={filters.client} onChange={e => set('client', e.target.value)}><option value="">All clients</option>{withChosen(options.clients, filters.client).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
-        <label>Job / order<Select aria-label="Job or order" value={filters.order} onChange={e => set('order', e.target.value)}><option value="">All jobs / orders</option>{filters.order && !orders.some(order => order.id === filters.order) && <option value={filters.order}>Selected order</option>}{orders.map(order => <option key={order.id} value={order.id}>{order.job || 'Job'} · {order.ref || order.client}{!filters.client ? ` · ${order.client}` : ''}</option>)}</Select></label>
-        <label>Agency<Select aria-label="Agency" value={filters.agency} onChange={e => set('agency', e.target.value)}><option value="">All agencies</option>{withChosen(options.agencies, filters.agency).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
-        <label>Country<Select aria-label="Country" value={filters.country} onChange={e => set('country', e.target.value)}><option value="">All countries</option>{withChosen(options.countries, filters.country).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
-        <div className="tv-search-row">
-          <label className="tv-search">Search<Input type="search" aria-label="Search candidate, client or job" placeholder="Name, client or job" value={search} onChange={e => setSearch(e.target.value)} /></label>
-          <button type="button" className={filters.incomplete ? 'tv-toggle is-on' : 'tv-toggle'} aria-pressed={!!filters.incomplete} onClick={() => apply(toggleIncomplete(filters))}>Missing documents only</button>
-        </div>
-      </div>
-      {data && <p className="tv-filter-note">All travelled candidates are shown when no filters are selected. Choosing a filter updates the list immediately; Show all candidates clears every filter. {!!options.undated && <>{options.undated} travelled {options.undated === 1 ? 'record has' : 'records have'} no saved travel date and will not appear under a specific year or month.</>}</p>}
+    </section>
+
+    <div className="tv-meta">
       {chips.length > 0 && <div className="tv-chips" role="group" aria-label="Filters in use">
         {chips.map(chip => <button key={chip.key} type="button" className="tv-chip" onClick={() => apply(clearChip(filters, chip.key))} aria-label={`Remove ${chip.label}`}>{chip.label}<X size={12} aria-hidden="true" /></button>)}
         <button type="button" className="tv-clear" onClick={clearAll}>Clear all</button>
       </div>}
-    </section>
+      {data && <button type="button" className="tv-breakdown-toggle" aria-expanded={breakdownOpen} aria-controls="tv-breakdowns" onClick={toggleBreakdown}>
+        <ChevronRight size={15} aria-hidden="true" className="tv-chevron" />Breakdown
+      </button>}
+    </div>
 
     {(error || exportError) && <div role="alert" className="tv-alert"><span><AlertCircle size={15} aria-hidden="true" />{error || exportError}{error && data && ' Showing the last loaded list.'}</span>{error ? <button type="button" onClick={refresh}>Try again</button> : <button type="button" disabled={!!exporting} onClick={() => void exportFile(lastExport)}>Try again</button>}</div>}
 
     {!data
       ? !error && <SnapshotState label="Loading travelled candidates" />
       : <div className={stale ? 'tv-body is-stale' : 'tv-body'}>
-        <SummaryCards items={[
-          { label: 'Travelled', value: data.total.toLocaleString(), detail: dateSummary(filters) || 'All dates', icon: Plane, tone: 'green' },
-          { label: 'Clients', value: data.summary.byClient.length.toLocaleString(), detail: filters.client || 'Employers they flew to', icon: Building2, tone: 'blue' },
-          { label: 'Countries', value: data.summary.byCountry.filter(item => item.country !== 'Not recorded').length.toLocaleString(), detail: filters.country || 'Where they went', icon: Globe2, tone: 'amber' },
-          { label: 'Agencies', value: data.summary.byAgency.filter(item => item.agency !== 'Not recorded').length.toLocaleString(), detail: filters.agency || 'Recorded referral agencies', icon: Users, tone: 'violet' },
-        ]} />
-
-        <details className="tv-breakdown-panel"><summary>View breakdowns by date, client, agency and country</summary><div className="tv-breakdowns">
+        {breakdownOpen && <div id="tv-breakdowns" className="tv-breakdowns">
           <DateBreakdown data={data} filters={filters} onPick={value => apply(value)} />
           <Breakdown title="By client" empty="No clients yet" items={data.summary.byClient.map(item => ({ label: item.client, value: item.client, count: item.count }))}
             selected={filters.client} onPick={value => apply(toggleFilter(filters, 'client', value))} />
@@ -131,16 +213,22 @@ export default function TravelledPage() {
             selected={filters.agency} onPick={value => apply(toggleFilter(filters, 'agency', value))} />
           <Breakdown title="By country" empty="No countries yet" items={data.summary.byCountry.map(item => ({ label: item.country, value: item.country, count: item.count }))}
             selected={filters.country} onPick={value => apply(toggleFilter(filters, 'country', value))} />
-        </div></details>
+        </div>}
 
         {data.rows.length === 0
           ? <section className="tv-card"><EmptyState icon={<Plane size={20} strokeWidth={1.6} />}
             title={chips.length ? 'No one matches these filters' : 'No one has travelled yet'}
             description={chips.length ? 'Remove a filter to see more.' : 'Confirmed travelled candidates appear here with their placement marked Deployed.'}
             action={chips.length ? <Button size="sm" onClick={clearAll}>Clear all filters</Button> : undefined} /></section>
-          : <TravelTable rows={data.rows} total={data.total} />}
+          : <TravelTable rows={data.rows} total={data.total} page={page} pageSize={pageSize} filtered={chips.length > 0}
+            onPage={setPage} onPageSize={size => { setPageSize(size); savePageSize('travelled', size); setPage(0) }} />}
       </div>}
   </div>
+}
+
+/** A label above a control, for the fields inside the "More filters" panel. */
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return <div className="tv-field"><span>{label}</span>{children}</div>
 }
 
 /** Years, then the months of a year, then the days of a month: each bar narrows the list, the crumbs above walk back out. */
@@ -201,33 +289,37 @@ function Breakdown({ title, items, selected, onPick, empty }: { title: string; i
   </section>
 }
 
-function TravelTable({ rows, total }: { rows: TravelledRow[]; total: number }) {
+function TravelTable({ rows, total, page, pageSize, filtered, onPage, onPageSize }: { rows: TravelledRow[]; total: number; page: number; pageSize: number; filtered: boolean; onPage: (page: number) => void; onPageSize: (size: number) => void }) {
+  const wrap = useRef<HTMLDivElement>(null)
+  const shown = pageRows(rows, page, pageSize)
+  const go = (next: number) => { onPage(next); wrap.current?.scrollTo({ top: 0 }) }
   return <section className="tv-card tv-table-card" aria-label="Travelled candidates">
-    <div className="tv-table-wrap">
+    <div ref={wrap} className="tv-table-wrap">
       <table className="tv-table">
         <colgroup><col className="tv-c-date" /><col className="tv-c-who" /><col className="tv-c-client" /><col className="tv-c-country" /><col className="tv-c-job" /><col className="tv-c-agency" /><col className="tv-c-docs" /><col className="tv-c-recruiter" /></colgroup>
         <thead><tr><th>Travel date</th><th>Candidate</th><th>Client</th><th>Country</th><th>Job</th><th>Agency</th><th>Documents</th><th>Recruiter</th></tr></thead>
         <tbody>
-          {rows.map(row => <tr key={row.applicationId}>
-            <td data-label="Travel date" className="tnum">{row.travelDate ? formatTravelDay(row.travelDate) : <span className="tv-muted">Not recorded</span>}</td>
+          {shown.map(row => <tr key={row.applicationId}>
+            <td data-label="Travel date" className="tnum tv-c-when">{row.travelDate ? formatTravelDay(row.travelDate) : <span className="tv-muted">Not recorded</span>}</td>
             <td data-label="Candidate" className="tv-who">
               <Link to={`/candidates/${row.candidateId}`}>{row.name}</Link>
               <TravellerIdChip candidate={row} />
-              {row.status && <StatusPill status={row.status} />}
+              {row.status && row.status !== 'deployed' && <StatusPill status={row.status} />}
             </td>
             <td data-label="Client">{row.clientId ? <Link to={`/clients/${row.clientId}`}>{row.client}</Link> : row.client || <span className="tv-muted">—</span>}</td>
             <td data-label="Country">{row.country || <span className="tv-muted">—</span>}</td>
             <td data-label="Job">{row.orderId ? <Link to={`/orders/${row.orderId}`}>{row.job || 'Open job'}</Link> : row.job || <span className="tv-muted">—</span>}{row.orderRef && <small className="ident">{row.orderRef}</small>}</td>
-            <td data-label="Agency">{row.agency ? row.agency : <span className="tv-muted">—<Link className="tv-hint" to={`/candidates/${row.candidateId}/application`}>add agency</Link></span>}</td>
+            <td data-label="Agency">{row.agency ? row.agency : <Link className="tv-hint" to={`/candidates/${row.candidateId}/application`}>Add agency</Link>}</td>
             <td data-label="Documents">{row.documents
-              ? row.documents.missing.length ? <details className="tv-doc-details"><summary className="tv-docs is-short">{documentsLabel(row)}<small>{row.documents.missing.length} missing</small></summary><ul>{row.documents.missing.map(label => <li key={label}>{label}</li>)}</ul><Link to={`/candidates/${row.candidateId}/application`}>Review documents</Link></details>
-                : <span className="tv-docs" title={documentsTitle(row)}>{documentsLabel(row)}<small>Complete</small></span>
+              ? row.documents.missing.length ? <details className="tv-doc-details"><summary className="tv-docs is-short" title={documentsTitle(row)}>{documentsLabel(row)}<ChevronDown size={13} aria-hidden="true" /><span className="sr-only"> documents on file, {row.documents.missing.length} missing</span></summary><ul>{row.documents.missing.map(label => <li key={label}>{label}</li>)}</ul><Link to={`/candidates/${row.candidateId}/application`}>Review documents</Link></details>
+                : <span className="tv-docs is-done" title={documentsTitle(row)}><Check size={13} aria-hidden="true" />{documentsLabel(row)}<span className="sr-only"> documents on file, none missing</span></span>
               : <span className="tv-muted">—</span>}</td>
             <td data-label="Recruiter">{row.recruiter || <span className="tv-muted">—</span>}</td>
           </tr>)}
         </tbody>
       </table>
     </div>
-    <footer className="tv-foot">{rows.length === total ? `${total.toLocaleString()} ${total === 1 ? 'candidate' : 'candidates'}` : `Showing ${rows.length.toLocaleString()} of ${total.toLocaleString()}. Narrow the filters or export the file to see all.`}</footer>
+    <Pager page={page} pageSize={pageSize} total={rows.length} noun="candidates" filtered={filtered} sizes={PAGE_SIZE_CHOICES} onPage={go} onPageSize={onPageSize} />
+    {rows.length < total && <p className="tv-foot">Showing the first {rows.length.toLocaleString()} of {total.toLocaleString()}. Narrow the filters or export the file to see all.</p>}
   </section>
 }
