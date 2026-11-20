@@ -18,19 +18,36 @@ export interface FigureRow {
 export interface FigureGroup { key: string; title: string; icon: ReactNode; tone?: 'done'; rows: FigureRow[] }
 
 /** The narrowest panel at which the figure tables are tables (the Tasks list's 1080px); below it every row is a card. */
-const TABLE_MIN_WIDTH = 1080
-let headCanvas: CanvasRenderingContext2D | null | undefined
-/** The width in px of a column heading as the table sets it (11.5px, 700, uppercase, .04em); an estimate where there is no canvas (tests, server). */
-function headWidth(text: string): number {
-  if (headCanvas === undefined) {
-    try { headCanvas = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d') } catch { headCanvas = null }
+export const TABLE_MIN_WIDTH = 1080
+/** Side padding of a heading or figure cell in the wide table, both sides (8px + 8px), plus the 1px column line. */
+const CELL_PAD = 17
+let measureCanvas: CanvasRenderingContext2D | null | undefined
+function canvas(): CanvasRenderingContext2D | null {
+  if (measureCanvas === undefined) {
+    try { measureCanvas = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d') } catch { measureCanvas = null }
   }
-  const upper = text.toUpperCase()
-  if (!headCanvas) return Math.ceil(upper.length * 8.2)
+  return measureCanvas
+}
+/** The width in px of ONE word as the table sets it (`font` is the CSS font shorthand without the family); an estimate where there is no canvas (tests, server). */
+function wordWidth(word: string, font: string, spacing: number, fallback: number): number {
+  const ctx = canvas()
+  if (!ctx) return Math.ceil(word.length * fallback)
   try {
-    headCanvas.font = `700 11.5px ${getComputedStyle(document.body).fontFamily}`
-    return Math.ceil(headCanvas.measureText(upper).width + upper.length * 0.46)
-  } catch { return Math.ceil(upper.length * 8.2) }
+    ctx.font = `${font} ${getComputedStyle(document.body).fontFamily}`
+    return Math.ceil(ctx.measureText(word).width + word.length * spacing)
+  } catch { return Math.ceil(word.length * fallback) }
+}
+const wordsOf = (text: string) => text.split(/\s+/).filter(Boolean)
+/**
+ * The width in px of the LONGEST WORD of a column heading as the table sets it (11.5px, 700, uppercase, .04em). Headings wrap at spaces, so a figure
+ * column only has to be as wide as that word plus its padding; an estimate where there is no canvas.
+ */
+export function headWordWidth(text: string): number {
+  return Math.max(0, ...wordsOf(text.toUpperCase()).map(word => wordWidth(word, '700 11.5px', 0.46, 8.2)))
+}
+/** The width of the longest word of the names as the table sets them (13px, 600): the name column is never narrower than that word plus its padding. */
+export function nameWordWidth(names: string[]): number {
+  return Math.max(0, ...names.flatMap(wordsOf).map(word => wordWidth(word, '600 13px', 0, 7.6)))
 }
 
 function hueOf(name: string) {
@@ -39,21 +56,24 @@ function hueOf(name: string) {
 
 /**
  * The people table in the Tasks screen's table style (its own CSS: .dw-table, hairline dividers, group bands such as
- * "Active today 3"). ONE column template serves the heading and every row (fixed layout over one colgroup with explicit widths),
- * names are left, every figure and its heading are right-aligned with the same padding, so numbers sit under their headings.
+ * "Active today 3"). ONE column template serves the heading and every row (fixed layout over one colgroup with explicit widths).
+ * Headings AND cells are centred (numbers too, in tabular figures; the group bands "Active today" stay left): a figure column is exactly as wide as
+ * the longest word of its own heading plus padding (headings wrap at spaces, never cut), the name column is the remainder and never narrower than
+ * its longest name word. The plan is computed from the columns that are shown, so it follows a column that appears or disappears.
  * A number with something behind it is a real button that opens its list; zero and missing are a light dash. An optional Total
  * row closes the table, in bold.
  */
-export function FigureTable({ caption, cols, tailHead, tailWidth = 124, tailNumeric = false, groups, total, nameHeader = 'Recruiter', nameWidth, selectedId = '', onDrill, onPickName, scope, dense = false }: {
+export function FigureTable({ caption, cols, tailHead, tailWidth = 136, tailNumeric = false, groups, total, nameHeader = 'Recruiter', nameWidth, selectedId = '', onDrill, onPickName, scope, dense = false }: {
   caption: string
   cols: TableCol[]
   tailHead?: string
   tailWidth?: number
-  /** The last column holds a number: heading and cells are right-aligned like the figures. */
+  /** The last column holds a number: its cells are plain figures (the Total column) rather than a pill or a meter. */
   tailNumeric?: boolean
   groups: FigureGroup[]
   total?: FigureRow
   nameHeader?: string
+  /** The least the name column takes (px); it is never less than the longest word of the names plus padding either. */
   nameWidth?: number
   selectedId?: string
   onDrill: (metric: string, staffId: string | null) => void
@@ -68,13 +88,16 @@ export function FigureTable({ caption, cols, tailHead, tailWidth = 124, tailNume
   if (total) for (const [id, value] of Object.entries(total.cells)) all[`total:${id}`] = value
   const flash = useChangedCells(`rows|${scope}`, all)
   // Column plan. The table is fixed-layout at 100% of its panel, so it always fits (no sideways scroll, no inline min-width). Every figure column
-  // is exactly as wide as its own heading needs (one line, uppercase, measured), spread a little wider when there is room; the name column is
-  // the remainder (names wrap at spaces). The plan is expressed against the narrowest width at which this is a table (1080px).
-  const need = cols.map(col => Math.max(40, headWidth(col.head ?? col.label) + 18))
-  if (tailHead) need.push(Math.max(56, headWidth(tailHead) + 18, tailWidth))
-  const nameTarget = nameWidth ?? (dense ? 190 : 230)
-  const grow = Math.min(1.3, Math.max(1, (TABLE_MIN_WIDTH - nameTarget) / need.reduce((sum, width) => sum + width, 0)))
-  const share = (width: number) => `${((width * grow) / TABLE_MIN_WIDTH * 100).toFixed(3)}%`
+  // is exactly as wide as the longest word of its own heading (headings wrap at spaces, uppercase, measured) plus its padding, and no narrower than
+  // its widest figure; the name column is the remainder and never less than its longest word. Nothing here is a per-screen number: it follows `cols`.
+  const heads = [...cols.map(col => col.head ?? col.label), ...(tailHead ? [tailHead] : [])].map(headWordWidth)
+  const names = [...groups.flatMap(group => group.rows), ...(total ? [total] : [])].map(row => row.name)
+  const nameLeast = Math.max(nameWidth ?? (dense ? 120 : 140), nameWordWidth([nameHeader, ...names]) + 24)
+  // When the figure columns and the name's least width do not fit the 1080px of the narrowest table, every figure column gives up some of its padding (never below 6px)
+  const wanted = (pad: number) => heads.map((word, i) => Math.max(44, word + pad, i === cols.length && !tailNumeric ? tailWidth : 0))
+  let pad = CELL_PAD
+  while (pad > 6 && wanted(pad).reduce((sum, width) => sum + width, 0) + nameLeast > TABLE_MIN_WIDTH) pad -= 1
+  const colWidths = wanted(pad).map(width => width + 'px')
   const tailClass = tailNumeric ? 'is-num' : 'is-tail'
   const bands = groups.length > 1
   let index = 0
@@ -91,9 +114,9 @@ export function FigureTable({ caption, cols, tailHead, tailWidth = 124, tailNume
   }
   return <ScrollEdges label={caption}>
     <table className={cn('dw-table dw-main dwr-table', dense && 'is-dense')} aria-label={caption}>
-      <colgroup><col style={{ width: 'auto' }} />{need.map((width, i) => <col key={i} style={{ width: share(width) }} />)}</colgroup>
+      <colgroup><col style={{ width: 'auto' }} />{colWidths.map((width, i) => <col key={i} style={{ width }} />)}</colgroup>
       <thead><tr>
-        <th scope="col" className="is-left">{nameHeader}</th>
+        <th scope="col" className="dwr-name-head">{nameHeader}</th>
         {cols.map(col => <th key={col.id} scope="col" className="is-num" title={col.info ? (col.head ? `${col.label}. ${col.info}` : col.info) : col.label}>{col.head ?? col.label}</th>)}
         {tailHead && <th scope="col" className={tailClass}>{tailHead}</th>}
       </tr></thead>
@@ -105,7 +128,7 @@ export function FigureTable({ caption, cols, tailHead, tailWidth = 124, tailNume
           {group.rows.map(row => {
             index += 1
             return <tr key={row.id} className={cn('dw-staff-row', index % 2 === 0 && 'is-alt', row.idle && 'is-idle', row.id === selectedId && 'is-active')}>
-              <th scope="row" className="is-left dwr-name">
+              <th scope="row" className="dwr-name">
                 <span className="dwr-person">
                   <span className={cn('record-avatar', `avatar-hue-${hueOf(row.name)}`)} aria-hidden="true">{initials(row.name)}</span>
                   {onPickName && !row.fixed
@@ -121,7 +144,7 @@ export function FigureTable({ caption, cols, tailHead, tailWidth = 124, tailNume
       </tbody>
       {total && <tfoot>
         <tr className="dwr-total">
-          <th scope="row" className="is-left dwr-name">{total.name}</th>
+          <th scope="row" className="dwr-name">{total.name}</th>
           {cols.map(col => figure(total, col, null))}
           {tailHead && <td className={tailClass} data-label={tailHead}>{total.tail}</td>}
         </tr>

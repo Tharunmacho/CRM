@@ -27,25 +27,29 @@
 :root:root .rv-card.ct-table { border-color: transparent; background: transparent; }
 
 /*
- * The sheet itself: the approved Tasks table look, EXACTLY (tokens in theme.css). From 1080px of card width it is a table: fixed layout at 100% of
- * the frame with percentage columns, so it never scrolls sideways (the card is 1128px at a 1440px window, 1056px at 1366px: below 1080px every
+ * The sheet itself: the approved Tasks table look, EXACTLY (tokens in theme.css). From 960px of card width it is a table: auto layout at 100% of
+ * the frame (columns sized by their content), so it never scrolls sideways (the card is 1128px at a 1440px window, 1071px at a 1225px one: below 960px every
  * placement is a labelled card). Blue 44px header (one line, uppercase 11.5px / 700, faint dividers, kept in view while the rows scroll), a thin 1px
  * frame with the 6px curve on the scroll box (it clips the header corners), rows of at least 56px with every cell centred, a faint line under every row,
  * a LIGHT line between columns, 8px side padding on the narrow S.No column, text wrapping at spaces (never mid-word, never an ellipsis; only Remarks,
  * which has no bound, stops at three lines with its whole text as the tooltip). A new client's first row keeps the stronger line (the sheet's grouping).
  */
-@container ct (min-width: 1080px) {
-  .ct-scroll { box-sizing: border-box; max-height: 72vh; overflow: auto; overflow-x: hidden; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); }
+@container ct (min-width: 960px) {
+  .ct-scroll { box-sizing: border-box; max-height: 72vh; overflow: auto; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); }
   .ct-scroll:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-  :root:root:root .ct-table .ct-scroll table { box-sizing: border-box; width: 100%; min-width: 0; table-layout: fixed; border: 0; border-radius: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; overflow: visible; }
-  .ct-col-sNo { width: 5.5%; } .ct-col-client { width: 14%; } .ct-col-country { width: 8%; } .ct-col-name { width: 14%; } .ct-col-position { width: 13%; }
-  .ct-col-referral { width: 9%; } .ct-col-advance { width: 9%; } .ct-col-stage { width: 11.5%; } .ct-col-remarks { width: auto; }
-  :root:root:root .ct-table .ct-scroll thead th { position: sticky; top: 0; z-index: 2; box-sizing: border-box; height: 44px; padding: 0 8px 0 10px; overflow: hidden; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: left; text-transform: uppercase; text-wrap: nowrap; white-space: nowrap; overflow-wrap: normal; vertical-align: middle; }
+  :root:root:root .ct-table .ct-scroll table { box-sizing: border-box; width: 100%; min-width: 0; table-layout: auto; border: 0; border-radius: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; overflow: visible; }
+  /* table-layout AUTO: a column is as wide as its content needs. The short columns (S.No, Ref, Advance) take only the longest word of their heading or figure
+   * (width 1% = the minimum content width, headings wrap at spaces); the rest share what is left in proportion to their content, no column ever narrower than its
+   * longest word. Nothing is a per-column percentage, so a column that appears or disappears (or a wider panel, a 125% zoom) re-flows by itself. */
+  .ct-col-sNo, .ct-col-referral, .ct-col-advance { width: 1%; }
+  :root:root:root .ct-table .ct-scroll thead th { position: sticky; top: 0; z-index: 2; box-sizing: border-box; height: 44px; padding: 4px 8px; overflow: visible; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: var(--table-align, center); text-transform: uppercase; text-wrap: wrap; white-space: normal; overflow-wrap: normal; vertical-align: middle; }
   :root:root:root .ct-table .ct-scroll thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
-  :root:root:root .ct-table .ct-scroll tbody td { box-sizing: border-box; height: 56px; padding: 8px 8px 8px 10px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); font-size: 13px; text-align: left; vertical-align: middle; line-height: 1.35; overflow-wrap: break-word; }
+  :root:root:root .ct-table .ct-scroll tbody td { box-sizing: border-box; height: 56px; padding: 8px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); font-size: 13px; text-align: var(--table-align, center); font-variant-numeric: tabular-nums; vertical-align: middle; line-height: 1.35; overflow-wrap: break-word; }
   :root:root:root .ct-table .ct-scroll tbody td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
   :root:root:root .ct-table .ct-scroll :is(th, td):first-child { padding-inline: 8px; text-align: center; }
-  :root:root:root .ct-table .ct-scroll tbody td:first-child { font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+  /* the one exception: Remarks is long free text, its cell stays left (its heading stays centred) */
+  :root:root:root .ct-table .ct-scroll tbody td.is-remarks { text-align: var(--table-align-text, left); }
+  :root:root:root .ct-table .ct-scroll tbody td:first-child { white-space: nowrap; font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-muted); }
   :root:root:root .ct-table .ct-scroll tbody tr:hover > td { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
   :root:root:root .ct-table .ct-scroll tbody tr.is-first-of-client > td { border-top: var(--table-frame-width) solid var(--table-line-strong); }
   :root:root:root .ct-table .ct-scroll tbody tr:first-child > td { border-top: 0; }
@@ -53,8 +57,8 @@
   .ct-table td.is-remarks .ct-cell { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 }
 
-/* Under 1080px (phones, tablets, a 1280px window with the sidebar open): every placement is a labelled card inside one thin 6px-radius frame; no scroller. */
-@container ct (max-width: 1079px) {
+/* Under 960px (phones, tablets, a 1280px window with the sidebar open): every placement is a labelled card inside one thin 6px-radius frame; no scroller. */
+@container ct (max-width: 959px) {
   .ct-scroll { box-sizing: border-box; max-height: none; overflow: visible; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); background: var(--bg-card); }
   :root:root:root .ct-table .ct-scroll table { display: block; width: 100%; min-width: 0; border: 0; border-radius: 0; }
   :root:root:root .ct-table .ct-scroll :is(tbody, thead, colgroup) { display: block; }

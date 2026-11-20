@@ -206,8 +206,8 @@ export function LeadSheetView({ report, roster, today, scope, staff, onPickStaff
       ? <section className="dw-panel dwr-status" aria-label="Lead status now">
         <div className="dw-panel-head"><div><h2>Lead status now</h2></div></div>
         {status.length === 0 ? <p className="dwb-none">No leads on the sheet.</p>
-          : <table className="dw-table"><colgroup><col /><col style={{ width: '16%' }} /><col style={{ width: '16%' }} /></colgroup><thead><tr><th scope="col" className="is-left">Status</th><th scope="col" className="is-num">Leads</th><th scope="col" className="is-num">Share</th></tr></thead>
-            <tbody>{status.map(item => <tr key={item.key}><th scope="row" className="is-left dwr-status-name">{item.label}</th><td className="is-num tnum">{numberText(item.count)}</td><td className="is-num tnum">{item.pct}%</td></tr>)}</tbody></table>}
+          : <table className="dw-table"><colgroup><col /><col style={{ width: '1%' }} /><col style={{ width: '1%' }} /></colgroup><thead><tr><th scope="col">Status</th><th scope="col" className="is-num">Leads</th><th scope="col" className="is-num">Share</th></tr></thead>
+            <tbody>{status.map(item => <tr key={item.key}><th scope="row" className="dwr-status-name">{item.label}</th><td className="is-num tnum">{numberText(item.count)}</td><td className="is-num tnum">{item.pct}%</td></tr>)}</tbody></table>}
       </section>
       : <p className="dwr-quiet">{NEEDS_SERVER}</p>}
   </>

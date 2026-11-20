@@ -78,11 +78,11 @@ test('the sheet is the Tasks look: names wrap at spaces, only Remarks stops at t
   assert.ok(!/overflow-wrap: anywhere/.test(css))
   assert.match(css, /td\.is-remarks \.ct-cell \{[^}]*-webkit-line-clamp: 3;/)
   // Table rules: 44 px blue header kept in view, 56 px rows centred, 10px side padding on header and cells, S.No 8px and centred; a table from 1080px, cards below: never a sideways scroll.
-  assert.match(css, /@container ct \(min-width: 1080px\)/)
-  assert.match(css, /@container ct \(max-width: 1079px\)/)
-  assert.match(css, /thead th \{[^}]*position: sticky;[^}]*height: 44px;[^}]*padding: 0 8px 0 10px;[^}]*background: var\(--primary\);[^}]*font-size: 11\.5px;[^}]*text-transform: uppercase;[^}]*white-space: nowrap;/)
-  assert.match(css, /tbody td \{[^}]*height: 56px;[^}]*padding: 8px 8px 8px 10px;[^}]*vertical-align: middle;/)
-  assert.match(css, /overflow: auto; overflow-x: hidden; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--table-frame-radius, 6px\)/)
+  assert.match(css, /@container ct \(min-width: 960px\)/) // auto layout: the sheet is a table from the width its content needs (960px), cards below
+  assert.match(css, /@container ct \(max-width: 959px\)/)
+  assert.match(css, /thead th \{[^}]*position: sticky;[^}]*height: 44px;[^}]*padding: 4px 8px;[^}]*background: var\(--primary\);[^}]*font-size: 11\.5px;[^}]*text-transform: uppercase;[^}]*white-space: normal;/)
+  assert.match(css, /tbody td \{[^}]*height: 56px;[^}]*padding: 8px;[^}]*vertical-align: middle;/)
+  assert.match(css, /overflow: auto; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--table-frame-radius, 6px\)/)
   assert.ok(!/min-width: 1060px/.test(css))
   const view = await readFile(new URL('../src/features/reports/client-tracker.tsx', import.meta.url), 'utf8')
   assert.match(view, /next\.delete\('stage'\)/)   // Reset / another stage must not leave a stale ?stage= in the address

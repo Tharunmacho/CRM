@@ -35,7 +35,7 @@ interface Builders<T> {
 function builders<T>(): Builders<T> {
   return {
     col: (key, header, width, value, extra = {}) => ({ key, header, width, sortable: true, value, render: row => { const v = value(row); return v == null || v === '' ? '—' : typeof v === 'number' ? <span className="tnum">{v.toLocaleString()}</span> : <span className="rv-cell" title={v}>{v}</span> }, ...extra }),
-    num: (key, header, width, value, render) => ({ key, header, width, sortable: true, align: 'right', value, render: render ?? (row => { const v = value(row); return v == null ? '—' : <span className="tnum">{v.toLocaleString()}</span> }) }),
+    num: (key, header, _width, value, render) => ({ key, header, width: '1%', sortable: true, align: 'center', value, render: render ?? (row => { const v = value(row); return v == null ? '—' : <span className="tnum">{v.toLocaleString()}</span> }) }),
   }
 }
 

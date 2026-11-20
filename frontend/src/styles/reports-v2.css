@@ -151,6 +151,11 @@
  */
 :root:root .rv-card.rv-table > header { border-bottom: 0; padding-bottom: 12px; }
 :root:root .rv-table.tb-blue .ui-data-table.ui-data-table thead th { white-space: normal; text-overflow: clip; overflow-wrap: normal; line-height: 1.15; }
+/* The report tables size by content, not by the column percentages (depth.css makes any DataTable that has widths table-layout: fixed): AUTO layout, the figure columns
+ * (width 1%) are as wide as the longest word of their heading or their figure, the first (name) column takes what is left and never less than its longest word. */
+:root:root .rv-table .ui-data-table.is-grid table.is-fixed { table-layout: auto; }
+:root:root .rv-table .ui-data-table.is-grid table.is-fixed th { overflow-wrap: normal; }
+:root:root .rv-table .ui-data-table.is-grid tbody td .tnum { white-space: nowrap; }
 :root:root .rv-table.tb-blue .ui-data-table .ui-th-inner > button { overflow: visible; text-align: inherit; text-overflow: clip; white-space: normal; overflow-wrap: normal; }
 
 /* Stacked cards: every cell carries its own label (data-label), so the visually hidden header row is dropped instead of lingering over the first card. */

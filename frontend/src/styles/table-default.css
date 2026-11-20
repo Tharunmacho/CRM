@@ -30,9 +30,16 @@
   }
 }
 
-/* ---------- text left, numbers right with tabular figures (any table, whatever the screen calls the number column) ---------- */
-:where(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) :is(td, th) { text-align: left; }
-:root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) :is(td, th):is(.num, .is-num, .is-right, .ui-c-right) { text-align: right; font-variant-numeric: tabular-nums; }
+/* ---------- ALIGNMENT (the Tasks table rule, for every table): every heading and cell is CENTRED, numbers too (tabular figures) ----------
+ * Vertically everything is already middle (below). Sort buttons, arrows and chips stay inline, so they centre with the text.
+ * EXCEPTIONS, the CELL only (its heading stays centred): a cell that holds long multi-line free text (notes, remarks text, addresses, emails, file names,
+ * descriptions: .is-text / .ui-c-text, or the named .is-notes .is-remarks .is-address .is-email .is-file .is-description) and a group header row that spans the columns
+ * ("Active today (5)": tr.dw-group, tr.is-group, td/th[colspan]). Number cells (.num .is-num .is-right .ui-c-right) are centred; a table that needs a number
+ * column to be as wide as its own heading says so in its own sheet (the Reports tables measure it). */
+:where(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) :is(td, th) { text-align: var(--table-align, center); }
+:root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) :is(td, th):is(.num, .is-num, .is-right, .ui-c-right) { text-align: var(--table-align, center); font-variant-numeric: tabular-nums; }
+:root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) td:is(.is-text, .ui-c-text, .is-notes, .is-remarks, .is-address, .is-email, .is-file, .is-description) { text-align: var(--table-align-text, left); }
+:root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tr:is(.dw-group, .is-group) > :is(td, th) { text-align: var(--table-align-text, left); }
 
 /* ---------- header ---------- */
 :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) thead tr { background: var(--primary); }

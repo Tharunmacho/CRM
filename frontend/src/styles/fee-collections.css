@@ -47,3 +47,18 @@
 :root:root .fee-collection-scroll { box-sizing: border-box; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
 :root:root .fee-collection-scroll thead th { border-top-width: 0; }
 :root:root .rv-card.fee-collection-table:has(> .fee-collection-scroll) { border-color: transparent; }
+
+/*
+ * ALIGNMENT (the shared table rule, styles/table-default.css): every heading and cell is centred, horizontally and vertically, the money columns too (tabular
+ * figures). Layout AUTO instead of the old per-column percentages: the money, invoice, status and manage columns are as wide as their own content or the
+ * longest word of their heading (width 1% = the minimum content width; headings wrap at spaces), the Candidate column takes what is left and never less than
+ * its longest word, so a column that is hidden (GST and Invoiced under 1280px) or a different panel width re-flows by itself. No sideways scroll, no cut words.
+ */
+:root:root:root .fee-collection-table.ops-fees table { table-layout: auto; width: 100%; }
+:root:root:root .fee-collection-table.ops-fees col { width: auto; }
+:root:root:root .fee-collection-table.ops-fees :is(col.fc-invoice, col.fc-fee, col.fc-gst, col.fc-total, col.fc-invoiced, col.fc-received, col.fc-balance, col.fc-status, col.fc-manage) { width: 1%; }
+:root:root:root .fee-collection-table.ops-fees thead th { height: 44px; padding: 4px 8px; overflow: visible; line-height: 1.2; text-align: var(--table-align, center); white-space: normal; overflow-wrap: normal; }
+:root:root:root .fee-collection-table.ops-fees tbody td { padding: 8px; text-align: var(--table-align, center); font-variant-numeric: tabular-nums; }
+:root:root:root .fee-collection-table.ops-fees tbody td:is(:nth-child(2), :nth-child(3), :nth-child(4), :nth-child(5), :nth-child(6), :nth-child(7), :nth-child(8), :nth-child(10)) { white-space: nowrap; }
+:root:root:root .fee-collection-table.ops-fees tbody td .fee-payment-status { white-space: normal; }
+:root:root:root .fee-collection-table.ops-fees tbody td.fee-collection-empty { text-align: var(--table-align, center); }

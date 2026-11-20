@@ -80,14 +80,17 @@
 :root:root .ui-data-table.is-grid td .ui-row-menu-trigger { width: 36px; height: 36px; }
 @media (pointer: coarse) { :root:root .ui-data-table.is-grid td .ui-row-menu-trigger { width: 44px; height: 44px; } }
 
-/* alignment: the column's `align` (left unless the column says otherwise): a header and its cells share one edge */
-.ui-data-table.is-grid .ui-c-left { text-align: left; }
-.ui-data-table.is-grid .ui-c-center { text-align: center; }
-.ui-data-table.is-grid .ui-c-right { text-align: right; }
-.ui-data-table.is-grid td.ui-c-center > :where(div, p, ul, .record-identity) { width: fit-content; max-width: 100%; margin-inline: auto; }
-.ui-data-table.is-grid td.ui-c-right > :where(div, p, ul, .record-identity) { width: fit-content; max-width: 100%; margin-inline-start: auto; }
-.ui-data-table.is-grid td.ui-c-center .record-identity { justify-content: center; }
-.ui-data-table.is-grid td.ui-c-center :is(.staff-tags, .att-exceptions, .as-tags, .uv-actions) { justify-content: center; }
+/* alignment (the Tasks table rule, for EVERY table): every heading and every cell is centred, horizontally (here) and vertically (middle, above); numbers too,
+ * with tabular figures; sort buttons and arrows stay inline so the heading text stays centred. A column's `align` (left / center / right) no longer moves
+ * anything: they all centre. The ONE exception is `align: 'text'` (class ui-c-text): a column of long multi-line free text (notes, remarks, addresses,
+ * emails, file names, descriptions) keeps its CELL left (the heading above it stays centred). Cells whose content is a block (div, p, list, identity) are
+ * shrunk to their content and centred, so they sit on the same centre line as the heading above. */
+:root:root .ui-data-table.is-grid :is(th, td) { text-align: var(--table-align, center); }
+:root:root .ui-data-table.is-grid td { font-variant-numeric: tabular-nums; }
+:root:root .ui-data-table.is-grid td.ui-c-text { text-align: var(--table-align-text, left); }
+.ui-data-table.is-grid td:not(.ui-c-text) > :where(div, p, ul, .record-identity) { width: fit-content; max-width: 100%; margin-inline: auto; }
+.ui-data-table.is-grid td:not(.ui-c-text) .record-identity { justify-content: center; }
+.ui-data-table.is-grid td:not(.ui-c-text) :is(.staff-tags, .att-exceptions, .as-tags, .uv-actions) { justify-content: center; }
 :root:root .ui-data-table.is-grid .ui-actions-cell { width: 1%; min-width: 88px; white-space: nowrap; text-align: center; }
 :root:root .ui-data-table.is-grid table.is-fixed th.ui-actions-cell { width: auto; }
 :root:root .ui-data-table.is-grid :is(th, td).ui-actions-cell { padding-left: 12px; padding-right: 12px; }

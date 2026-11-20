@@ -89,8 +89,11 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
 .dr-drill-scroll { overflow-x: auto; transition: opacity .14s; }
 .dr-drill-scroll.is-stale { opacity: .5; }
 .dr-drill-table { width: 100%; min-width: 640px; border-collapse: collapse; }
-.dr-drill-table th { position: sticky; top: 0; padding: 8px 10px; background: var(--bg-card); border-bottom: var(--table-line-width) solid var(--table-line); text-align: left; font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
-.dr-drill-table td { padding: 10px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: top; overflow-wrap: anywhere; }
+.dr-drill-table th { position: sticky; top: 0; padding: 8px 10px; background: var(--bg-card); border-bottom: var(--table-line-width) solid var(--table-line); text-align: var(--table-align, center); font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+.dr-drill-table td { padding: 10px; border-bottom: var(--table-line-width) solid var(--table-line); text-align: var(--table-align, center); vertical-align: middle; overflow-wrap: break-word; }
+.dr-drill-table tbody th { text-align: var(--table-align, center); vertical-align: middle; }
+/* the one exception: the free-text Detail / Note / Key figures cells stay left (their headings stay centred) */
+.dr-drill-table td.dr-detail { text-align: var(--table-align-text, left); }
 .dr-when { white-space: nowrap; }
 .dr-when b { display: block; font-weight: 600; font-variant-numeric: tabular-nums; }
 .dr-when small, .dr-ci { font-size: 11.5px; color: var(--text-light); }
@@ -171,7 +174,7 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
 .dr-mini { min-width: 0; }
 .dr-mini th, .dr-mini td { padding: 8px 6px; font-size: 13px; font-weight: 400; }
 .dr-mini thead th { font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
-.dr-mini .dr-num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.dr-mini .dr-num { text-align: var(--table-align, center); font-variant-numeric: tabular-nums; font-weight: 600; }
 .dr-mini td.is-changed { color: var(--warning-ink); }
 
 .dr-drill .dr-drill-table thead th, .dr-drill .dr-mini thead th { font-size: 12px; font-weight: 700; color: var(--text-main); }
@@ -187,38 +190,39 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
  *   - header: the primary blue band, 44px, one line, uppercase 11.5px / 700, a very faint divider (--table-header-line), the bottom edge the frame line
  *   - frame: 1px var(--table-line-strong) with the 6px curve, on the scroll box (daily-work.css), clipping the header corners
  *   - body: rows of at least 56px, every cell vertically centred, a faint line under EVERY row, a LIGHT line between columns (not after the last),
- *     names wrap at spaces (never mid-word, never an ellipsis); numbers are right-aligned, tabular, under right-aligned headings (same edge)
+ *     names wrap at spaces (never mid-word, never an ellipsis); EVERYTHING is centred (names, numbers, headings, the Day closed pills; only the group bands Active today / No activity stay left): a figure column is as wide as the longest word of its own heading (headings wrap at spaces) and the name column is the remainder
  */
 @container dw (min-width: 1080px) {
   :root .dwr .tk-table-wrap { overflow: hidden; }
   :root .dwr .dwr-table.dw-table.dw-main { width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
-  :root .dwr .dwr-table.dw-table.dw-main thead th { box-sizing: border-box; height: 44px; padding: 0 8px 0 10px; overflow: hidden; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: left; text-transform: uppercase; text-wrap: nowrap; white-space: nowrap; overflow-wrap: normal; vertical-align: middle; }
+  :root .dwr .dwr-table.dw-table.dw-main thead th { box-sizing: border-box; height: 44px; padding: 4px 8px; overflow: visible; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: var(--table-align, center); text-transform: uppercase; text-wrap: wrap; white-space: normal; overflow-wrap: normal; word-break: normal; vertical-align: middle; }
   :root .dwr .dwr-table.dw-table.dw-main thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
-  :root .dwr .dwr-table.dw-table.dw-main thead th.is-num { padding: 0 10px 0 6px; text-align: right; }
-  :root .dwr .dwr-table.dw-table.dw-main thead th.is-tail { padding: 0 8px 0 10px; text-align: left; }
+  :root .dwr .dwr-table.dw-table.dw-main thead th:is(.is-num, .is-tail) { padding: 4px 8px; text-align: var(--table-align, center); }
+  :root .dwr .dwr-table.dw-table.dw-main thead th.dwr-name-head { padding: 4px 10px; }
 
-  :root .dwr .dwr-table.dw-table.dw-main :is(tbody, tfoot) :is(td, th) { box-sizing: border-box; height: 56px; padding: 8px 8px 8px 10px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); background: transparent; font-size: 13px; font-weight: 400; text-align: left; vertical-align: middle; overflow-wrap: break-word; }
+  :root .dwr .dwr-table.dw-table.dw-main :is(tbody, tfoot) :is(td, th) { box-sizing: border-box; height: 56px; padding: 8px 8px 8px 10px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); background: transparent; font-size: 13px; font-weight: 400; text-align: var(--table-align, center); vertical-align: middle; overflow-wrap: break-word; }
   :root .dwr .dwr-table.dw-table.dw-main :is(tbody, tfoot) :is(td, th):not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
   :root .dwr .dwr-table.dw-table.dw-main tbody .dw-staff-row:hover > :is(td, th) { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
   :root .dwr .dwr-table.dw-table.dw-main tbody .dw-staff-row.is-active > :is(td, th) { background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
   :root .dwr .dwr-table.dw-table.dw-main tbody .dw-staff-row.is-alt { background: transparent; }
 
-  /* the name: no avatar in the wide table (the avatar is for the cards), the name wraps at spaces, never mid-word */
-  :root .dwr .dwr-table.dw-table.dw-main th.dwr-name { font-weight: 600; text-align: left; }
+  /* the name: centred like everything else; no avatar in the wide table (the avatar is for the cards), the name wraps at spaces, never mid-word */
+  :root .dwr .dwr-table.dw-table.dw-main th.dwr-name { padding: 8px 10px; font-weight: 600; text-align: var(--table-align, center); }
   .dwr .dwr-table .record-avatar { display: none; }
   .dwr .dwr-table .dwr-person { display: block; }
-  .dwr .dwr-table .dwr-who { display: block; max-width: 100%; overflow: visible; font-size: 13px; font-weight: 600; line-height: 1.35; text-align: left; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
+  .dwr .dwr-table .dwr-who { display: block; max-width: 100%; margin-inline: auto; overflow: visible; font-size: 13px; font-weight: 600; line-height: 1.35; text-align: var(--table-align, center); text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
 
-  /* figures: right-aligned with their right-aligned headings, tabular numerals, one weight */
-  :root .dwr .dwr-table.dw-table.dw-main td.is-num { padding: 8px 10px 8px 6px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; color: var(--text-main); }
+  /* figures: centred under their centred headings (the same column centre), tabular numerals, one weight */
+  :root .dwr .dwr-table.dw-table.dw-main td.is-num { padding: 8px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: var(--table-align, center); color: var(--text-main); }
   :root .dwr .dwr-table.dw-table.dw-main td.is-strong { font-weight: 700; }
-  .dwr .dwr-table td.is-num > .dw-none, .dwr .dwr-table td.is-num > .dwr-plain, .dwr .dwr-table td.is-num > .dwr-link { display: block; margin-left: auto; text-align: right; }
-  .dwr .dwr-table .dw-none { text-align: right; font-weight: 400; opacity: .55; }
-  .dwr .dwr-table .dwr-link { margin: 0 -6px 0 auto; }
-  :root .dwr .dwr-table.dw-table.dw-main td.is-tail { text-align: left; }
-  .dwr .dwr-table td.is-tail .dw-none { text-align: left; }
+  .dwr .dwr-table td.is-num > .dw-none, .dwr .dwr-table td.is-num > .dwr-plain, .dwr .dwr-table td.is-num > .dwr-link { display: block; margin-inline: auto; text-align: var(--table-align, center); }
+  .dwr .dwr-table .dw-none { text-align: var(--table-align, center); font-weight: 400; opacity: .55; }
+  .dwr .dwr-table .dwr-link { width: 100%; margin: 0; padding: 3px 0; text-align: var(--table-align, center); }
+  :root .dwr .dwr-table.dw-table.dw-main td.is-tail { padding: 8px; text-align: var(--table-align, center); }
+  .dwr .dwr-table td.is-tail .dw-none { text-align: var(--table-align, center); }
   .dwr .dwr-table td.is-tail :is(.ui-badge, .dwr-pillbtn) { white-space: nowrap; }
-  .dwr .dwr-table .dwr-pct { gap: 8px; }
+  .dwr .dwr-table td.is-tail > .dwr-pillbtn { display: inline-block; }
+  .dwr .dwr-table .dwr-pct { justify-content: center; gap: 8px; width: auto; }
   .dwr .dwr-table .dwr-pct .dwb-meter { flex: 1 1 0; min-width: 24px; max-width: 64px; }
   .dwr .dwr-table .dwr-changed { display: block; margin: 2px 0 0; }
 
@@ -227,7 +231,7 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
   :root .dwr .dwr-table.dw-table.dw-main tfoot .dwr-total .dwr-link { font-weight: 700; }
 
   /* the group bands (Active today / No activity): a slim tinted band with the same row line */
-  :root:root:root .dwr .dwr-table.dw-main .dw-group > th { height: 40px; padding: 0 10px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); font-size: 13px; }
+  :root:root:root:root .dwr .dwr-table.dw-main .dw-group > th { height: 40px; padding: 0 10px; text-align: var(--table-align-text, left); border: 0; border-bottom: var(--table-line-width) solid var(--table-line); font-size: 13px; }
 }
 
 /* "Lead status now": a small three-column table in the same look at every width (it never turns into cards, three columns fit a phone) */
@@ -237,13 +241,13 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
 :root .dwr .dwr-status > table.dw-table tbody { display: table-row-group; padding: 0; }
 :root .dwr .dwr-status > table.dw-table tr { display: table-row; }
 :root .dwr .dwr-status > table.dw-table :is(td, th) { display: table-cell; }
-:root .dwr .dwr-status > table.dw-table { box-sizing: border-box; width: 100%; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); overflow: hidden; font-size: 13px; }
-:root .dwr .dwr-status > table.dw-table thead th { box-sizing: border-box; height: 44px; padding: 0 8px 0 10px; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: left; text-transform: uppercase; white-space: nowrap; }
+:root .dwr .dwr-status > table.dw-table { box-sizing: border-box; width: 100%; table-layout: auto; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); overflow: hidden; font-size: 13px; }
+:root .dwr .dwr-status > table.dw-table thead th { box-sizing: border-box; height: 44px; padding: 0 8px 0 10px; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: var(--table-align, center); text-transform: uppercase; white-space: normal; overflow-wrap: normal; }
 :root .dwr .dwr-status > table.dw-table thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
-:root .dwr .dwr-status > table.dw-table thead th.is-num { padding: 0 10px 0 6px; text-align: right; }
-:root .dwr .dwr-status > table.dw-table tbody :is(td, th) { box-sizing: border-box; height: 56px; padding: 8px 8px 8px 10px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); text-align: left; vertical-align: middle; overflow-wrap: break-word; }
+:root .dwr .dwr-status > table.dw-table thead th.is-num { padding: 4px 8px; text-align: var(--table-align, center); }
+:root .dwr .dwr-status > table.dw-table tbody :is(td, th) { box-sizing: border-box; height: 56px; padding: 8px 8px 8px 10px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); text-align: var(--table-align, center); vertical-align: middle; overflow-wrap: break-word; }
 :root .dwr .dwr-status > table.dw-table tbody :is(td, th):not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
-:root .dwr .dwr-status > table.dw-table tbody td.is-num { padding: 8px 10px 8px 6px; font-size: 14px; font-weight: 600; text-align: right; color: var(--text-main); }
+:root .dwr .dwr-status > table.dw-table tbody td.is-num { padding: 8px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: var(--table-align, center); color: var(--text-main); }
 :root .dwr .dwr-status > table.dw-table tbody th.dwr-status-name { font-weight: 500; }
 
 /* One set of edges (as the other panels at 1360px): the Lead status panel has no chrome of its own, its table is the frame */

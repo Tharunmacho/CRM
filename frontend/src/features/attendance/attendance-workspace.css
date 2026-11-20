@@ -11,6 +11,8 @@
 .att-two > strong { font-size: 13.5px; font-weight: 600; color: var(--text-main); }
 .att-two > small { font-size: 12px; line-height: 1.4; color: var(--text-muted); }
 .att-two > .att-pill { justify-self: start; margin-bottom: 2px; }
+/* in the table (the shared rule: every cell is centred) the two-line cells and their status pill sit on the column's centre; the stacked cards (under 1280px) keep them left */
+@media (min-width: 1280px) { .attendance-workspace .ui-data-table td .att-two > .att-pill { justify-self: center; } }
 .att-icon-only.ui-button { width: 32px; padding: 0; }
 .att-row-off { background: var(--tint-1); }
 .att-row-off td { color: var(--text-muted); }

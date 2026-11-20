@@ -180,7 +180,7 @@ test('Lead sheet monitoring: five tiles tied to the Lead sheet screen, a table w
   assert.ok(foot.includes('font') || foot.includes('dwr-total')) // pinned, bold by CSS
   assert.ok(!/not contacted yet|not assigned|Leads called or updated|select a number|Where every lead/.test(t), 'no captions or subtitles')
   assert.match(t, /Lead status now Status Leads Share/)
-  assert.equal(count(html, /<tr><th scope="row" class="is-left dwr-status-name">/g), 9) // all nine statuses
+  assert.equal(count(html, /<tr><th scope="row" class="dwr-status-name">/g), 9) // all nine statuses
   assert.ok(!/Stage|Overdue|Pending|Candidates|Prescreened|Forwarded|Day closed/.test(t), 'nothing about candidates, stages or the daily figures')
 })
 
@@ -234,23 +234,23 @@ test('every table uses one column template: header and row cells line up, and nu
   }
 })
 
-test('the Candidate table: the name column is the remainder, every figure column is as wide as its heading needs, all right-aligned', async () => {
+test('the Candidate table: the name column is the remainder, every figure column is as wide as the longest word of its heading, everything centred', async () => {
   const html = render(views.CandidateMonitoringView)
   const table = html.slice(html.indexOf('<table'))
   assert.ok(!/min-width/.test(table.slice(0, table.indexOf('<thead>'))), 'no inline min-width: the table fits its panel')
-  const widths = [...table.matchAll(/<col style="width:([\d.]+)%/g)].map(m => Number(m[1]))
+  const widths = [...table.matchAll(/<col style="width:([\d.]+)px/g)].map(m => Number(m[1]))
 
   assert.equal(widths.length, 17) // Done, Pending, Overdue, No order, stages 1 to 12, Total; the Recruiter column has no width of its own (auto: it takes the rest)
   assert.ok(table.includes('<col style="width:auto"/>') || table.includes('<col style="width:auto" />'))
   const sum = widths.reduce((a, b) => a + b, 0)
-  assert.ok(sum < 90 && sum > 55, 'the figure columns leave the Recruiter column at least 10% of the table (' + sum + ')')
+  assert.ok(sum < 1080 - 120 && sum > 500, 'the figure columns leave the Recruiter column its longest word at the narrowest table width (' + sum + ')')
   assert.ok(widths[3] > widths[4], 'No order (a longer heading) is wider than a stage number')
-  assert.match(table, /<th scope="col" class="is-num">Total<\/th>/) // the Total heading is a figure heading: right-aligned like its numbers
+  assert.match(table, /<th scope="col" class="is-num">Total<\/th>/) // the Total heading is a figure heading: centred like its numbers
   const css = await readFile(new URL('../src/styles/daily-report.css', import.meta.url), 'utf8')
-  assert.match(css, /thead th\.is-num \{ padding: 0 10px 0 6px; text-align: right; \}/)
-  assert.match(css, /td\.is-num \{ padding: 8px 10px 8px 6px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right;/)
+  assert.match(css, /thead th:is\(\.is-num, \.is-tail\) \{ padding: 4px 8px; text-align: var\(--table-align, center\); \}/)
+  assert.match(css, /td\.is-num \{ padding: 8px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: var\(--table-align, center\);/)
   assert.match(css, /\.dwr-table\.dw-table\.dw-main thead th \{[^}]*height: 44px;/)
-  assert.match(css, /td\.is-num > \.dw-none[^{]*\{ display: block; margin-left: auto; text-align: right; \}/) // the dash is right-aligned like a number
+  assert.match(css, /td\.is-num > \.dw-none[^{]*\{ display: block; margin-inline: auto; text-align: var\(--table-align, center\); \}/) // the dash is centred like a number
 })
 
 test('headings are the Tasks look: the primary blue band, bold uppercase 11.5px, one line; group bands bold', async () => {
@@ -261,7 +261,8 @@ test('headings are the Tasks look: the primary blue band, bold uppercase 11.5px,
   assert.match(rule[1], /background: var\(--primary\); color: var\(--on-primary\)/)
   assert.match(rule[1], /font-size: 11\.5px; font-weight: 700/)
   assert.match(rule[1], /text-transform: uppercase/)
-  assert.match(rule[1], /white-space: nowrap/)
+  assert.match(rule[1], /white-space: normal/) // headings wrap at spaces (never cut), 44px at least
+  assert.match(rule[1], /text-align: var\(--table-align, center\)/)
   const weightOf = selector => {
     const found = new RegExp('(?:^|\\n)' + selector.replace(/[.*+?^$\{}()|[\]\\]/g, '\\$&') + ' \\{([^}]*)\\}').exec(css)
     assert.ok(found, 'no rule for ' + selector)

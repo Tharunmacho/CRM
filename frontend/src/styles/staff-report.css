@@ -327,3 +327,22 @@
   :root:root:root .sw-scroll .sw-table.sw-matrix :is(tbody, tfoot) td:empty { display: none; }
   :root:root:root .sw-scroll .sw-table.sw-matrix tfoot tr { background: var(--tint-2); }
 }
+
+/*
+ * ALIGNMENT (the shared table rule, styles/table-default.css): every heading and every cell of the weekly report's tables is centred, horizontally and
+ * vertically, numbers too (tabular figures); a heading and its column share one centre (the same side padding on both). Headings wrap at spaces. These rules
+ * sit after the metrics above on purpose; the stacked cards (container query above) keep their own left-aligned label/value layout.
+ */
+:root:root:root .sw-table :is(thead th, tbody td, tbody th, tfoot td, tfoot th) { text-align: var(--table-align, center); vertical-align: middle; }
+:root:root:root .sw-table :is(td, th):is(.num, :first-child, :last-child) { padding-inline: 8px; }
+:root:root:root:root .sw-table :is(thead th, thead th.num),:root:root:root:root .sw-matrix thead th:first-child { text-align: var(--table-align, center); }
+:root:root:root .sw-table .num { font-variant-numeric: tabular-nums; }
+/* a number column is as wide as the longest word of its heading or its figure (width 1% = the minimum content width of an auto-layout column); the name column takes what is left */
+:root:root:root .sw-table thead th.num { width: 1%; }
+:root:root:root .sw-matrix :is(tbody td, tfoot td) { white-space: nowrap; }
+:root:root:root .sw-table thead th { padding-block: 4px; }
+:root:root:root .sw-table thead th button { justify-content: center; text-align: center; }
+:root:root:root .sw-table td > :is(.sw-link, .sw-chip) { text-align: center; }
+:root:root:root .sw-table .sw-meter { margin-inline: auto; }
+:root:root:root .sw-matrix :is(thead th, tbody td, tbody th, tfoot td, tfoot th):not(:first-child) { padding-inline: 4px; }
+:root:root:root .sw-matrix tbody th, :root:root:root .sw-matrix tfoot th { text-align: var(--table-align, center); }

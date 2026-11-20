@@ -13,7 +13,7 @@ test('the figure tables have no inline min-width: they fit their panel, columns 
   const table = await read('features/daily-report/report-table.tsx')
   assert.ok(!/minWidth|style=\{\{ minWidth/.test(table), 'no min-width in the code')
   assert.match(table, /<col style=\{\{ width: 'auto' \}\} \/>/) // the name column is the remainder
-  assert.match(table, /headWidth\(/) // each figure column is as wide as its own heading
+  assert.match(table, /headWordWidth\(/) // each figure column is as wide as the longest word of its own heading
   assert.match(table, /const TABLE_MIN_WIDTH = 1080/) // the Tasks list's breakpoint: a table from 1080px, cards below
   const views = await read('features/daily-report/report-views.tsx')
   assert.ok(!/colWidth=/.test(views))
@@ -51,10 +51,10 @@ test('the Recruiters board has no chrome of its own at any width, so its cards s
   assert.match(css, /\.dwb-card-name b \{ overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; \}/)
 })
 
-test('the Client tracker is a table from 1080px of card width and labelled cards below it, never a scroller', async () => {
+test('the Client tracker is a table from 960px of card width (auto layout) and labelled cards below it, never a scroller', async () => {
   const css = await read('styles/client-tracker.css')
   assert.match(css, /\.ct-table \{ container: ct \/ inline-size; \}/)
-  const cards = css.slice(css.indexOf('@container ct (max-width: 1079px)'))
+  const cards = css.slice(css.indexOf('@container ct (max-width: 959px)'))
   assert.match(cards, /max-height: none; overflow: visible;/)
   assert.match(cards, /td:first-child \{ display: none; \}/) // the serial number is not shown on a card
   assert.match(cards, /td\[data-label='Name'\] \{ grid-column: 1 \/ -1; order: -1;/)

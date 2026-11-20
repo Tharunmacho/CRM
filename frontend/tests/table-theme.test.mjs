@@ -50,7 +50,7 @@ test('the shared table has no explanatory captions: no "Showing" word in the pag
   assert.doesNotMatch(table, /pagination-label/)
   assert.doesNotMatch(table, /Remove a filter to see more results/)
   assert.match(table, /title=\{col\.header\}/)
-  assert.match(table, /col\.actions \? 'center' : col\.align \?\? 'left'/)
+  assert.match(table, /!col\.actions && col\.align === 'text' \? 'text' : 'center'/) // every column is centred; only align: 'text' keeps its cell left
 })
 
 test('table-theme.css: the safety net for every other table, in tokens, after the old skin, low specificity', async () => {

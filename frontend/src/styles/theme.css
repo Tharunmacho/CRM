@@ -723,6 +723,9 @@
    --table-line-strong   the thin outer frame around a table and the header's bottom edge                      (var(--border-control))
    --table-frame-width   the frame's width (1px); --table-frame-radius its small corner curve (6px; overflow clips the header corners)
    --table-header-line   the very faint column divider inside the primary-blue header band
+   --table-align         the text alignment of EVERY table heading and cell (center, horizontally; cells are also vertically middle); numbers too, with tabular figures
+   --table-align-text    the one exception, for the CELL only (its heading stays centred): long multi-line free text (notes, remarks, addresses, emails, file names, descriptions)
+                         and the group header rows that span columns ("Active today (5)"). A table opts a cell in with .is-text / .ui-c-text (the DataTable column align: 'text').
    They are built from the palette's own border tokens, so every palette follows and both themes stay visible. */
 :root {
   --table-line-width: 1px;
@@ -732,6 +735,8 @@
   --table-column-line: color-mix(in srgb, var(--border-main) 55%, var(--bg-card));
   --table-line-strong: var(--border-control);
   --table-header-line: color-mix(in srgb, var(--on-primary) 16%, var(--primary));
+  --table-align: center;
+  --table-align-text: left;
 }
 [data-theme="dark"] {
   --table-line-width: 1px;
@@ -741,4 +746,6 @@
   --table-column-line: color-mix(in srgb, var(--border-main) 55%, var(--bg-card));
   --table-line-strong: var(--border-control);
   --table-header-line: color-mix(in srgb, var(--on-primary) 16%, var(--primary));
+  --table-align: center;
+  --table-align-text: left;
 }

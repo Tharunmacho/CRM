@@ -23,10 +23,11 @@ export interface Column<T> {
   /** A row-actions column: fixed to its content, right-aligned, never wrapped or clipped. */
   actions?: boolean
   /**
-   * Header and cell alignment. Left by default, so a header and its cells share one left edge; set 'center' on a short
-   * code or flag column and 'right' on figures (the header follows).
+   * Header and cell alignment. EVERY heading and cell is centred (numbers too, in tabular figures): 'left', 'center' and 'right' all
+   * centre, so a table inherits the one shared look (styles/data-table.css). The single exception is 'text': a column of long multi-line
+   * free text (notes, remarks, addresses, emails, file names, descriptions) whose CELL stays left while its heading stays centred.
    */
-  align?: 'left' | 'right' | 'center'
+  align?: 'left' | 'right' | 'center' | 'text'
   /**
    * Keeps the column in view while the table scrolls sideways. The first column and the actions column pin themselves;
    * use 'none' to opt out.
@@ -196,8 +197,8 @@ export function DataTable<T>({
   const headPad = grid ? '' : compact ? 'px-3 py-2.5' : dense ? 'px-4 py-2' : 'px-4 py-3'
   const fixedLayout = columns.some((col) => col.width)
   const rule = !grid && gridLines ? 'border-r border-rule-soft last:border-r-0' : ''
-  const alignOf = (col: Column<T>, _index?: number): 'left' | 'center' | 'right' =>
-    col.actions ? 'center' : col.align ?? 'left'
+  const alignOf = (col: Column<T>, _index?: number): 'text' | 'center' =>
+    !col.actions && col.align === 'text' ? 'text' : 'center'
   const pinOf = (col: Column<T>, index: number): 'start' | 'end' | undefined => {
     if (!grid || col.pin === 'none') return undefined
     if (col.pin) return col.pin
@@ -271,7 +272,7 @@ export function DataTable<T>({
                       col.actions && 'ui-actions-cell',
                       grid
                         ? [`ui-c-${al}`, pin && `is-pin-${pin}`, col.sortable && 'is-sortable', isSorted && 'is-sorted']
-                        : [col.actions && 'text-right', col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'],
+                        : 'text-center',
                     )}
                   >
                     <span className="ui-th-inner inline-flex items-center gap-1">
@@ -422,7 +423,7 @@ export function DataTable<T>({
                         col.actions && 'ui-actions-cell',
                         grid
                           ? [`ui-c-${al}`, pin && `is-pin-${pin}`]
-                          : [col.actions && 'text-right', col.align === 'right' && 'text-right', col.align === 'center' && 'text-center'],
+                          : al === 'text' ? 'text-left' : 'text-center',
                         col.className,
                       )}
                     >
@@ -431,7 +432,7 @@ export function DataTable<T>({
                     )
                   })}
                   {openColumn && (
-                    <td className={cn('ui-actions-cell w-14 align-middle', grid ? 'ui-c-center is-pin-end' : 'text-right', pad)} style={grid ? pinStyle('end') : undefined} data-label="">
+                    <td className={cn('ui-actions-cell w-14 align-middle', grid ? 'ui-c-center is-pin-end' : 'text-center', pad)} style={grid ? pinStyle('end') : undefined} data-label="">
                       <RowOpen />
                     </td>
                   )}
