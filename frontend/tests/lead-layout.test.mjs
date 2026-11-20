@@ -104,3 +104,12 @@ test('Uploaded is a default column that goes first when the table is tight, neve
   assert.equal(fields.DEFAULT_COLUMN_FIELDS.has('uploaded'), true)
   assert.ok(fields.LEAD_FIELD_DEFS.some(field => field.id === 'uploaded'), 'the expanded row lists it with every other field')
 })
+
+test('Location and Job applied are wide enough for a 15-letter word at 13px bold, so a place is never broken mid-word', () => {
+  const need = 15 * 8 + 16 + 1 // 15 capitals at about 8px, the cell's 8px padding either side, the 1px column line
+  const byKey = Object.fromEntries(columns.map(column => [column.key, column]))
+  assert.equal(columnsModule.WORD_COLUMN_MIN, need)
+  for (const key of ['location', 'position']) assert.ok(byKey[key].width >= need, `${key} is ${byKey[key].width}px, needs ${need}px`)
+  assert.ok(byKey.state.width >= 12 * 8 + 17, 'State holds Chhattisgarh whole')
+  assert.ok(byKey.location.optional, 'Location is still hidden by the fit before anything is squeezed')
+})

@@ -184,11 +184,11 @@ export function StaffWeeklyBody({ weekly, staffId, onOpenStaff }: { weekly: Staf
         <div className="sw-scroll"><table className="sw-table sw-matrix">
           <thead><tr><th>Recruiter</th>{data.funnel.map(stage => <th key={stage.stage} className="num" title={stage.label}><span>{stage.stage}</span><small>{stage.label}</small></th>)}</tr></thead>
           <tbody>{rows.map(row => <tr key={row.id}>
-            <th><button type="button" className="sw-link" onClick={() => onOpenStaff(row.id)}>{row.name}</button></th>
+            <th data-label="Recruiter"><button type="button" className="sw-link" onClick={() => onOpenStaff(row.id)}>{row.name}</button></th>
             {data.funnel.map(stage => { const now = row.stages.inStageNow[stage.stage] ?? 0; const moved = row.stages.movesByStage[stage.stage] ?? 0
-              return <td key={stage.stage} className="num">{now || moved ? <><b>{now}</b>{moved ? <em>({moved})</em> : null}</> : ''}</td> })}
+              return <td key={stage.stage} className="num" data-label={`Stage ${stage.stage}`}>{now || moved ? <><b>{now}</b>{moved ? <em>({moved})</em> : null}</> : ''}</td> })}
           </tr>)}</tbody>
-          <tfoot><tr><th>Team</th>{data.funnel.map(stage => <td key={stage.stage} className="num"><b>{stage.inStageNow || ''}</b>{stage.movesInPeriod ? <em>({stage.movesInPeriod})</em> : null}</td>)}</tr></tfoot>
+          <tfoot><tr><th data-label="Recruiter">Team</th>{data.funnel.map(stage => <td key={stage.stage} className="num" data-label={`Stage ${stage.stage}`}><b>{stage.inStageNow || ''}</b>{stage.movesInPeriod ? <em>({stage.movesInPeriod})</em> : null}</td>)}</tr></tfoot>
         </table></div>
       </section>
 
@@ -224,21 +224,21 @@ function StaffLine({ row, notes, onOpen }: { row: StaffRow; notes: boolean; onOp
   const t = row.tasks
   const hoursShare = a.expectedHours ? Math.min(100, Math.round((a.hoursWorked / a.expectedHours) * 100)) : a.hoursWorked ? 100 : 0
   return <tr className={row.status === 'no_attendance' ? 'is-flag' : undefined} onClick={onOpen}>
-    <td><button type="button" className="sw-link" onClick={event => { event.stopPropagation(); onOpen() }}>{row.name}</button>
+    <td data-label="Recruiter"><button type="button" className="sw-link" onClick={event => { event.stopPropagation(); onOpen() }}>{row.name}</button>
       <span className={`sw-chip is-${statusTone(row.status)}`}>{STATUS_LABEL[row.status]}</span>{!row.active && <span className="sw-chip is-muted">Inactive</span>}</td>
-    <td><b>{a.workedDays}</b> worked{a.absentDays ? <span className="sw-bad"> - {a.absentDays} absent</span> : null}
+    <td data-label="Days"><b>{a.workedDays}</b> worked{a.absentDays ? <span className="sw-bad"> - {a.absentDays} absent</span> : null}
       {a.leaveDays ? <small>{a.leaveDays} on leave</small> : null}{a.missingCheckouts ? <small>{a.missingCheckouts} no check-out</small> : null}</td>
-    <td><b>{formatHours(a.hoursWorked)}</b>{a.expectedHours ? <small>of {formatHours(a.expectedHours)}</small> : null}
+    <td data-label="Hours"><b>{formatHours(a.hoursWorked)}</b>{a.expectedHours ? <small>of {formatHours(a.expectedHours)}</small> : null}
       <i className="sw-meter" aria-hidden="true"><b style={{ width: `${hoursShare}%` }} /></i>
       {a.activeHours ? <small>{formatHours(a.activeHours)} active in the CRM</small> : null}</td>
-    <td>{t.available && t.assigned ? <><b>{t.completed}</b> of {t.assigned}<small>{formatPercent(t.completionPercent)}{t.postponed ? ` - ${t.postponed} postponed` : ''}{t.overdue ? ` - ${t.overdue} overdue` : ''}</small></> : <span className="sw-muted">{t.available ? 'None assigned' : 'No data yet'}</span>}</td>
-    {notes && <td className="num">{row.feedbackNotes || <span className="sw-muted">0</span>}</td>}
-    <td className="num">{row.stages.moves || <span className="sw-muted">0</span>}</td>
-    <td className="num">{row.outcomes.forwarded}</td>
-    <td className="num">{row.outcomes.visaReceived}{row.outcomes.visaStamped ? <small>{row.outcomes.visaStamped} stamped</small> : null}</td>
-    <td className="num">{row.outcomes.deployed}</td>
-    <td className="num">{row.stuck.count ? <span className="sw-bad">{row.stuck.count}<small>oldest {row.stuck.oldestDays} d</small></span> : <span className="sw-muted">0</span>}</td>
-    <td className="num"><span className={`sw-score-pill is-${scoreTone(row.score)}`} title={row.scoreParts.map(p => `${p.label}: ${p.detail}`).join('\n')}>{row.score ?? '-'}</span></td>
+    <td data-label="Daily tasks">{t.available && t.assigned ? <><b>{t.completed}</b> of {t.assigned}<small>{formatPercent(t.completionPercent)}{t.postponed ? ` - ${t.postponed} postponed` : ''}{t.overdue ? ` - ${t.overdue} overdue` : ''}</small></> : <span className="sw-muted">{t.available ? 'None assigned' : 'No data yet'}</span>}</td>
+    {notes && <td className="num" data-label="Notes written">{row.feedbackNotes || <span className="sw-muted">0</span>}</td>}
+    <td className="num" data-label="Stage moves">{row.stages.moves || <span className="sw-muted">0</span>}</td>
+    <td className="num" data-label="Sent to client">{row.outcomes.forwarded}</td>
+    <td className="num" data-label="Visa">{row.outcomes.visaReceived}{row.outcomes.visaStamped ? <small>{row.outcomes.visaStamped} stamped</small> : null}</td>
+    <td className="num" data-label="Deployed">{row.outcomes.deployed}</td>
+    <td className="num" data-label="Stuck">{row.stuck.count ? <span className="sw-bad">{row.stuck.count}<small>oldest {row.stuck.oldestDays} d</small></span> : <span className="sw-muted">0</span>}</td>
+    <td className="num" data-label="Score"><span className={`sw-score-pill is-${scoreTone(row.score)}`} title={row.scoreParts.map(p => `${p.label}: ${p.detail}`).join('\n')}>{row.score ?? '-'}</span></td>
   </tr>
 }
 
@@ -246,16 +246,16 @@ function LeadLine({ row, onOpen }: { row: StaffRow; onOpen: () => void }) {
   const leads = row.leads
   const none = <span className="sw-muted">0</span>
   return <tr onClick={onOpen}>
-    <td><button type="button" className="sw-link" onClick={event => { event.stopPropagation(); onOpen() }}>{row.name}</button></td>
+    <td data-label="Recruiter"><button type="button" className="sw-link" onClick={event => { event.stopPropagation(); onOpen() }}>{row.name}</button></td>
     {!leads?.available
-      ? <td colSpan={LEAD_COLUMNS.length - 1} className="sw-muted">No lead data</td>
+      ? <td colSpan={LEAD_COLUMNS.length - 1} className="sw-muted" data-label="Leads">No lead data</td>
       : <>
-        <td className="num">{leads.assigned ? <><b>{leads.assigned}</b><small className={`sw-lead-${leadsTone(leads)}`}>{leadsCalledText(leads)}</small></> : none}</td>
-        <td className="num">{leads.interested || none}</td>
-        <td className="num">{leads.calls || none}{leads.worked ? <small>{leads.worked} {leads.worked === 1 ? 'lead' : 'leads'}</small> : null}</td>
-        <td className="num">{leads.resumesReceived || none}</td>
-        <td className="num">{leads.converted || none}{leads.conversionPercent != null ? <small>{formatPercent(leads.conversionPercent)}</small> : null}</td>
-        <td className="num">{leads.followUpsOverdue ? <span className="sw-bad">{leads.followUpsOverdue}</span> : none}{leads.open ? <small>{leads.open} open</small> : null}</td>
+        <td className="num" data-label="Assigned">{leads.assigned ? <><b>{leads.assigned}</b><small className={`sw-lead-${leadsTone(leads)}`}>{leadsCalledText(leads)}</small></> : none}</td>
+        <td className="num" data-label="Interested">{leads.interested || none}</td>
+        <td className="num" data-label="Calls">{leads.calls || none}{leads.worked ? <small>{leads.worked} {leads.worked === 1 ? 'lead' : 'leads'}</small> : null}</td>
+        <td className="num" data-label="Resumes">{leads.resumesReceived || none}</td>
+        <td className="num" data-label="Converted">{leads.converted || none}{leads.conversionPercent != null ? <small>{formatPercent(leads.conversionPercent)}</small> : null}</td>
+        <td className="num" data-label="Overdue">{leads.followUpsOverdue ? <span className="sw-bad">{leads.followUpsOverdue}</span> : none}{leads.open ? <small>{leads.open} open</small> : null}</td>
       </>}
   </tr>
 }

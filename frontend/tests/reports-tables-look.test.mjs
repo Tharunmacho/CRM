@@ -83,3 +83,35 @@ test('Attendance: no heading is cut and the matrix names wrap', async () => {
     }
   }
 })
+
+test('Reports (legacy tabs): the DataTable report tables wrap headings at spaces, lose the double rule and never break a word anywhere', async () => {
+  const css = await read('styles/reports-v2.css')
+  assert.match(css, /:root:root \.rv-card\.rv-table > header \{ border-bottom: 0;/) // one frame, never two
+  assert.match(css, /:root:root \.rv-table\.tb-blue \.ui-data-table\.ui-data-table thead th \{ white-space: normal; text-overflow: clip; overflow-wrap: normal;/)
+  assert.match(css, /\.rv-table\.tb-blue \.ui-data-table \.ui-th-inner > button \{[^}]*text-overflow: clip; white-space: normal;/)
+  assert.match(css, /\.rv-cell \{[^}]*overflow-wrap: break-word; word-break: normal;/)
+  assert.ok(!/overflow-wrap: anywhere/.test(css), 'no mid-word breaking in the report styles')
+  const views = await read('features/reports/report-views.tsx')
+  assert.match(views, /className=\{`rv-card rv-table tb-blue \$\{className\}`\}/) // the shared Tasks-look theme
+  assert.match(views, /stackBelow/) // labelled cards below the fit width
+})
+
+test('Reports (legacy tabs): the weekly staff report tables fit their panel and become labelled cards below their fit width', async () => {
+  const css = await read('styles/staff-report.css')
+  assert.match(css, /\.sw-body \{ container: sw \/ inline-size; \}/)
+  assert.match(css, /:root:root \.rv-card\.sw-card:has\(> \.sw-scroll\) \{ border-color: transparent; \}/) // one frame
+  assert.match(css, /\.sw-staff \{ min-width: 0; \}/) // the 880px minimum is gone
+  assert.match(css, /\.sw-staff td:not\(:first-child\) \{ white-space: normal; \}/)
+  assert.match(css, /\.sw-table thead th \{ white-space: normal; text-overflow: clip; overflow-wrap: normal;/)
+  for (const [name, width] of [['staff', 979], ['leads', 779], ['matrix', 719]]) {
+    const block = css.slice(css.indexOf(`@container sw (max-width: ${width}px)`))
+    assert.match(block, new RegExp(String.raw`\.sw-scroll:has\(> \.sw-${name}\) \{ overflow: visible; padding: 0 16px 16px; border: 0; border-radius: 0; \}`), `${name}: the cards have no frame`)
+    assert.match(block, new RegExp(String.raw`\.sw-table\.sw-${name} :is\(tbody, tfoot\) td::before \{ content: attr\(data-label\)`), `${name}: every cell shows its label`)
+  }
+  assert.ok(!/overflow-wrap: anywhere/.test(css))
+  const tsx = await read('features/staff-report/staff-weekly-report.tsx')
+  for (const label of ['Recruiter', 'Days', 'Hours', 'Daily tasks', 'Stage moves', 'Sent to client', 'Visa', 'Deployed', 'Stuck', 'Score', 'Assigned', 'Interested', 'Calls', 'Resumes', 'Converted', 'Overdue']) {
+    assert.ok(tsx.includes(`data-label="${label}"`), `${label} cell is labelled`)
+  }
+  assert.match(tsx, /data-label=\{`Stage \$\{stage\.stage\}`\}/)
+})
