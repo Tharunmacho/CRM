@@ -935,6 +935,9 @@ def save_form(db: Session, user: User, candidate_id: str, body: dict, *, applica
     if changes.get("whatsapp") is SAME_AS_PHONE:
         changes["whatsapp"] = (changes.get("phone") or candidate.phone or "").strip() or None
     changes = {k: (v if k not in ("email", "passport_no") else normalize_candidate_values({k: v})[k] or None) for k, v in changes.items()}
+    for column in ("phone", "whatsapp"):   # '+91XXXXXXXXXX' when it can be read with confidence, as typed otherwise
+        if isinstance(changes.get(column), str):
+            changes[column] = normalize_candidate_values({column: changes[column]})[column]
     for column in ("father_name", "marital_status", "gender", "nationality", "current_address", "whatsapp", "email", "current_city",
                    "passport_no", "passport_place", "native_place", "family_member_number", "job_duration_preference",
                    "country_preference", "best_time_to_contact", "interest_level"):

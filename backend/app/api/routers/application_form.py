@@ -163,9 +163,9 @@ def save_assignment(candidate_id: str, body: AssignmentIn, response: Response, o
     """Change the client's job, the source, the agency or the recruiter of this candidate from the form (see the v2 contract)."""
     _no_store(response)
     fields = {key: getattr(body, key) for key in body.model_fields_set}
-    for key in ("source", "recruiterId"):
-        if key in fields and fields[key] is None:
-            raise HTTPException(422, "Choose a source." if key == "source" else "Choose a recruiter.")
+    # `source: null` clears the source (stored as "other", see form_assignment); a recruiter cannot be cleared here.
+    if "recruiterId" in fields and fields["recruiterId"] is None:
+        raise HTTPException(422, "Choose a recruiter.")
     with applications_router._mutation(db):
         outcome = form_assignment.apply(db, user, candidate_id, fields)
     if outcome["applicationId"]:  # a new job was mapped: show its application, not the one it replaced

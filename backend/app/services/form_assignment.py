@@ -199,11 +199,15 @@ def apply(db: Session, user: User, candidate_id: str, fields: dict) -> dict:
 
     # ---- source
     if "source" in fields:
-        value = Source(fields["source"])
+        # The column cannot be empty (it is a database enum), so "no source" (null) is stored as the catch-all "other";
+        # clearing is always allowed, even when an admin has hidden that option.
+        cleared = fields["source"] is None
+        value = Source.other if cleared else Source(fields["source"])
         if value != candidate.source:
             from app.services.form_options import ensure_allowed
-            ensure_allowed(db, "candidate_source", value.value, current=candidate.source.value)
-            meta = {"from": candidate.source.value, "to": value.value}
+            if not cleared:
+                ensure_allowed(db, "candidate_source", value.value, current=candidate.source.value)
+            meta = {"from": candidate.source.value, "to": value.value, **({"cleared": True} if cleared else {})}
             if candidate.source == Source.referral and candidate.source_detail:
                 meta["referral_detail"] = candidate.source_detail.strip()
             _audit(db, user, "source changed", candidate, meta)

@@ -22,7 +22,8 @@ import {
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
-import { currencyChoices, currencyLabel } from '@/shared/lib/agency'
+import { currencyChoices, currencyLabel, homeDigits } from '@/shared/lib/agency'
+import { formatPhone, samePhone } from '@/shared/lib/phone'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { applicationFileSlot, applicationFileVersions, newestFileVersions, type ApplicationFile } from '@/shared/lib/document-files'
 import { useStore } from '@/shared/state/crm-store'
@@ -342,7 +343,7 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
   const photo = newestFileVersions(candidateDocuments.find(document => document.key === 'photo')?.versions ?? [])[0]
   // The order and the stage are already in the title line and the progress strip, so they are not repeated here.
   const facts: [string, React.ReactNode, React.ReactNode, boolean?][] = [
-    ['Phone', <Phone key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.phone, true],
+    ['Phone', <Phone key="i" className="h-3.5 w-3.5" aria-hidden="true" />, formatPhone(cand.phone, homeDigits(store.settings.homeCallingCode)), true],
     ['Passport', <BookUser key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.passportNo ?? 'Not saved', !!cand.passportNo],
     ['Passport expires', <BookUser key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.passportExpiry ? dateLabel(cand.passportExpiry) : 'Not saved'],
     ['Recruiter', <User key="i" className="h-3.5 w-3.5" aria-hidden="true" />, owner?.name ?? 'Not assigned'],
@@ -396,6 +397,7 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
  */
 function CandidateRecord({ app }: { app: Application }) {
   const store = useStore()
+  const home = homeDigits(store.settings.homeCallingCode)
   const cand = store.candidate(app.candidateId)!
   const order = store.order(app.orderId)!
   const client = store.company(order.companyId)!
@@ -415,8 +417,9 @@ function CandidateRecord({ app }: { app: Application }) {
       </Segment>
 
       <Segment icon={<Phone className="h-4 w-4" />} title="Contact and source" subtitle="How to reach this candidate and where they came from">
-        <Fact label="Mobile" value={cand.phone} ident />
-        <Fact label="WhatsApp" value={cand.whatsapp ?? 'Not provided'} ident={!!cand.whatsapp} />
+        <Fact label="Mobile" value={formatPhone(cand.phone, home)} ident />
+        {/* The WhatsApp number is written out only when it is not the mobile number. */}
+        <Fact label="WhatsApp" value={!cand.whatsapp ? 'Not provided' : samePhone(cand.whatsapp, cand.phone, home) ? 'Same as mobile' : formatPhone(cand.whatsapp, home)} ident={!!cand.whatsapp && !samePhone(cand.whatsapp, cand.phone, home)} />
         <Fact label="Email" value={cand.email ?? 'Not provided'} half />
         <Fact label="Source" value={cand.source.replace('_', '-') + (cand.sourceDetail ? ` · ${cand.sourceDetail}` : '')} className="capitalize" half />
         <Fact label="Date added" value={dateLabel(cand.addedAt)} />

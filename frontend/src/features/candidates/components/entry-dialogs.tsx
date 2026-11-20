@@ -1,5 +1,7 @@
 import { AlertTriangle } from 'lucide-react'
 import { Badge } from '@/shared/ui/display'
+import { formatPhone } from '@/shared/lib/phone'
+import { useHomeDigits } from '@/shared/state/use-agency'
 import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { primaryId } from '../candidate-ids'
@@ -21,6 +23,7 @@ export function DuplicateDialog({ duplicate, form, saving, error, onCancel, onOp
   onOpen: (id: string) => void
   onMerge: (id: string) => void
 }) {
+  const home = useHomeDigits()
   const canMerge = duplicate?.candidate.canMerge !== false
   const owner = duplicate?.candidate.ownerName
   return (
@@ -54,7 +57,7 @@ export function DuplicateDialog({ duplicate, form, saving, error, onCancel, onOp
             <div className="ac-dup-body">
               <p className="ac-dup-label">Already in the Data Bank</p>
               <p className="ac-dup-name">{duplicate.candidate.name}</p>
-              <p className="ac-dup-meta ident" title={duplicate.candidate.phone}>{duplicate.candidate.phone}</p>
+              <p className="ac-dup-meta ident" title={formatPhone(duplicate.candidate.phone, home)}>{formatPhone(duplicate.candidate.phone, home)}</p>
               <div className="ac-dup-badges">
                 <Badge>{primaryId(duplicate.candidate)}</Badge>
                 <Badge>Recruiter: {duplicate.candidate.ownerName ?? 'Not assigned yet'}</Badge>

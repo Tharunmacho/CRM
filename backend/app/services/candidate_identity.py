@@ -11,6 +11,7 @@ import unicodedata
 from sqlalchemy import case, func, or_, select
 from app.db.models import Candidate
 from app.services import agency_settings
+from app.services.phone_format import canonical_phone
 
 
 def text(value):
@@ -84,6 +85,10 @@ def normalize_candidate_values(values):
         cleaned["email"] = normalize_email(cleaned["email"]) or None
     if "passport_no" in cleaned:
         cleaned["passport_no"] = normalize_passport(cleaned["passport_no"]) or None
+    for key in ("phone", "whatsapp"):
+        if isinstance(cleaned.get(key), str):
+            # Stored as '+91XXXXXXXXXX' when it can be read with confidence, as typed otherwise (matching compares digits only).
+            cleaned[key] = canonical_phone(cleaned[key], agency_settings.home_digits())
     for key in ("skills", "designations", "languages"):
         if key in cleaned:
             cleaned[key] = normalized_labels(cleaned[key])

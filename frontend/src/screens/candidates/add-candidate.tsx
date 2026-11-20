@@ -37,6 +37,7 @@ import { fieldSources, liveDuplicateQuery, SCAN_KIND_LABEL, type DuplicateMatch 
 import { candidateEntryErrors, draftSnapshot, EMPTY_CANDIDATE_FORM as EMPTY } from '@/features/candidates/entry-model'
 import { educationPayload, historyPayload, previewFormFromEntry } from '@/features/application-form/entry-bridge'
 import { applicationFormHref } from '@/features/application-form/form-model'
+import { FormOptionSelect } from '@/features/application-form/components/form-option-select'
 import { fileHref } from '@/shared/api/client'
 import { useReferenceAgencies } from '@/features/clients/agency-api'
 import '@/styles/application-form.css'
@@ -358,7 +359,7 @@ export default function AddCandidatePage() {
       education: educationPayload(form.education),
       work_history: historyPayload(form.workHistory),
       ...screeningPayload(form),
-      source: form.source,
+      source: form.source || 'other',   // "Not recorded": the column cannot be empty, so the catch-all source is stored
       source_detail: form.sourceDetail.trim() || undefined,
       // The server prefers the scanned resume's own text; this covers a hand-filled form.
       resume_text: `${form.name} — ${form.designation}, ${form.totalExperience || 0} years. ${form.skills}`,
@@ -476,10 +477,7 @@ export default function AddCandidatePage() {
   const years = (key: FormKey, label: string, cls: string) =>
     F(key, label, <Input type="number" min="0" step="1" value={form[key]} onChange={(e) => set(key, e.target.value)} placeholder="Years" />, { cls })
   const choice = (key: FormKey, label: string, category: string, cls: string, empty = 'Not recorded') => (
-    F(key, label, <Select value={form[key]} onChange={(e) => set(key, e.target.value)}>
-      <option value="">{empty}</option>
-      {choicesFor(formOptions, category, form[key]).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-    </Select>, { cls })
+    F(key, label, <FormOptionSelect category={category} value={form[key]} onChange={(value) => set(key, value)} label={label} allowClear clearLabel={empty} allowAdd={category !== OPT.gender} />, { cls })
   )
   const labels = (category: string) => activeOptions(formOptions, category).map((option) => option.label)
   // Suggestions come from what is already saved (the server's lists); the page's own records stand in until they arrive.
@@ -682,9 +680,7 @@ export default function AddCandidatePage() {
               {/* ------------------------------------------------------------------ Assessment */}
               <FormSection id="candidate-assessment" icon={Gauge} title="Assessment & preferences" subtitle="From the screening conversation. The recruiter still records the initial call on the profile.">
                 <div className="ac-g">
-                  {F('serviceChargesStatus', 'Service charges', <Select value={form.serviceChargesStatus} onChange={(e) => set('serviceChargesStatus', e.target.value)}>
-                    {choicesFor(formOptions, OPT.serviceCharges, form.serviceChargesStatus).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </Select>, { cls: 's-4' })}
+                  {F('serviceChargesStatus', 'Service charges', <FormOptionSelect category={OPT.serviceCharges} value={form.serviceChargesStatus} onChange={(value) => set('serviceChargesStatus', value)} label="Service charges" allowAdd />, { cls: 's-4' })}
                   <EntryField label="Interest level" className="s-12" hint="Tap the chosen card again to clear it.">
                     <InterestCards value={form.interestLevel} options={choicesFor(formOptions, OPT.interestLevel, form.interestLevel)} onChange={(value) => set('interestLevel', value)} />
                   </EntryField>
@@ -695,9 +691,8 @@ export default function AddCandidatePage() {
               <FormSection id="candidate-source" icon={Share2} title="Source & follow-up" subtitle="Where the candidate came from, who looks after them and when to follow up. The client, country and job come from the order once the candidate is matched.">
                 <div className="ac-g">
                   <EntryField label="Source" className="s-3">
-                    <Select value={form.source} onChange={(e) => set('source', e.target.value)}>
-                      {choicesFor(formOptions, OPT.source, form.source).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </Select>
+                    {/* "Not recorded" is saved as the catch-all source "Other" (the column cannot be empty); the list is the admin-managed one. */}
+                    <FormOptionSelect category={OPT.source} value={form.source} onChange={(value) => set('source', value)} label="Source" allowClear clearLabel="Not recorded" allowAdd />
                   </EntryField>
                   <EntryField label={sourceHint} className="s-3" aux={agencyNames.length > 0 ? <datalist id="reference-agency-names">{[...new Set(agencyNames)].map((name) => <option key={name} value={name} />)}</datalist> : undefined}>
                     <Input value={form.sourceDetail} onChange={(e) => set('sourceDetail', e.target.value)} placeholder={sourcePlaceholder} maxLength={255} list={agencyNames.length ? 'reference-agency-names' : undefined} />

@@ -1,8 +1,9 @@
 /**
  * Pure helpers behind the Data Bank table's cells: the preferred-country pills, the colour of a form-option value
  * (service charges, interest level), the two-line date, the date of birth and the WhatsApp link.
- * No React, no imports, so they are unit-tested directly (tests/data-bank-view.test.mjs).
+ * No React and no imports but the shared phone helper, so they are unit-tested directly (tests/data-bank-view.test.mjs).
  */
+import { waDigits } from '@/shared/lib/phone'
 
 export type Tone = 'ok' | 'info' | 'warn' | 'bad' | 'quiet'
 
@@ -87,8 +88,11 @@ export function dobParts(dob?: string | null, now: Date = new Date()): { label: 
 
 /* --------------------------------------------------------------- whatsapp */
 
-/** A wa.me link for a saved WhatsApp number, or null when it holds too few digits to be a number. */
-export function whatsappHref(number?: string | null): string | null {
-  const digits = (number ?? '').replace(/\D/g, '')
-  return digits.length >= 7 && digits.length <= 15 ? `https://wa.me/${digits}` : null
+/**
+ * A wa.me link for a saved WhatsApp number, or null when it cannot be a number. `home` is the agency's calling code as digits
+ * (shared/lib/agency.ts `homeDigits`): a national number gets it, so the link opens the right chat.
+ */
+export function whatsappHref(number?: string | null, home?: string | null): string | null {
+  const digits = waDigits(number, home)
+  return digits ? `https://wa.me/${digits}` : null
 }

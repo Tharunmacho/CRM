@@ -3,6 +3,9 @@ import { ClipboardList, FileSearch, Footprints, Link2, Mail, MessageCircle, Penc
 import { useNavigate } from 'react-router-dom'
 import { applicationFormHref } from '@/features/application-form/form-model'
 import { countryCode } from '@/shared/lib/country-flag'
+import { homeDigits } from '@/shared/lib/agency'
+import { formatPhone, samePhone } from '@/shared/lib/phone'
+import { useHomeDigits } from '@/shared/state/use-agency'
 import { labelFor, type FormOptions } from '@/features/form-options/form-options-model'
 import { countryTone, dobParts, splitCountries, whatsappHref } from '@/features/candidates/data-bank-view'
 import { stageByNo } from '@/shared/workflow/stages'
@@ -121,7 +124,9 @@ const humanize = (value: string) => { const text = value.replace(/_/g, ' ').trim
 
 /** What the field registry (data-bank-fields.ts) needs from the store to write a candidate's recruiter, stage, order, status and option labels. */
 export function bankContext(store: Store, options: FormOptions = {}): BankContext {
+  const home = homeDigits(store.settings?.homeCallingCode)
   return {
+    phone: (value) => formatPhone(value, home),
     ownerName: (id) => (id ? store.user(id)?.name ?? '' : ''),
     agent: (candidate) => agentLabel(candidate.sourceDetail, candidate.source),
     statusLabel: (candidate) => [candidate.status === 'needs_review' ? '' : candidateStatus(candidate).label,
@@ -232,11 +237,15 @@ export function CandidateCell({ candidate, mark = plain }: CellProps) {
 
 /** Phone (with the green WhatsApp glyph when a WhatsApp number is saved) over the e-mail; both on one line each, cut with a tooltip. */
 export function ContactLines({ candidate, mark = plain }: CellProps) {
+  const home = useHomeDigits()
+  const phone = formatPhone(candidate.phone, home)
+  // The WhatsApp number is written out only when it is not the phone; the glyph itself always opens the chat.
+  const other = candidate.whatsapp && !samePhone(candidate.whatsapp, candidate.phone, home) ? formatPhone(candidate.whatsapp, home) : ''
   return (
-    <span className="dbt-stack" title={candidate.email ? `${candidate.phone} · ${candidate.email}` : candidate.phone}>
+    <span className="dbt-stack" title={[phone, other && `WhatsApp ${other}`, candidate.email].filter(Boolean).join(' · ')}>
       <span className="dbt-line">
-        {candidate.phone ? <span className="dbt-main ident">{mark(candidate.phone)}</span> : <Dash />}
-        {whatsappHref(candidate.whatsapp) && <WhatsAppLink candidate={candidate} />}
+        {phone ? <span className="dbt-main ident">{mark(phone)}</span> : <Dash />}
+        {whatsappHref(candidate.whatsapp, home) && <WhatsAppLink candidate={candidate} />}
       </span>
       {candidate.email && <small className="dbt-sub is-email" title={candidate.email}>{mark(candidate.email)}</small>}
     </span>
@@ -277,10 +286,11 @@ export function CountryPills({ value, max = 2 }: { value?: string | null; max?: 
 
 /** Green WhatsApp glyph that opens the chat; a dash when no WhatsApp number is saved. */
 export function WhatsAppLink({ candidate }: { candidate: Candidate }) {
-  const href = whatsappHref(candidate.whatsapp)
+  const home = useHomeDigits()
+  const href = whatsappHref(candidate.whatsapp, home)
   if (!href) return <span className="db-muted" title="No WhatsApp number saved" aria-label="No WhatsApp number">–</span>
   return (
-    <a className="db-wa" href={href} target="_blank" rel="noopener noreferrer" title={`Chat on WhatsApp: ${candidate.whatsapp}`} aria-label={`Open WhatsApp chat with ${candidate.name}`}
+    <a className="db-wa" href={href} target="_blank" rel="noopener noreferrer" title={`Chat on WhatsApp: ${formatPhone(candidate.whatsapp, home)}`} aria-label={`Open WhatsApp chat with ${candidate.name}`}
       onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
         <path fill="currentColor" d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.16-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.39-1.48-.88-.79-1.48-1.76-1.65-2.06-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.61-.92-2.21-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.07 2.88 1.21 3.07.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.08 1.76-.72 2-1.41.25-.7.25-1.29.17-1.41-.07-.12-.27-.2-.57-.35M12.05 21.78h-.01a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.26c0-5.45 4.44-9.88 9.89-9.88 2.64 0 5.12 1.03 6.99 2.9a9.82 9.82 0 0 1 2.89 6.99c0 5.45-4.44 9.88-9.88 9.88M20.46 3.49A11.8 11.8 0 0 0 12.05 0C5.5 0 .16 5.34.16 11.89c0 2.1.55 4.14 1.59 5.95L.06 24l6.3-1.65a11.9 11.9 0 0 0 5.69 1.45h.01c6.55 0 11.89-5.34 11.89-11.89 0-3.18-1.24-6.17-3.48-8.42" />

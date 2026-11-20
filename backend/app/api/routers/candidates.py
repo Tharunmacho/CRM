@@ -109,7 +109,11 @@ def candidate_position_groups(response: Response, filters: Search = Depends(cand
 
 
 @router.get("/export")
-def candidate_export(filters: Search = Depends(candidate_filters), db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
+def candidate_export(filters: Search = Depends(candidate_filters), db: Session = Depends(get_db), user: User = Depends(current_user)):
+    # Every signed-in role may download; a recruiter's file holds only their own candidates whatever the query says
+    # (Admin and MD get the whole filtered bank), as the Lead sheet export does.
+    if not is_admin_level(user):
+        filters.staff = user.id
     return Response(export_candidates(db, filters), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": 'attachment; filename="candidate-data-bank.xlsx"', "Cache-Control": "private, no-store"})
 

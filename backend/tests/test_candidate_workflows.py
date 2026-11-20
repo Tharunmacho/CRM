@@ -46,6 +46,18 @@ def create(db, **values):
     return route.create_candidate(route.CandidateIn(name='Synthetic candidate', phone='9000000001', **values), db, db.get(m.User, 'admin'))
 
 
+def test_phone_and_whatsapp_are_stored_canonical_and_duplicates_still_match(db):
+    first = route.create_candidate(route.CandidateIn(name='Asha', phone='098765 43210', whatsapp='+91 98765 43210'), db, db.get(m.User, 'admin'))
+    row = db.get(m.Candidate, first.id)
+    assert (row.phone, row.whatsapp) == ('+919876543210', '+919876543210')
+    # the same person typed another way is still found (matching compares digits)
+    assert [c.id for c, _ in identity_matches(db, {'phone': '9876543210'})] == [row.id]
+    assert [c.id for c, _ in identity_matches(db, {'phone': '+91-98765-43210'})] == [row.id]
+    # an unreadable value is kept exactly as typed
+    second = route.create_candidate(route.CandidateIn(name='Ravi', phone='98765 43211 ext 4'), db, db.get(m.User, 'admin'))
+    assert db.get(m.Candidate, second.id).phone == '98765 43211 ext 4'
+
+
 def test_phone_normalization_does_not_collapse_foreign_country_codes():
     assert normalize_phone('+91 90000 00001') == normalize_phone('0091-9000000001') == normalize_phone('09000000001') == '9000000001'
     assert normalize_phone('+44 90000 00001') != normalize_phone('+91 90000 00001')
@@ -169,7 +181,7 @@ def test_manual_creation_persists_phone_normalization_used_by_duplicate_lookup(d
     assert first.json()['ref'].startswith('CND-')
     assert first.json()['careId'] == 'CI-001'
     candidate = db.get(m.Candidate, first.json()['id'])
-    assert candidate.phone == '9000000001' and candidate.whatsapp == '9000000002'
+    assert candidate.phone == "+919000000001" and candidate.whatsapp == "+919000000002"  # canonical form; matching still compares digits
     duplicate = make_client(db).post('/api/candidates', json={'name': 'Same number', 'phone': '9000000001'})
     assert duplicate.status_code == 409, duplicate.text
     assert db.scalar(select(func.count()).select_from(m.Candidate)) == 1
@@ -308,7 +320,7 @@ def test_bounded_search_exact_skills_no_skills_and_fulltext(db):
     assert make_client(db).get('/api/candidates?page_size=101').status_code == 422
 
 
-def test_column_filters_export_parity_and_admin_guard(db):
+def test_column_filters_export_parity_and_recruiter_scope(db):
     for index in range(3):
         db.add(m.Candidate(ref=f'EX-{index}', name='=FORMULA' if index == 0 else f'Name {index}', phone=f'900000001{index}', source='email',
                            skills=['Welding'] if index < 2 else [], total_experience=4, owner_id='b'))
@@ -316,13 +328,22 @@ def test_column_filters_export_parity_and_admin_guard(db):
     url = '/api/candidates?skills=welding&column_filters={"experience":"4","source":"Email"}&page_size=1'
     listing = make_client(db, 'a').get(url)
     assert listing.status_code == 200 and listing.json()['total'] == 2
-    assert make_client(db, 'a').get('/api/candidates/export').status_code == 403
+    # Every role may download; a recruiter's file holds only their own candidates, whatever the query asks for.
+    own = make_client(db, 'b').get('/api/candidates/export?staff=a')
+    assert own.status_code == 200
+    with ZipFile(BytesIO(own.content)) as workbook:
+        assert workbook.read('xl/worksheets/sheet1.xml').decode().count('<row ') == 4   # header + the three owned by 'b'
+    other = make_client(db, 'a').get('/api/candidates/export?staff=b')
+    assert other.status_code == 200
+    with ZipFile(BytesIO(other.content)) as workbook:
+        assert workbook.read('xl/worksheets/sheet1.xml').decode().count('<row ') == 1   # header only: 'a' owns none
     response = make_client(db).get(url.replace('/api/candidates?', '/api/candidates/export?'))
     assert response.status_code == 200
     with ZipFile(BytesIO(response.content)) as workbook:
         xml = workbook.read('xl/worksheets/sheet1.xml').decode()
         assert '=FORMULA' in xml and '<f>' not in xml
         assert 'Name 1' in xml and 'Name 2' not in xml
+        assert '+91 90000 00011' in xml   # the Phone column is written in the grouped, calling-code form
         assert xml.count('<row ') == 3
 
 

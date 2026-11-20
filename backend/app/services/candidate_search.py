@@ -13,7 +13,9 @@ from app.api.schemas import CandidateOut
 from app.core.config import get_settings
 from app.db.models import Application, ApplicationStatus, Attachment, AuditEntry, Candidate, CandidateStatus, Client, Company, Designation, FormOption, Order, Source, User
 from app.domain.stages import STAGES
-from app.services.candidate_identity import normalized_labels
+from app.services import agency_settings
+from app.services.candidate_identity import normalize_phone, normalized_labels
+from app.services.phone_format import format_phone
 from app.services.care_india_id import format_care_id
 from app.services.traveller_id import format_traveller_id
 from app.services.agency_display import agency_display_expression
@@ -389,6 +391,14 @@ def candidate_skill_facets(db, filters: Search):
             "total": total, "recorded": recorded, "missing": total - recorded}
 
 
+def whatsapp_if_different(candidate, home: str) -> str:
+    """The WhatsApp number as written in the sheet, blank when it is the same number as the phone (it only repeats the column before)."""
+    whatsapp = (candidate.whatsapp or "").strip()
+    if not whatsapp or (candidate.phone and normalize_phone(whatsapp, home) == normalize_phone(candidate.phone, home)):
+        return ""
+    return format_phone(whatsapp, home)
+
+
 def export_candidates(db, filters):
     # Source claims are deferred on ordinary list reads.  The export explicitly includes
     # them in the main candidate query so an Excel export never creates one query per row.
@@ -429,6 +439,7 @@ def export_candidates(db, filters):
         lambda session: dict(session.execute(select(Candidate.id, agency_display_expression()).where(Candidate.id.in_(matching_ids))).all()),
         read_uploaded,
     )
+    home = agency_settings.home_digits(db)
     rows = [["Care India ID", "Traveller ID", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Exact source wording", "Passport available", "Source", "Assigned recruiter", "Mapped order", "Stage", "Status", "Added at",
              "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level", "Agency", "Profile review issues",
              *[label + " document" for _slot, label in required], "Missing mandatory documents"]]
@@ -451,11 +462,11 @@ def export_candidates(db, filters):
             if not review:
                 review.append("Profile check pending")
         exact = "; ".join(f"{key}: {value}" for key, value in sorted((candidate.source_claims or {}).items()))
-        rows.append([candidate.care_id or "", candidate.traveller_id or "", candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
+        rows.append([candidate.care_id or "", candidate.traveller_id or "", candidate.name, format_phone(candidate.phone, home), candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
                      candidate.total_experience, exact, "Yes" if candidate.passport_no else "No", candidate.source.value,
                      users.get(candidate.owner_id, UNASSIGNED_LABEL), orders.get(app.order_id, "") if app else "", app.current_stage if app else "",
                      candidate.status.value, candidate.created_at.isoformat(),
-                     candidate.dob.isoformat() if candidate.dob else "", candidate.whatsapp or "", candidate.country_preference or "", service, interest,
+                     candidate.dob.isoformat() if candidate.dob else "", whatsapp_if_different(candidate, home), candidate.country_preference or "", service, interest,
                      agencies.get(candidate.id) or "", "; ".join(review),
                      *["Uploaded" if slot in saved else "Wrong document" if slot in wrong else "Marked manually (no file attached)" if slot in marked else "Missing" for slot, _label in required],
                      ", ".join(label for slot, label in required if slot not in saved | marked)])

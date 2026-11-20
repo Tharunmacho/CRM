@@ -39,11 +39,12 @@ const placementJs = ts.transpileModule(placementSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
 }).outputText
 const placement = {}
-new Function('exports', 'React', 'bankApplication', 'bankFormApplication', 'stageByNo', 'StageChip', 'Dash', placementJs)(
+new Function('exports', 'React', 'bankApplication', 'bankFormApplication', 'stageByNo', 'StageChip', 'Dash', 'homeDigits', 'formatPhone', placementJs)(
   placement, React, assignment.bankApplication, assignment.bankFormApplication,
   stage => ({ title: stage === 12 ? 'Deployed' : `Stage ${stage}` }),
   ({ stage }) => React.createElement('span', { 'data-stage': stage }, `Stage ${stage}`),
   () => React.createElement('span', { 'aria-label': 'None' }, 'None'),
+  () => '91', (value) => value ?? '',
 )
 const placementStore = applications => ({
   applicationsFor: () => applications,

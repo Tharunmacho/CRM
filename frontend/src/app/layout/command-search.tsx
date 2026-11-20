@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { CornerDownLeft, FileText, Search, User, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
+import { homeDigits } from '@/shared/lib/agency'
+import { formatPhone } from '@/shared/lib/phone'
 import { useStore } from '@/shared/state/crm-store'
 import { canWorkCandidate } from '@/features/candidates/candidate-access'
 import { idLine, idSearchText } from '@/features/candidates/candidate-ids'
@@ -12,6 +14,7 @@ export interface SearchPage { label: string; to: string; icon: typeof Search }
 /** ⌘K / Ctrl+K palette: jump to a page or a candidate without leaving the keyboard. */
 export function CommandSearch({ open, onClose, pages }: { open: boolean; onClose: () => void; pages: SearchPage[] }) {
   const store = useStore()
+  const home = homeDigits(store.settings.homeCallingCode)
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -32,9 +35,9 @@ export function CommandSearch({ open, onClose, pages }: { open: boolean; onClose
       .filter((candidate) => canWorkCandidate(store.me, candidate)
         && `${candidate.name} ${idSearchText(candidate)} ${candidate.phone} ${candidate.email ?? ''}`.toLowerCase().includes(text))
       .slice(0, 6)
-      .map((candidate) => ({ key: `c:${candidate.id}`, label: candidate.name, detail: [idLine(candidate), candidate.phone].filter(Boolean).join(' · '), to: `/candidates/${candidate.id}`, kind: 'candidate' as const, icon: User }))
+      .map((candidate) => ({ key: `c:${candidate.id}`, label: candidate.name, detail: [idLine(candidate), formatPhone(candidate.phone, home)].filter(Boolean).join(' · '), to: `/candidates/${candidate.id}`, kind: 'candidate' as const, icon: User }))
     return [...people, ...pageHits].slice(0, 9)
-  }, [query, pages, store])
+  }, [query, pages, store, home])
 
   useEffect(() => { setActive(0) }, [query])
 

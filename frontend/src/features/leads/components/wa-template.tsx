@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { AutoTextarea } from '@/shared/ui/primitives'
-import { useAgency } from '@/shared/state/use-agency'
+import { useAgency, useHomeDigits } from '@/shared/state/use-agency'
 import { loadWaTemplates, leadExtrasApi } from '../lead-extras-api'
 import { DEFAULT_WA_TEMPLATES, WA_BODY_MAX, fillTemplate, waUrl, type WaTemplate } from '../wa-template-model'
 import '@/styles/lead-extras.css'
@@ -56,6 +56,7 @@ export function WaComposerHost() {
 
 function Composer({ open }: { open: Open }) {
   const agency = useAgency()
+  const home = useHomeDigits()
   const { lead, rect } = open
   const [templates, setTemplates] = useState<WaTemplate[]>(DEFAULT_WA_TEMPLATES)
   const [company, setCompany] = useState(agency.name)
@@ -102,7 +103,7 @@ function Composer({ open }: { open: Open }) {
     return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDown) }
   }, [])
 
-  const url = waUrl(lead.phone, text)
+  const url = waUrl(lead.phone, text, home)
   const pick = (next: WaTemplate) => { setKey(next.key); setEdited(false); setNote('') }
   const send = () => {
     if (!url) return

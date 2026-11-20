@@ -804,6 +804,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
+/** The store when there is one, null outside the provider (small display components that only read a setting use this). */
+export function useOptionalStore() {
+  return useContext(Ctx)
+}
+
 export function useStore() {
   const v = useContext(Ctx)
   if (!v) throw new Error('useStore must be used inside StoreProvider')

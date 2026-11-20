@@ -179,7 +179,7 @@ def test_candidate_fields_take_only_active_options_but_keep_values_already_store
     assert admin.post("/api/candidates", json={**body, "serviceChargesStatus": "waived", "interestLevel": "interested"}).status_code == 201
     assert admin.post("/api/candidates", json={"name": "N", "phone": "9000000042", "serviceChargesStatus": "unknown"}).status_code == 422
     assert admin.post("/api/candidates", json={"name": "N", "phone": "9000000042", "interestLevel": "keen"}).status_code == 422
-    stored = db.scalar(select(m.Candidate).where(m.Candidate.phone == "9000000041"))
+    stored = db.scalar(select(m.Candidate).where(m.Candidate.phone == "+919000000041"))
 
     admin.put(f"/api/form-options/{waived['id']}", json={"isActive": False})
     interested = db.scalar(select(m.FormOption).where(m.FormOption.category == "interest_level", m.FormOption.value == "interested"))

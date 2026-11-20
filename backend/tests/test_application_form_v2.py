@@ -472,10 +472,13 @@ def test_source_and_agency_save_by_reference_id_or_free_text(desk):
     assert cleared["assignment"]["agency"] is None and cleared["recruitment"]["sourceDetail"] is None
     assert put_assignment(desk, {"agencyId": "nope"}).status_code == 404
     assert put_assignment(desk, {"source": "carrier pigeon"}).status_code == 422
-    assert put_assignment(desk, {"source": None}).status_code == 422
     assert put_assignment(desk, {"recruiterId": None}).status_code == 422
+    # "Select a source" clears the source: the column cannot be empty, so it becomes the catch-all "other" (audited as cleared).
+    emptied = put_assignment(desk, {"source": None})
+    assert emptied.status_code == 200 and emptied.json()["assignment"]["source"]["key"] == "other"
     with desk.sessions() as db:
         actions = {a.action for a in db.scalars(select(AuditEntry).where(AuditEntry.action.like("Application form:%")))}
+        assert any(a.meta.get("cleared") for a in db.scalars(select(AuditEntry).where(AuditEntry.action == "Application form: source changed")))
     assert {"Application form: source changed", "Application form: agency changed"} <= actions
 
 

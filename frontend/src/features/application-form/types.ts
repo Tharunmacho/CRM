@@ -267,7 +267,8 @@ export interface AssignmentData {
 /** A partial change to the assignment block, as the PUT sends it. */
 export interface AssignmentChange {
   orderId?: string | null
-  source?: string
+  /** A source code; null clears it (the server keeps the catch-all "other").*/
+  source?: string | null
   agencyId?: string | null
   agencyName?: string | null
   recruiterId?: string

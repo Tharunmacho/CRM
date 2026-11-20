@@ -95,3 +95,15 @@ test('an option name must be new, short and not empty', () => {
   assert.equal(optionLabelError('Agreed', rows, 'a'), undefined, 'renaming to its own name is fine')
   assert.equal(optionLabelError('Declined', rows), undefined)
 })
+
+test('"+ Add an option" turns a typed name into a stored option: plain wording for free lists, a code for strict ones', () => {
+  const rows = [{ value: 'agreed', label: 'Agreed' }, { value: '1 year', label: '1 year' }]
+  assert.equal(model.ADD_OPTION_LABEL, '+ Add an option')
+  assert.deepEqual(model.newOptionDraft('  6   months ', false, rows), { ok: true, value: '6 months', label: '6 months' })
+  assert.deepEqual(model.newOptionDraft('Somewhat keen', true, rows), { ok: true, value: 'somewhat_keen', label: 'Somewhat keen' })
+  assert.deepEqual(model.newOptionDraft('', false, rows), { ok: false, message: 'Enter a name.' })
+  assert.equal(model.newOptionDraft('AGREED', true, rows).ok, false, 'the same name, whatever the case')
+  assert.equal(model.newOptionDraft('Agreed!!', true, [{ value: 'agreed', label: 'Other' }]).ok, false, 'a code that is already taken')
+  assert.equal(model.newOptionDraft('€€€', true, rows).ok, false, 'a name with no letters or numbers has no code')
+  assert.equal(model.newOptionDraft('x'.repeat(70), false, rows).ok, false, 'longer than the server accepts as a value')
+})

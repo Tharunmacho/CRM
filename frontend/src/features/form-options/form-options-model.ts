@@ -147,6 +147,26 @@ export function slugValue(label: string): string {
   return label.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60)
 }
 
+/** The last row of a dropdown that lets an Admin or MD add a choice in place; never a stored value. */
+export const ADD_OPTION_VALUE = '__add_option__'
+export const ADD_OPTION_LABEL = '+ Add an option'
+/** What the server accepts as a stored value (backend/app/services/form_options.py VALUE_PATTERN). */
+const STORED_VALUE = /^[A-Za-z0-9][A-Za-z0-9 ._/+&()',-]{0,59}$/
+
+/**
+ * The option an inline "+ Add an option" box would create from a typed name, or the sentence that says why not.
+ * Free-text lists store the wording itself ("2 years"); strict lists store a plain code ("somewhat_keen"), as the settings card does.
+ */
+export function newOptionDraft(label: string, strict: boolean, rows: FormOption[]): { ok: true; value: string; label: string } | { ok: false; message: string } {
+  const clean = label.trim().replace(/\s+/g, ' ')
+  const problem = optionLabelError(clean, rows)
+  if (problem) return { ok: false, message: problem }
+  const value = strict ? slugValue(clean) : clean
+  if (!value || !STORED_VALUE.test(value)) return { ok: false, message: 'Use letters or numbers in the name (up to 60 characters).' }
+  if (rows.some((row) => row.value.toLowerCase() === value.toLowerCase())) return { ok: false, message: 'This name is already in the list.' }
+  return { ok: true, value, label: clean }
+}
+
 /** Move one row up or down among its category's rows and renumber the sort values 10, 20, 30, ... */
 export function reorder(rows: FormOption[], value: string, direction: -1 | 1): FormOption[] {
   const sorted = [...rows].sort((a, b) => a.sort - b.sort)

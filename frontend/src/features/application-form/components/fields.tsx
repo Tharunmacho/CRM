@@ -4,8 +4,9 @@ import { cn } from '@/shared/lib/cn'
 import { DatePicker } from '@/shared/ui/date-picker'
 import { Input, Select, Textarea } from '@/shared/ui/primitives'
 import { passportExpiryNotice } from '@/features/candidates/passport-expiry'
-import { choicesFor, labelFor } from '@/features/form-options/form-options-model'
+import { FORM_OPTION_CATEGORIES, labelFor } from '@/features/form-options/form-options-model'
 import { useFormOptions } from '@/features/form-options/use-form-options'
+import { FormOptionSelect } from './form-option-select'
 import {
   PROVENANCE_LABELS,
   ageFromDob,
@@ -172,8 +173,11 @@ export function FormField({
     if (def.path === 'passport.expiryDate') hint = <ExpiryHint value={String(value)} />
   } else if (def.kind === 'select') {
     const current = String(value)
-    const options = def.category ? choicesFor(formOptions, def.category, current).map((option) => ({ value: option.value, label: option.active ? option.label : `${option.label} (no longer offered)` })) : (def.options ?? [])
-    body = (
+    const options = def.options ?? []
+    // An admin-managed list: the shared dropdown (with "+ Add an option" for Admin and MD); a fixed list in the code stays a plain select.
+    body = def.category ? (
+      <FormOptionSelect id={id} category={def.category} value={current} onChange={set} label={def.label} allowClear allowAdd={def.category !== FORM_OPTION_CATEGORIES.gender} />
+    ) : (
       <Select id={id} value={current} onChange={(event) => set(event.target.value)} aria-label={def.label}>
         <option value="">Select an option</option>
         {current && !options.some((option) => option.value === current) && <option value={current}>{current}</option>}

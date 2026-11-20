@@ -1,8 +1,10 @@
 /**
  * WhatsApp message templates of the Lead sheet (pure). The three defaults mirror backend/app/services/lead_templates.py and are
  * only used until (or if) the server's copy cannot be read; an administrator's wording comes from GET /api/leads/wa-templates.
- * Placeholders: {name}, {position}, {company_name}. No imports (tests load this file on its own).
+ * Placeholders: {name}, {position}, {company_name}. Only import: the shared phone helper (tests rewrite it, see tests/fixtures/role-labels-url.mjs).
  */
+import { waDigits } from '@/shared/lib/phone'
+
 export interface WaTemplate { key: string; title: string; body: string; isDefault?: boolean; defaultBody?: string; defaultTitle?: string }
 
 export const WA_PLACEHOLDERS = ['{name}', '{position}', '{company_name}'] as const
@@ -34,10 +36,10 @@ export function fillTemplate(body: string, values: WaValues): string {
     .replace(/\{company_name\}/g, company || 'our agency')
 }
 
-/** wa.me link for a phone and message; null when the phone has no usable digits (7 to 15). */
-export function waUrl(phone: string | null | undefined, message: string): string | null {
-  const digits = (phone ?? '').replace(/^\s*p:\s*/i, '').replace(/\D/g, '')
-  if (digits.length < 7 || digits.length > 15) return null
+/** wa.me link for a phone and message (the agency's calling code, `home` as digits, is added to a national number); null when the phone cannot be a number. */
+export function waUrl(phone: string | null | undefined, message: string, home?: string | null): string | null {
+  const digits = waDigits(phone, home)
+  if (!digits) return null
   const text = message.trim()
   return `https://wa.me/${digits}${text ? `?text=${encodeURIComponent(text)}` : ''}`
 }

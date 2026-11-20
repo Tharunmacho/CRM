@@ -1363,7 +1363,7 @@ export function applyAssignmentChange(assignment: AssignmentData, change: Assign
       if (owner) next.client = { id: owner.id, name: owner.name, companyId: owner.companyId, companyName: owner.companyName }
     }
   }
-  if (change.source) next.source = { key: change.source, label: sourceLabel(change.source) }
+  if ('source' in change) { const key = change.source || 'other'; next.source = { key, label: sourceLabel(key) } }
   if ('agencyId' in change || 'agencyName' in change) {
     const known = change.agencyId ? assignment.options.agencies.find((item) => item.id === change.agencyId) : undefined
     const name = known?.name ?? (change.agencyName ?? '').trim()

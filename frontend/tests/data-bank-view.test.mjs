@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 async function load(path) {
   const source = await readFile(new URL(path, import.meta.url), 'utf8')
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-  return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+  return import(`data:text/javascript;base64,${Buffer.from(withRoleLabels(js)).toString('base64')}`)
 }
 
 const view = await load('../src/features/candidates/data-bank-view.ts')
@@ -62,9 +63,10 @@ test('a date of birth is read without a time-zone shift, with the age today', ()
   assert.equal(view.dobParts('1994-13-01', now), null)
 })
 
-test('a WhatsApp link needs a plausible number and keeps only its digits', () => {
+test('a WhatsApp link needs a plausible number and adds the calling code of the agency to a national one', () => {
   assert.equal(view.whatsappHref('+91 98765 43210'), 'https://wa.me/919876543210')
-  assert.equal(view.whatsappHref('98765-43210'), 'https://wa.me/9876543210')
+  assert.equal(view.whatsappHref('98765-43210'), 'https://wa.me/919876543210')
+  assert.equal(view.whatsappHref('98765-43210', '971'), 'https://wa.me/9719876543210')
   assert.equal(view.whatsappHref('12345'), null)
   assert.equal(view.whatsappHref(''), null)
   assert.equal(view.whatsappHref(undefined), null)

@@ -306,11 +306,11 @@ export default function DataBankPage() {
             <Button variant="secondary" icon={<UserPlus className="h-4 w-4" />} onClick={() => navigate('/add-candidate')}>
               Add candidate
             </Button>
-            {store.can('export') && (
-              <Button variant="primary" disabled={loading || !!loadError || exporting} icon={<Download className="h-4 w-4" />} onClick={() => void exportExcel()}>
-                {exporting ? 'Preparing Excel…' : 'Export Excel'}
-              </Button>
-            )}
+            {/* Everyone downloads; the server puts only a recruiter's own candidates in their file (Admin and MD get the whole filtered list). */}
+            <Button variant="primary" disabled={loading || !!loadError || exporting} icon={<Download className="h-4 w-4" />} onClick={() => void exportExcel()}
+              title={isAdminLevel(store.me.role) ? undefined : 'The file holds the candidates assigned to you'}>
+              {exporting ? 'Preparing Excel…' : 'Export Excel'}
+            </Button>
           </>
         }
       />

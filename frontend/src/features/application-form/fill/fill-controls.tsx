@@ -7,8 +7,9 @@ import { FieldLabelContext } from '@/shared/ui/control-context'
 import { Input, Select, Textarea } from '@/shared/ui/primitives'
 import { PhoneField } from '@/features/candidates/components/entry-fields'
 import { TagField } from '@/features/candidates/components/entry-section'
-import { FORM_OPTION_CATEGORIES, activeOptions, choicesFor, labelFor } from '@/features/form-options/form-options-model'
+import { FORM_OPTION_CATEGORIES, activeOptions, labelFor } from '@/features/form-options/form-options-model'
 import { useFormOptions } from '@/features/form-options/use-form-options'
+import { FormOptionSelect } from '../components/form-option-select'
 import { ageFromDob, formatFormDate, isBlank, toDraft, yearsLabel } from '../form-model'
 import type { ApplicationFormData, FormDraft } from '../types'
 import type { FormContext } from '../components/sections'
@@ -146,11 +147,11 @@ export function FillFieldView({ env, field, canWork, aux, hint, disabled, onWrit
     control = <DatePicker id={id} value={String(value)} onChange={set} max={field.notFuture ? todayKey() : undefined} disabled={disabled} aria-label={field.label} />
   } else if (field.control === 'select') {
     const current = String(value)
-    const options = choicesFor(formOptions, field.category ?? '', current)
-    control = (
+    control = field.category ? (
+      <FormOptionSelect id={id} category={field.category} value={current} disabled={disabled} onChange={set} label={field.label} allowClear allowAdd={field.category !== FORM_OPTION_CATEGORIES.gender} />
+    ) : (
       <Select id={id} value={current} disabled={disabled} onChange={(event) => set(event.target.value)} aria-label={field.label}>
         <option value="">Select an option</option>
-        {options.map((option) => <option key={option.value} value={option.value}>{option.active ? option.label : `${option.label} (no longer offered)`}</option>)}
       </Select>
     )
   } else if (field.control === 'phone') {

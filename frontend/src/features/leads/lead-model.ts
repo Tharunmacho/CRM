@@ -1,3 +1,4 @@
+import { waDigits } from '@/shared/lib/phone'
 import { isAdminLevel } from '@/shared/model/role-labels'
 /**
  * Pure rules behind the Lead sheet: the status colours, the list query, follow-up wording, who may work a lead,
@@ -641,10 +642,10 @@ export function platformKind(value?: string | null): PlatformKind {
 
 export const PLATFORM_LABEL: Record<PlatformKind, string> = { facebook: 'Facebook', instagram: 'Instagram', google: 'Google', other: 'Other' }
 
-/** wa.me link for a phone number (digits only, 7 to 15 of them); null when it cannot be a number. */
-export function whatsappLink(phone?: string | null): string | null {
-  const digits = (phone ?? '').replace(/\D/g, '')
-  return digits.length >= 7 && digits.length <= 15 ? `https://wa.me/${digits}` : null
+/** wa.me link for a phone number, with the agency's calling code (`home`, digits) added to a national number; null when it cannot be a number. */
+export function whatsappLink(phone?: string | null, home?: string | null): string | null {
+  const digits = waDigits(phone, home)
+  return digits ? `https://wa.me/${digits}` : null
 }
 
 /** Meta writes phones as "p:+971501234567"; show them without the prefix. */

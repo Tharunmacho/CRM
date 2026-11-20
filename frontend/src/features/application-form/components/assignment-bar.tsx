@@ -5,7 +5,10 @@ import { cn } from '@/shared/lib/cn'
 import { roleWord } from '@/shared/model/role-labels'
 import { Button, Select } from '@/shared/ui/primitives'
 import { SuggestInput } from '@/shared/ui/suggest-input'
-import { PICKERS_LOCKED_TEXT, SOURCE_OPTIONS, cleanAgencyName, jobOptionText, jobUnavailableReason } from '../form-model'
+import { FORM_OPTION_CATEGORIES, labelFor } from '@/features/form-options/form-options-model'
+import { useFormOptions } from '@/features/form-options/use-form-options'
+import { FormOptionSelect } from './form-option-select'
+import { PICKERS_LOCKED_TEXT, cleanAgencyName, jobOptionText, jobUnavailableReason } from '../form-model'
 import { applicationOptions, applicationOptionText } from '../paper-model'
 import type { ApplicationRef, AssignmentChange, AssignmentData } from '../types'
 import type { AssignmentField } from '../use-application-form'
@@ -96,8 +99,11 @@ export function AssignmentBar({
   const typedKnown = options.agencies.some((item) => item.name.toLowerCase() === agencyText.trim().toLowerCase())
   useEffect(() => { if (typedKnown && agencyText.trim() !== serverAgency) commitAgency() }, [agencyText]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The source list is the admin-managed `candidate_source` list (the one Add candidate uses), so renamed, hidden and reordered
+  // sources follow here too. "Select a source" clears the value.
+  const { options: formOptions } = useFormOptions()
   const sourceKey = assignment.source.key
-  const sourceOptions = SOURCE_OPTIONS.some((item) => item.key === sourceKey) || !sourceKey ? SOURCE_OPTIONS : [...SOURCE_OPTIONS, { key: sourceKey, label: assignment.source.label }]
+  const sourceText = (sourceKey && labelFor(formOptions, FORM_OPTION_CATEGORIES.source, sourceKey) !== sourceKey ? labelFor(formOptions, FORM_OPTION_CATEGORIES.source, sourceKey) : assignment.source.label) || ''
 
   // With several applications the Job list starts with them (current ones first, the one on screen marked).
   const several = applications.length > 1 && Boolean(onSwitchApplication)
@@ -170,12 +176,10 @@ export function AssignmentBar({
 
       <Field id="source" label="Source" saving={saving.source} error={errors.source}>
         {can.source ? (
-          <Select id="af-assign-source" value={sourceKey} aria-label="Source" onChange={(event) => { if (event.target.value && event.target.value !== sourceKey) onChange('source', { source: event.target.value }) }}>
-            {!sourceKey && <option value="">Select a source</option>}
-            {sourceOptions.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
-          </Select>
+          <FormOptionSelect id="af-assign-source" category={FORM_OPTION_CATEGORIES.source} value={sourceKey} label="Source" allowClear clearLabel="Select a source" allowAdd
+            onChange={(next) => { if (next !== sourceKey) onChange('source', { source: next || null }) }} />
         ) : (
-          <p className="af-assign-value" id="af-assign-source">{assignment.source.label || NOT_SET}</p>
+          <p className="af-assign-value" id="af-assign-source">{sourceText || NOT_SET}</p>
         )}
       </Field>
 

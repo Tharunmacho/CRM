@@ -17,6 +17,7 @@ import { CopyButton } from './lead-columns'
 import { StatusSelect } from './status-select'
 import { openWhatsApp } from './wa-template'
 import { isAdminLevel } from '@/shared/model/role-labels'
+import { useHomeDigits } from '@/shared/state/use-agency'
 
 interface Props {
   /** The row that was clicked; shown at once while the full detail loads. */
@@ -101,9 +102,10 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
   const blocked = gateBlocks(gate) ? GATE_REASON : workRefusal
   const dirty = useMemo(() => !!detail && (status !== statusPick(detail) || notes.trim() !== (detail.notes ?? '').trim() || follow !== toLocalInput(detail.nextFollowUpAt)), [detail, status, notes, follow])
 
+  const home = useHomeDigits()
   if (!row || !shown) return null
   const phone = cleanPhone(shown.phone)
-  const wa = whatsappLink(phone)
+  const wa = whatsappLink(phone, home)
   const st = leadStatus(shown.status, shown.statusLabel)
   const date = leadDate(shown)
   const created = createdParts(date?.value)

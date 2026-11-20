@@ -27,6 +27,8 @@ export interface BankContext {
   optionLabel: (category: string, value: string) => string
   /** The active or latest deployed application's stage and order; null when no placement is recorded. */
   application: (candidateId: string) => { stage: string; order: string } | null
+  /** A saved phone or WhatsApp number written as "+91 98765 43210" (the agency's calling code added when it was saved without one). */
+  phone?: (value: string | null | undefined) => string
 }
 
 export interface BankFieldDef {
@@ -76,8 +78,8 @@ export const BANK_FIELD_DEFS: readonly BankFieldDef[] = [
   { id: 'fatherName', label: "Father's name", group: 'Person', width: 140, inColumns: true, value: (c) => text(c.fatherName) },
   { id: 'languages', label: 'Languages', group: 'Person', width: 130, inColumns: true, value: (c) => list(c.languages) },
 
-  { id: 'phone', label: 'Phone number', group: 'Contact', width: 150, sortKey: 'phone', inColumns: true, value: (c) => text(c.phone) },
-  { id: 'whatsapp', label: 'WhatsApp number', group: 'Contact', width: 150, inColumns: true, value: (c) => text(c.whatsapp) },
+  { id: 'phone', label: 'Phone number', group: 'Contact', width: 150, sortKey: 'phone', inColumns: true, value: (c, x) => (x.phone ? x.phone(c.phone) : text(c.phone)) },
+  { id: 'whatsapp', label: 'WhatsApp number', group: 'Contact', width: 150, inColumns: true, value: (c, x) => (x.phone ? x.phone(c.whatsapp) : text(c.whatsapp)) },
   { id: 'email', label: 'Email', group: 'Contact', width: 180, inColumns: true, value: (c) => text(c.email) },
   { id: 'currentCity', label: 'Current city / location', group: 'Contact', width: 130, inColumns: true, value: (c) => text(c.currentCity) },
   { id: 'nativePlace', label: 'Native place', group: 'Contact', width: 120, inColumns: true, value: (c) => text(c.nativePlace) },
