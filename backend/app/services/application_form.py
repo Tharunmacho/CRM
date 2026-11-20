@@ -406,7 +406,8 @@ def deployment_gaps(uploaded: set[str], include_invoice: bool = True) -> list[di
 def missing_required_documents(db: Session, candidate_id: str, include_invoice: bool = True) -> list[dict]:
     """Candidate-wide inspection gaps; these never gate manual stage movement."""
     records = db.execute(select(Attachment.slot, rejected_expression()).where(
-        Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.slot.in_(STORED_SLOTS)).distinct()).all()
+        Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.slot.in_(STORED_SLOTS),
+        Attachment.deleted_at.is_(None)).distinct()).all()
     uploaded = {slot for slot, rejected in records if not rejected}
     wrong = {slot for slot, rejected in records if rejected}
     uploaded.update(slot for slot, saved in manual_document_statuses(db, candidate_id).items() if saved["uploaded"] and slot not in wrong)
@@ -441,6 +442,7 @@ def set_document_status(db: Session, user: User, candidate_id: str, slot: str, u
     predicate = (Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id) & Attachment.slot.in_(keys)
     if slot == "invoice" and chosen:
         predicate = or_(predicate, (Attachment.entity_type == "application") & (Attachment.entity_id == chosen.id) & (Attachment.slot == "invoice"))
+    predicate = predicate & Attachment.deleted_at.is_(None)   # a removed file no longer counts as the evidence
     actual = db.scalar(select(Attachment.id).where(predicate).limit(1))
     if actual:
         if db.scalar(select(Attachment.id).where(predicate, rejected_expression()).limit(1)):
@@ -601,7 +603,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
         return list(session.execute(
             select(Attachment.id, Attachment.slot, Attachment.version, Attachment.file_name, Attachment.size_kb,
                    Attachment.content_type, Attachment.uploaded_at, Attachment.uploaded_by, Attachment.entity_type, Attachment.entity_id, rejected_expression())
-            .where(or_(*scope))).all())
+            .where(or_(*scope), Attachment.deleted_at.is_(None))).all())
 
     def read_jobs(session):
         return list(session.execute(
@@ -1515,6 +1517,9 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
     meta = (job.draft or {}).get("applicationForm")
     if not meta or not job.candidate_id:
         return
+    removed_source = meta.get("attachmentId") or job.attachment_id
+    if removed_source and db.scalar(select(Attachment.deleted_at).where(Attachment.id == removed_source)) is not None:
+        return   # the file was removed before the reader finished: nothing read from it fills the form
     from app.services.candidate_identity import merge_ocr_data
     from app.integrations.ocr.mapping import resume_text_from
     candidate = db.scalar(select(Candidate).where(Candidate.id == job.candidate_id)
@@ -1768,7 +1773,7 @@ def _has_separate_passport_anchor(db: Session, candidate: Candidate, source: Att
         return False
     attachments = db.scalars(select(Attachment).where(
         Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
-        Attachment.slot == "passport", Attachment.id != source.id,
+        Attachment.slot == "passport", Attachment.id != source.id, Attachment.deleted_at.is_(None),
     )).all()
     for attachment in attachments:
         jobs = db.scalars(select(DocumentExtractionJob).where(
@@ -1834,7 +1839,7 @@ def replay_saved_partial_resume(db: Session, *, candidate_id: str, job_id: str) 
             meta, candidate_id=candidate.id, attachment_id=attachment_id, slot="resume"):
         return False
     source = db.scalar(select(Attachment).where(Attachment.id == attachment_id).with_for_update())
-    if source is None or source.entity_type != "candidate" or source.entity_id != candidate.id \
+    if source is None or source.deleted_at is not None or source.entity_type != "candidate" or source.entity_id != candidate.id \
             or source.slot != "resume" or source.object_key != job.object_key \
             or source.content_hash != job.content_hash:
         return False
@@ -1947,7 +1952,8 @@ def reconsider_identity_rejection(db: Session, user: User, candidate_id: str, at
         raise HTTPException(404, "Candidate not found")
     ensure_can_edit(user, candidate)
     attachment = db.scalar(select(Attachment).where(Attachment.id == attachment_id, Attachment.entity_type == "candidate",
-                                                    Attachment.entity_id == candidate_id, Attachment.slot.in_(READABLE_SLOTS)).with_for_update())
+                                                    Attachment.entity_id == candidate_id, Attachment.slot.in_(READABLE_SLOTS),
+                                                    Attachment.deleted_at.is_(None)).with_for_update())
     if attachment is None:
         raise HTTPException(404, "This candidate has no such document.")
     job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state), undefer(DocumentExtractionJob.draft))

@@ -234,7 +234,7 @@ def _plan(db: Session, source: Candidate, target: Candidate, confirm: bool) -> S
     moved_tasks = plan.tasks
     counts = db.execute(select(
         select(func.count()).select_from(DocumentExtractionJob).where(DocumentExtractionJob.candidate_id == source.id).scalar_subquery(),
-        select(func.count()).select_from(ApplicationFeedback).where(ApplicationFeedback.candidate_id == source.id).scalar_subquery(),
+        select(func.count()).select_from(ApplicationFeedback).where(ApplicationFeedback.candidate_id == source.id, ApplicationFeedback.deleted_at.is_(None)).scalar_subquery(),
         select(func.count()).select_from(Remark).where(Remark.task_id.in_(moved_tasks)).scalar_subquery() if moved_tasks else literal(0),
         select(func.count()).select_from(Application).where(Application.candidate_id == source.id).scalar_subquery() if plan.move_work else literal(0),
         (select(func.count()).select_from(MailMessage).where(MailMessage.candidate_id == source.id).scalar_subquery()

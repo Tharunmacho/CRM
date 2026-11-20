@@ -21,7 +21,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from botocore.exceptions import BotoCoreError, ClientError
@@ -29,6 +29,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.core.deps import current_user, ensure_can_work, ensure_can_work_candidate
+from app.core.roles import is_admin_level
 from app.db.models import Application, Attachment, AuditEntry, Candidate, Client, Company, Lead, User
 from app.services import document_storage, file_ownership
 from app.services.invoice_access import can_see_invoices, ensure_can_see_invoices
@@ -170,7 +171,7 @@ def _mirror_stage_document_on_candidate(db: Session, application: Application, r
     candidate = _entity(db, "candidate", application.candidate_id, lock=True)
     matching = db.scalar(select(Attachment).where(
         Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
-        Attachment.slot == candidate_slot, Attachment.content_hash == row.content_hash,
+        Attachment.slot == candidate_slot, Attachment.content_hash == row.content_hash, Attachment.deleted_at.is_(None),
     ).order_by(Attachment.version.desc()).limit(1))
     if matching is not None:
         return matching
@@ -434,7 +435,7 @@ def download(
     user: User = Depends(current_user),
 ) -> FileResponse:
     row = db.get(Attachment, attachment_id)
-    if row is None:
+    if row is None or row.deleted_at is not None:   # a removed file is gone for everyone (its bytes are kept in storage)
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
     if row.slot == "invoice":
         ensure_can_see_invoices(user)
@@ -481,7 +482,7 @@ def list_for(
         db,
         lambda session: session.scalar(select(model.id).where(model.id == entity_id)) is not None,
         lambda session: list(session.scalars(
-            select(Attachment).where(Attachment.entity_type == entity_type, Attachment.entity_id == entity_id)
+            select(Attachment).where(Attachment.entity_type == entity_type, Attachment.entity_id == entity_id, Attachment.deleted_at.is_(None))
             .order_by(Attachment.slot, Attachment.version))),
     )
     if not found:
@@ -502,3 +503,75 @@ def list_for(
         }
         for r in rows
     ]
+
+
+# Slots a stage form's saved draft may point at ({"id": ...}); removing the file also drops that pointer so the form does not prefill a dead link.
+_DRAFT_FILE_SLOTS = {"passport", "air_ticket", "pcc"}
+REMOVABLE_ENTITIES = {"candidate", "application"}
+
+
+def _forget_in_drafts(db: Session, row: Attachment) -> None:
+    """A stage form's saved draft keeps a small reference to its file; after the file is removed the form must not prefill it."""
+    if row.entity_type == "application":
+        scope = Application.id == row.entity_id
+    elif row.slot in _DRAFT_FILE_SLOTS:
+        scope = Application.candidate_id == row.entity_id
+    else:
+        return
+    for application in db.scalars(select(Application).where(scope)):
+        draft = application.draft if isinstance(application.draft, dict) else {}
+        kept = {key: value for key, value in draft.items() if not (isinstance(value, dict) and value.get("id") == row.id)}
+        if len(kept) != len(draft):
+            application.draft = kept
+
+
+def remove_attachment(db: Session, user: User, attachment_id: str, *, candidate_id: str | None = None) -> dict:
+    """Remove a wrong document or photo: a SOFT delete, in the caller's transaction (the caller commits). The row, its bytes in storage
+    and every earlier version are kept; the file is hidden from the document slot (which falls back to the previous version, if there
+    is one), the exports and every reader, and the audit trail records who removed which file and when. Allowed to whoever uploaded it,
+    the candidate's recruiter, an admin and an MD (403 otherwise, 404 when the file is missing or already removed).
+    One read (the file with its candidate's recruiter), one UPDATE, one audit entry. `candidate_id` limits it to that candidate's files."""
+    candidate_owner = func.coalesce(
+        select(Candidate.owner_id).where(Candidate.id == Attachment.entity_id, Attachment.entity_type == "candidate").scalar_subquery(),
+        select(Candidate.owner_id).join(Application, Application.candidate_id == Candidate.id)
+        .where(Application.id == Attachment.entity_id, Attachment.entity_type == "application").scalar_subquery(),
+    )
+    found = db.execute(select(Attachment, candidate_owner).where(Attachment.id == attachment_id).with_for_update(of=Attachment)).one_or_none()
+    if found is None or found[0].deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
+    row, owner_id = found
+    if candidate_id is not None and (row.entity_type != "candidate" or row.entity_id != candidate_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
+    if row.slot == "invoice":
+        ensure_can_see_invoices(user)
+    if row.entity_type not in REMOVABLE_ENTITIES or row.slot == "source_bundle":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "This file cannot be removed here.")
+    if not (is_admin_level(user) or row.uploaded_by == user.id or (owner_id is not None and owner_id == user.id)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the person who uploaded this file, the candidate's recruiter, an admin or an MD can remove it.")
+    now = datetime.now(timezone.utc)
+    row.deleted_at = now
+    row.deleted_by = user.id
+    db.add(AuditEntry(
+        actor_id=user.id, action="Removed a document", target=row.file_name, entity_type=row.entity_type, entity_id=row.entity_id,
+        meta={"attachment_id": row.id, "slot": row.slot, "version": row.version, "file_name": row.file_name,
+              "uploaded_by": row.uploaded_by, "removed_by": user.id, "removed_at": now.isoformat()},
+        at=now,
+    ))
+    _forget_in_drafts(db, row)
+    return {"id": row.id, "slot": row.slot, "entityType": row.entity_type, "entityId": row.entity_id, "removed": True, "removedAt": now.isoformat()}
+
+
+@router.delete("/{attachment_id}")
+def remove(
+    attachment_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Soft-delete one file (see `remove_attachment`)."""
+    try:
+        answer = remove_attachment(db, user, attachment_id)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "The document could not be removed. Please retry.") from exc
+    return answer

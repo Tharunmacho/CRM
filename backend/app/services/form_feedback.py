@@ -26,7 +26,6 @@ REASONS = {
     "waiting_payment": "Waiting for a payment", "other": "Other",
 }
 NOTIFY_KINDS = ("delay", "issue")  # these tell the admins and MDs
-EDIT_WINDOW = timedelta(minutes=15)
 LIMIT_HOURS = 48
 MAX_ITEMS = 50
 BODY_LIMIT = 2000
@@ -35,13 +34,13 @@ BODY_LIMIT = 2000
 # ------------------------------------------------------------------ reading
 
 def read_items(session: Session, candidate_id: str) -> list:
-    """The newest notes with their author's name (one statement)."""
+    """The newest notes (a removed note is hidden) with their author's name (one statement)."""
     return list(session.execute(
         select(ApplicationFeedback.id, ApplicationFeedback.kind, ApplicationFeedback.reason, ApplicationFeedback.body,
                ApplicationFeedback.stage, ApplicationFeedback.author_id, ApplicationFeedback.application_id,
-               ApplicationFeedback.created_at, User.name.label("author_name"))
+               ApplicationFeedback.created_at, ApplicationFeedback.edited_at, User.name.label("author_name"))
         .outerjoin(User, User.id == ApplicationFeedback.author_id)
-        .where(ApplicationFeedback.candidate_id == candidate_id)
+        .where(ApplicationFeedback.candidate_id == candidate_id, ApplicationFeedback.deleted_at.is_(None))
         .order_by(ApplicationFeedback.created_at.desc(), ApplicationFeedback.id.desc()).limit(MAX_ITEMS)).all())
 
 
@@ -49,13 +48,9 @@ def _iso(value) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def within_window(created_at: datetime, now: datetime | None = None) -> bool:
-    return ((now or datetime.now(timezone.utc)) - created_at) <= EDIT_WINDOW
-
-
-def can_change(user: User, author_id: str | None, created_at: datetime, now: datetime | None = None) -> bool:
-    """Admin may delete any note; everyone else only their own, within 15 minutes of writing it."""
-    return is_admin_level(user) or (author_id == user.id and within_window(created_at, now))
+def can_change(user: User, author_id: str | None, owner_id: str | None) -> bool:
+    """Edit or delete a note, at any time: the person who wrote it, the candidate's recruiter, an admin or an MD."""
+    return is_admin_level(user) or author_id == user.id or (owner_id is not None and owner_id == user.id)
 
 
 def stage_clock(application, tasks: list, stage_rows: list, items: list, now: datetime) -> dict | None:
@@ -84,11 +79,12 @@ def stage_clock(application, tasks: list, stage_rows: list, items: list, now: da
 
 def build_block(user: User, candidate, application, items: list, tasks: list, stage_rows: list, can_write: bool, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
+    owner_id = getattr(candidate, "owner_id", None)
     return {
         "items": [{"id": i.id, "kind": i.kind, "reason": i.reason, "body": i.body, "stage": i.stage, "authorId": i.author_id,
                    "authorName": i.author_name or "Former team member",
-                   "createdAt": _iso(i.created_at), "canEdit": i.author_id == user.id and within_window(i.created_at, now),
-                   "canDelete": can_change(user, i.author_id, i.created_at, now)} for i in items],
+                   "createdAt": _iso(i.created_at), "editedAt": _iso(i.edited_at),
+                   "canEdit": can_change(user, i.author_id, owner_id), "canDelete": can_change(user, i.author_id, owner_id)} for i in items],
         "canWrite": can_write,
         "stageClock": stage_clock(application, tasks, stage_rows, items, now),
     }
@@ -156,38 +152,41 @@ def create(db: Session, user: User, candidate_id: str, *, kind: str, reason: str
     return row
 
 
-def _own(db: Session, candidate_id: str, feedback_id: str) -> ApplicationFeedback:
-    row = db.scalar(select(ApplicationFeedback).where(ApplicationFeedback.id == feedback_id, ApplicationFeedback.candidate_id == candidate_id)
-                    .with_for_update())
-    if row is None:
+def _own(db: Session, user: User, candidate_id: str, feedback_id: str) -> tuple[ApplicationFeedback, Candidate]:
+    """The live note (a removed one is 404) and its candidate, locked; 403 unless the caller may change it (author, owner, admin, MD)."""
+    found = db.execute(select(ApplicationFeedback, Candidate).join(Candidate, Candidate.id == ApplicationFeedback.candidate_id)
+                       .where(ApplicationFeedback.id == feedback_id, ApplicationFeedback.candidate_id == candidate_id,
+                              ApplicationFeedback.deleted_at.is_(None)).with_for_update(of=ApplicationFeedback)).one_or_none()
+    if found is None:
         raise HTTPException(404, "That note no longer exists.")
-    return row
+    row, candidate = found
+    if not can_change(user, row.author_id, candidate.owner_id):
+        raise HTTPException(403, "Only the person who wrote a note, the candidate's recruiter, an admin or an MD can change it.")
+    return row, candidate
 
 
 def edit(db: Session, user: User, candidate_id: str, feedback_id: str, *, kind: str | None, reason: str | None, body: str | None) -> ApplicationFeedback:
-    row = _own(db, candidate_id, feedback_id)
-    if row.author_id != user.id:
-        raise HTTPException(403, "Only the person who wrote a note can change it.")
-    if not within_window(row.created_at):
-        raise HTTPException(403, "A note can be changed for 15 minutes after it is written.")
+    row, candidate = _own(db, user, candidate_id, feedback_id)
+    before = row.body
     values = _clean(kind, reason, body, partial=True)
     for key, value in values.items():
         setattr(row, key, value)
-    row.updated_at = datetime.now(timezone.utc)
-    candidate = db.get(Candidate, candidate_id)
-    db.add(AuditEntry(actor_id=user.id, action="Application form: feedback edited", target=candidate.name if candidate else None, entity_type="candidate",
-                      entity_id=candidate_id, meta={"feedback_id": row.id, "kind": row.kind}))
+    now = datetime.now(timezone.utc)
+    row.updated_at = now
+    row.edited_at = now
+    db.add(AuditEntry(actor_id=user.id, action="Application form: feedback edited", target=candidate.name, entity_type="candidate",
+                      entity_id=candidate_id, meta={"feedback_id": row.id, "kind": row.kind, "author_id": row.author_id,
+                                                    "before": before, "after": row.body}))
     return row
 
 
 def delete(db: Session, user: User, candidate_id: str, feedback_id: str) -> None:
-    row = _own(db, candidate_id, feedback_id)
-    if not can_change(user, row.author_id, row.created_at):
-        if not is_admin_level(user) and row.author_id == user.id:
-            raise HTTPException(403, "A note can be deleted for 15 minutes after it is written. Ask an admin or MD to remove it.")
-        raise HTTPException(403, "Only the person who wrote a note, an admin or an MD, can delete it.")
-    candidate = db.get(Candidate, candidate_id)
-    db.add(AuditEntry(actor_id=user.id, action="Application form: feedback deleted", target=candidate.name if candidate else None,
-                      entity_type="candidate", entity_id=candidate_id,
-                      meta={"feedback_id": row.id, "kind": row.kind, "author_id": row.author_id}))
-    db.delete(row)
+    """Soft delete: the note is hidden everywhere, the row stays, and the audit entry holds its text, who removed it and when."""
+    row, candidate = _own(db, user, candidate_id, feedback_id)
+    now = datetime.now(timezone.utc)
+    row.deleted_at = now
+    row.deleted_by = user.id
+    db.add(AuditEntry(actor_id=user.id, action="Application form: feedback deleted", target=candidate.name,
+                      entity_type="candidate", entity_id=candidate_id, at=now,
+                      meta={"feedback_id": row.id, "kind": row.kind, "reason": row.reason, "stage": row.stage, "author_id": row.author_id,
+                            "text": row.body, "deleted_at": now.isoformat()}))

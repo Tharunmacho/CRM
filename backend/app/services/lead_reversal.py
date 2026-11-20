@@ -59,7 +59,7 @@ def _check(db: Session, lead: Lead, candidate: Candidate | None):
             or db.scalar(select(exists().where(TaskEvent.task_id.in_(tasks))))
             or db.scalar(select(exists().where(DailyWorkItem.candidate_id == candidate.id,
                 (DailyWorkItem.started_at.is_not(None)) | (DailyWorkItem.completed_at.is_not(None)))))
-            or db.scalar(select(exists().where(ApplicationFeedback.candidate_id == candidate.id)))):
+            or db.scalar(select(exists().where(ApplicationFeedback.candidate_id == candidate.id, ApplicationFeedback.deleted_at.is_(None))))):
         return refuse("This candidate has completed work or recruiter notes. Keep that history on the candidate.")
     result["allowed"] = True
     return result

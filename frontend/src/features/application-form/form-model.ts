@@ -1396,8 +1396,6 @@ export const FEEDBACK_REASONS: { value: FeedbackReason; label: string }[] = [
 ]
 
 export const FEEDBACK_MAX_LENGTH = 2000
-/** Staff can delete their own note for this long; an administrator can always delete. */
-export const FEEDBACK_DELETE_MINUTES = 15
 
 export const feedbackKindLabel = (kind: string): string => FEEDBACK_KINDS.find((item) => item.value === kind)?.label ?? kind
 export const feedbackReasonLabel = (reason: string): string => FEEDBACK_REASONS.find((item) => item.value === reason)?.label ?? ''
@@ -1414,6 +1412,8 @@ function normaliseFeedback(raw: unknown): FeedbackData {
       return {
         id: str(row.id), kind: (kinds.includes(str(row.kind)) ? str(row.kind) : 'update') as FeedbackKind, reason: str(row.reason) as FeedbackReason | '',
         body: str(row.body), stage: row.stage == null ? null : num(row.stage), authorId: str(row.authorId), authorName: str(row.authorName), createdAt: str(row.createdAt),
+        editedAt: str(row.editedAt) || null,
+        canEdit: typeof row.canEdit === 'boolean' ? row.canEdit : null,
         canDelete: typeof row.canDelete === 'boolean' ? row.canDelete : null,
       }
     }).filter((item) => item.id),
@@ -1447,11 +1447,16 @@ export function stageClockTone(clock: Pick<StageClock, 'hours' | 'limitHours' | 
   return clock.limitHours > 0 && clock.hours >= clock.limitHours * 0.75 ? 'warn' : 'ok'
 }
 
-/** An administrator may delete any note; the author only within 15 minutes of writing it. */
-export function canDeleteFeedback(item: Pick<FeedbackItem, 'authorId' | 'createdAt'> & { canDelete?: boolean | null }, viewer: { id: string; role: string }, now: Date = new Date()): boolean {
-  if (typeof item.canDelete === 'boolean') return item.canDelete // the server knows its own clock
-  if (isAdminLevel(viewer.role)) return true
-  if (!viewer.id || item.authorId !== viewer.id) return false
-  const written = new Date(item.createdAt).getTime()
-  return Number.isFinite(written) && now.getTime() - written <= FEEDBACK_DELETE_MINUTES * 60_000
+/**
+ * The author, the candidate's recruiter, an admin and an MD may edit or delete a note, at any time. The server decides (`canEdit` /
+ * `canDelete`, it knows the recruiter); an older server that says nothing lets the author and an admin or MD through.
+ */
+export function canEditFeedback(item: Pick<FeedbackItem, 'authorId'> & { canEdit?: boolean | null }, viewer: { id: string; role: string }): boolean {
+  if (typeof item.canEdit === 'boolean') return item.canEdit
+  return isAdminLevel(viewer.role) || Boolean(viewer.id && item.authorId === viewer.id)
+}
+
+export function canDeleteFeedback(item: Pick<FeedbackItem, 'authorId'> & { canDelete?: boolean | null }, viewer: { id: string; role: string }): boolean {
+  if (typeof item.canDelete === 'boolean') return item.canDelete
+  return isAdminLevel(viewer.role) || Boolean(viewer.id && item.authorId === viewer.id)
 }

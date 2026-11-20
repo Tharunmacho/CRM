@@ -76,7 +76,7 @@ def document_counts():
     """
     per_slot = (
         select(Attachment.entity_id.label("candidate_id"), Attachment.slot.label("slot"), func.count().label("n"))
-        .where(Attachment.entity_type == "candidate", Attachment.slot.in_(DESK_DOCUMENT_SLOTS))
+        .where(Attachment.entity_type == "candidate", Attachment.slot.in_(DESK_DOCUMENT_SLOTS), Attachment.deleted_at.is_(None))
         .group_by(Attachment.entity_id, Attachment.slot).subquery("per_slot")
     )
     per_candidate = (
@@ -115,11 +115,11 @@ def snapshot_statement(user_id: str, *, compact: bool = False, slim: bool = Fals
     candidate_files = select(
         Attachment.id, Attachment.entity_id, Attachment.slot, Attachment.version,
         Attachment.file_name, Attachment.size_kb, Attachment.uploaded_by, Attachment.uploaded_at, pending_expression(), rejected_expression(),
-    ).where(Attachment.entity_type == "candidate")
+    ).where(Attachment.entity_type == "candidate", Attachment.deleted_at.is_(None))
     # DISTINCT ON returns only the latest agreement, not all historical versions.
     agreements = (
         select(Attachment.entity_id, Attachment.id, Attachment.file_name)
-        .where(Attachment.entity_type == "company", Attachment.slot == "agreement")
+        .where(Attachment.entity_type == "company", Attachment.slot == "agreement", Attachment.deleted_at.is_(None))
         .distinct(Attachment.entity_id)
         .order_by(Attachment.entity_id, Attachment.version.desc())
     )

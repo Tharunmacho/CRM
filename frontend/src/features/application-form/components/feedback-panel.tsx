@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2, MessageSquareText, Send, TimerReset, Trash2 } from 'lucide-react'
+import { Loader2, MessageSquareText, Pencil, Save, Send, TimerReset, Trash2, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { ago, initials } from '@/shared/lib/format'
 import { Button, IconButton, Select, Textarea } from '@/shared/ui/primitives'
@@ -9,19 +9,23 @@ import {
   FEEDBACK_REASONS,
   STAGE_NAMES,
   canDeleteFeedback,
+  canEditFeedback,
   feedbackKindLabel,
   feedbackReasonLabel,
   stageClockText,
   stageClockTone,
 } from '../form-model'
-import type { FeedbackData, FeedbackKind, FeedbackReason, StageClock } from '../types'
+import type { FeedbackData, FeedbackItem, FeedbackKind, FeedbackReason, StageClock } from '../types'
 import type { FeedbackDraft } from '../form-api'
 import { SectionHeader } from './section-header'
+import { ConfirmRemoveDialog } from './confirm-remove'
 
 export interface FeedbackActions {
   busy: boolean
   error: string
   onSend: (note: FeedbackDraft) => Promise<boolean>
+  /** Save the new words of a note; true when saved. */
+  onEdit: (feedbackId: string, body: string) => Promise<boolean>
   onDelete: (feedbackId: string) => Promise<void>
 }
 
@@ -107,6 +111,57 @@ export function StageClockBar({ feedback, actions, canWrite }: { feedback: Feedb
   )
 }
 
+/** One note on the timeline. Its author, the candidate's recruiter, an admin and an MD can edit (inline, Save / Cancel) or remove it, at any time. */
+function NoteItem({ item, actions, viewer }: { item: FeedbackItem; actions: FeedbackActions; viewer: { id: string; role: string } }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(item.body)
+  const [removing, setRemoving] = useState(false)
+  const reason = item.reason ? feedbackReasonLabel(item.reason) : ''
+  const canEdit = canEditFeedback(item, viewer)
+  const canDelete = canDeleteFeedback(item, viewer)
+  const trimmed = text.trim()
+  const save = async () => {
+    if (!trimmed || actions.busy) return
+    if (trimmed === item.body.trim()) { setEditing(false); return }
+    if (await actions.onEdit(item.id, trimmed)) setEditing(false)
+  }
+  return (
+    <li className={cn('af-note-item', `is-${item.kind}`)}>
+      <span className="af-avatar" aria-hidden="true">{initials(item.authorName || '?')}</span>
+      <div className="af-note-body">
+        <div className="af-note-meta">
+          <b>{item.authorName || 'Someone'}</b>
+          <span className={cn('af-kind-chip', `is-${item.kind}`)}>{feedbackKindLabel(item.kind)}</span>
+          {reason && <span className="af-note-reason">{reason}</span>}
+          {item.stage != null && STAGE_NAMES[item.stage] && <span className="af-note-stage">{STAGE_NAMES[item.stage]}</span>}
+          {item.createdAt && <time dateTime={item.createdAt} title={new Date(item.createdAt).toLocaleString()}>{ago(item.createdAt)}</time>}
+          {item.editedAt && <span className="af-note-edited" title={`Edited ${new Date(item.editedAt).toLocaleString()}`}>edited {ago(item.editedAt)}</span>}
+        </div>
+        {editing ? (
+          <div className="af-note-edit">
+            <Textarea value={text} rows={3} maxRows={8} maxLength={FEEDBACK_MAX_LENGTH} autoFocus aria-label="Edit note" onChange={(event) => setText(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditing(false); setText(item.body) } if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void save() } }} />
+            {actions.error && <p className="af-note is-error" role="alert">{actions.error}</p>}
+            <div className="af-note-edit-foot">
+              <span className="af-composer-count tnum" aria-live="polite">{text.length} of {FEEDBACK_MAX_LENGTH}</span>
+              <Button size="sm" variant="secondary" disabled={actions.busy} icon={<X />} onClick={() => { setEditing(false); setText(item.body) }}>Cancel</Button>
+              <Button size="sm" variant="primary" disabled={!trimmed || actions.busy} icon={actions.busy ? <Loader2 className="animate-spin" /> : <Save />} onClick={() => void save()}>{actions.busy ? 'Saving' : 'Save'}</Button>
+            </div>
+          </div>
+        ) : <p className="af-note-text">{item.body}</p>}
+      </div>
+      {!editing && (canEdit || canDelete) && (
+        <span className="af-note-actions">
+          {canEdit && <IconButton label="Edit this note" onClick={() => { setText(item.body); setEditing(true) }}><Pencil className="h-4 w-4" /></IconButton>}
+          {canDelete && <IconButton label="Delete this note" tone="danger" onClick={() => setRemoving(true)}><Trash2 className="h-4 w-4" /></IconButton>}
+        </span>
+      )}
+      {removing && <ConfirmRemoveDialog title="Delete this note?" description="The note disappears from the form. The audit trail keeps its text, who deleted it and when."
+        detail={item.body.length > 160 ? `${item.body.slice(0, 160)}…` : item.body} confirmLabel="Delete note" onClose={() => setRemoving(false)} onConfirm={() => actions.onDelete(item.id)} />}
+    </li>
+  )
+}
+
 /**
  * The recruiter notes section of the working card: the composer and the timeline, newest first. Anyone who can work the candidate
  * always gets the composer, even when the server has no notes yet (an older server): saving then says so calmly and the typed
@@ -126,27 +181,7 @@ export function NotesPanel({ feedback, actions, viewer, canWork }: { feedback: F
         <p className="af-notes-empty">No notes yet. When this candidate takes longer than expected, write the reason here.</p>
       ) : (
         <ol className="af-timeline">
-          {feedback.items.map((item) => {
-            const reason = item.reason ? feedbackReasonLabel(item.reason) : ''
-            return (
-              <li key={item.id} className={cn('af-note-item', `is-${item.kind}`)}>
-                <span className="af-avatar" aria-hidden="true">{initials(item.authorName || '?')}</span>
-                <div className="af-note-body">
-                  <div className="af-note-meta">
-                    <b>{item.authorName || 'Someone'}</b>
-                    <span className={cn('af-kind-chip', `is-${item.kind}`)}>{feedbackKindLabel(item.kind)}</span>
-                    {reason && <span className="af-note-reason">{reason}</span>}
-                    {item.stage != null && STAGE_NAMES[item.stage] && <span className="af-note-stage">{STAGE_NAMES[item.stage]}</span>}
-                    {item.createdAt && <time dateTime={item.createdAt} title={new Date(item.createdAt).toLocaleString()}>{ago(item.createdAt)}</time>}
-                  </div>
-                  <p className="af-note-text">{item.body}</p>
-                </div>
-                {canDeleteFeedback(item, viewer) && (
-                  <IconButton label="Delete this note" tone="danger" onClick={() => { if (window.confirm('Delete this note?')) void actions.onDelete(item.id) }}><Trash2 className="h-4 w-4" /></IconButton>
-                )}
-              </li>
-            )
-          })}
+          {feedback.items.map((item) => <NoteItem key={item.id} item={item} actions={actions} viewer={viewer} />)}
         </ol>
       )}
     </section>

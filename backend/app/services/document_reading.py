@@ -41,7 +41,7 @@ def start(db, candidate_id, user, attachment_ids):
     ensure_can_edit(user, candidate)
     identifiers = list(dict.fromkeys(attachment_ids))
     files = list(db.scalars(select(Attachment).where(Attachment.id.in_(identifiers),
-        Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
+        Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.deleted_at.is_(None),
         Attachment.slot.in_(READABLE_SLOTS)).order_by(Attachment.uploaded_at, Attachment.version, Attachment.id)))
     if len(files) != len(identifiers):
         raise HTTPException(422, "Choose stored resume, passport, Aadhaar or education certificate files belonging to this candidate.")

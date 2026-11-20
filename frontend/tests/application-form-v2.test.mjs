@@ -208,15 +208,17 @@ test('the stage clock is calm, then amber near the limit, then red when overdue'
   assert.equal(model.stageClockTone({ hours: 5, limitHours: 48, overdue: true }), 'over')
 })
 
-test('a note can be deleted by an administrator at any time, by its author only within 15 minutes', () => {
-  const now = new Date('2026-11-05T10:20:00Z')
-  const note = (minutes, authorId = 'u1') => ({ authorId, createdAt: new Date(now.getTime() - minutes * 60_000).toISOString() })
-  assert.equal(model.canDeleteFeedback(note(5), { id: 'u1', role: 'staff' }, now), true)
-  assert.equal(model.canDeleteFeedback(note(16), { id: 'u1', role: 'staff' }, now), false)
-  assert.equal(model.canDeleteFeedback(note(5, 'u2'), { id: 'u1', role: 'staff' }, now), false)
-  assert.equal(model.canDeleteFeedback(note(600, 'u2'), { id: 'a1', role: 'admin' }, now), true)
-  // An MD holds every privilege an admin holds, so an MD may delete any note too.
-  assert.equal(model.canDeleteFeedback(note(600, 'u2'), { id: 'm1', role: 'manager' }, now), true)
+test('a note can be edited and deleted at any time by its author, an admin or an MD (the server adds the candidate\'s recruiter)', () => {
+  const note = (authorId = 'u1') => ({ authorId })
+  for (const check of [model.canDeleteFeedback, model.canEditFeedback]) {
+    assert.equal(check(note(), { id: 'u1', role: 'staff' }), true)                 // the author, however old the note is
+    assert.equal(check(note('u2'), { id: 'u1', role: 'staff' }), false)            // another recruiter
+    assert.equal(check(note('u2'), { id: 'a1', role: 'admin' }), true)
+    assert.equal(check(note('u2'), { id: 'm1', role: 'manager' }), true)           // an MD holds every privilege an admin holds
+    assert.equal(check({ ...note('u2'), canEdit: true, canDelete: true }, { id: 'o1', role: 'staff' }), true)    // the candidate's recruiter, as the server says
+    assert.equal(check({ ...note('u1'), canEdit: false, canDelete: false }, { id: 'u1', role: 'staff' }), false) // the server has the last word
+  }
+  assert.equal(model.FEEDBACK_DELETE_MINUTES, undefined)   // the 15 minute rule is gone
   assert.deepEqual(model.FEEDBACK_KINDS.map((item) => item.label), ['Update', 'Delay', 'Issue', 'Client feedback', 'Candidate feedback'])
   assert.equal(model.FEEDBACK_REASONS.length, 6)
   assert.equal(model.FEEDBACK_MAX_LENGTH, 2000)
@@ -248,17 +250,22 @@ test('the institution is one stored text shown as a name and an address, and joi
   }
 })
 
-test('a note carries the answer of the server about deleting when it gives one', () => {
+test('a note carries the answer of the server about editing and deleting, and its edited mark', () => {
   const form = model.normalizeForm(v2({ feedback: { canWrite: true, stageClock: null, items: [
-    { id: 'n1', kind: 'delay', body: 'x', authorId: 'u9', createdAt: '2026-11-05T10:00:00Z', canDelete: true },
+    { id: 'n1', kind: 'delay', body: 'x', authorId: 'u9', createdAt: '2026-11-05T10:00:00Z', editedAt: '2026-11-06T09:00:00Z', canEdit: true, canDelete: true },
     { id: 'n2', kind: 'update', body: 'y', authorId: 'u1', createdAt: '2026-11-05T10:00:00Z' },
   ] } }))
   assert.equal(form.feedback.items[0].canDelete, true)
+  assert.equal(form.feedback.items[0].canEdit, true)
+  assert.equal(form.feedback.items[0].editedAt, '2026-11-06T09:00:00Z')
   assert.equal(form.feedback.items[1].canDelete, null)
+  assert.equal(form.feedback.items[1].canEdit, null)
+  assert.equal(form.feedback.items[1].editedAt, null)
   const viewer = { id: 'u1', role: 'staff' }
-  assert.equal(model.canDeleteFeedback(form.feedback.items[0], viewer, new Date('2026-11-06T10:00:00Z')), true)
-  assert.equal(model.canDeleteFeedback(form.feedback.items[1], viewer, new Date('2026-11-06T10:00:00Z')), false)
-  assert.equal(model.canDeleteFeedback({ ...form.feedback.items[1], canDelete: false }, { id: 'a', role: 'admin' }, new Date()), false)
+  assert.equal(model.canDeleteFeedback(form.feedback.items[0], viewer), true)
+  assert.equal(model.canEditFeedback(form.feedback.items[0], viewer), true)
+  assert.equal(model.canDeleteFeedback(form.feedback.items[1], viewer), true)   // an older server: the author, any time
+  assert.equal(model.canDeleteFeedback({ ...form.feedback.items[1], canDelete: false }, { id: 'a', role: 'admin' }), false)
 })
 
 const workspace = () => ({

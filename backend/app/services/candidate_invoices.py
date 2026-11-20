@@ -107,7 +107,7 @@ def _ticket(db, candidate_id, app, row=None, placements=None):
     matches = [(Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id) & (Attachment.slot == "air_ticket")]
     if app:
         matches.append((Attachment.entity_type == "application") & (Attachment.entity_id == app.id) & (Attachment.slot == "stage_12_file"))
-    options = list(db.scalars(select(Attachment).where(or_(*matches)).order_by(Attachment.uploaded_at.desc(), Attachment.version.desc())))
+    options = list(db.scalars(select(Attachment).where(or_(*matches), Attachment.deleted_at.is_(None)).order_by(Attachment.uploaded_at.desc(), Attachment.version.desc())))
     options.sort(key=lambda ticket: ticket.entity_type != "application")
     placements = [placement.id for placement in (placements if placements is not None else _placements(db, candidate_id))]
     for ticket in options:

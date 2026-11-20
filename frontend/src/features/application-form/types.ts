@@ -286,7 +286,10 @@ export interface FeedbackItem {
   authorId: string
   authorName: string
   createdAt: string
-  /** What the server says this viewer may do with the note; null when it does not say (an older server), then the 15 minute rule is worked out here. */
+  /** When the note was last edited by hand; null for a note nobody has changed. */
+  editedAt: string | null
+  /** What the server says this viewer may do with the note (its author, the candidate's recruiter, an admin or an MD, at any time); null when it does not say (an older server). */
+  canEdit: boolean | null
   canDelete: boolean | null
 }
 

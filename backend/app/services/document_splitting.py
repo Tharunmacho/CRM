@@ -328,9 +328,10 @@ def store_pieces(db: Session, user: User, candidate: Candidate, plan: SplitPlan,
             versions = db.scalars(select(Attachment).where(
                 Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id, Attachment.slot == slot)
                 .order_by(Attachment.version.desc())).all()
-            same = next((row for row in versions if row.content_hash == digest and (slot in MULTI_SLOTS or row is versions[0])), None)
+            live = [row for row in versions if row.deleted_at is None]   # a removed file is not "already filed": a fresh upload is stored
+            same = next((row for row in live if row.content_hash == digest and (slot in MULTI_SLOTS or row is live[0])), None)
             if same is None:
-                same = _already_filed(piece, slot, versions, settings)
+                same = _already_filed(piece, slot, live, settings)
             if same is not None:
                 stored.append(StoredPiece(slot, label_of(slot), same.file_name, piece.pages, same, duplicate=True))
                 continue
@@ -361,7 +362,7 @@ def store_source_bundle(db: Session, user: User, candidate: Candidate, data: byt
     versions = db.scalars(select(Attachment).where(
         Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id, Attachment.slot == "source_bundle")
         .order_by(Attachment.version.desc())).all()
-    same = next((row for row in versions if row.content_hash == digest), None)
+    same = next((row for row in versions if row.content_hash == digest and row.deleted_at is None), None)
     if same is not None:
         return same
     name = _safe_name(original_name or "file")

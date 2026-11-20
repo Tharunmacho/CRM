@@ -32,10 +32,12 @@ const ICONS: Record<FillCard['kind'], LucideIcon> = { fields: UserRound, passpor
  * completeness and the "N to add" counts follow every keystroke. Sections 5 to 7 (Documents, Client and recruitment,
  * Recruitment process tracking) are the shell's; the passport document itself is also a row of the Documents list.
  */
-export function FillView({ ctx, canWork, upload, busyKinds, onExtract, readError, cards: shown }: {
+export function FillView({ ctx, canWork, upload, onRemove, busyKinds, onExtract, readError, cards: shown }: {
   ctx: FormContext
   canWork: boolean
   upload: (kind: DocumentKind, file: File) => Promise<void>
+  /** Removes one stored file (the photo's Remove button); throws the server's sentence. */
+  onRemove?: (attachmentId: string) => Promise<void>
   busyKinds: DocumentKind[]
   onExtract?: (attachmentIds: string[]) => Promise<void>
   readError?: string
@@ -81,7 +83,7 @@ export function FillView({ ctx, canWork, upload, busyKinds, onExtract, readError
   const body = (card: FillCard) => {
     const grid = card.fields.length > 0 && (
       <div className="aff-grid">
-        {card.no === 1 && <PhotoTile photo={form.documents.photo?.current ?? null} canWork={canWork} busy={busyKinds.includes('photo')} upload={upload} />}
+        {card.no === 1 && <PhotoTile photo={form.documents.photo?.current ?? null} canWork={canWork} busy={busyKinds.includes('photo')} upload={upload} onRemove={canWork ? onRemove : undefined} />}
         {card.fields.map((item) => <FillFieldView key={item.key} env={env} field={item} canWork={canWork} />)}
       </div>
     )

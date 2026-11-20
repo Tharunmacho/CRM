@@ -173,6 +173,12 @@ export default function ApplicationFormPage() {
     }
   }, [state, store])
 
+  /** Remove one uploaded file (soft delete on the server); the slot shows its previous version, or nothing, at once. */
+  const removeDocument = useCallback(async (attachmentId: string) => {
+    await state.removeDocument(attachmentId)
+    store.notify('Document removed')
+  }, [state, store])
+
   const smooth = () => (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth') as ScrollBehavior
 
   /** Shows a section. The panels stay mounted (nothing typed is lost); the page keeps its place and the section starts under the tab bar. */
@@ -227,8 +233,9 @@ export default function ApplicationFormPage() {
     busy: state.feedbackBusy,
     error: state.feedbackError,
     onSend: state.sendFeedback,
+    onEdit: state.changeFeedback,
     onDelete: state.removeFeedback,
-  }), [state.feedbackBusy, state.feedbackError, state.sendFeedback, state.removeFeedback])
+  }), [state.feedbackBusy, state.feedbackError, state.sendFeedback, state.changeFeedback, state.removeFeedback])
 
   /**
    * "Fill in" beside a missing item: show the section that holds the field, then scroll to it and put the cursor in it.
@@ -337,11 +344,11 @@ export default function ApplicationFormPage() {
               </div>
               <div className="af-pane af-card af-work" id="af-pane-details" role="tabpanel" aria-labelledby={`af-tab-${isDetailTab(activeTab) ? activeTab : 'personal'}`} hidden={!isDetailTab(activeTab)}>
                 <div className="af-fill-wrap" ref={fillRef}>
-                  <FillView ctx={ctx.fill} canWork={canWork} upload={upload} busyKinds={busyKinds} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} readError={state.readError} cards={shownCards} />
+                  <FillView ctx={ctx.fill} canWork={canWork} upload={upload} onRemove={removeDocument} busyKinds={busyKinds} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} readError={state.readError} cards={shownCards} />
                 </div>
               </div>
               <div className="af-pane af-card af-work" id="af-pane-documents" role="tabpanel" aria-labelledby="af-tab-documents" hidden={!here('documents')}>
-                <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} onManualStatus={state.markDocument} onIdentity={state.checkIdentity} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} readError={state.readError} />
+                <DocumentsSection form={form} canUpload={canWork} onUpload={upload} onRemove={removeDocument} busyKinds={busyKinds} onManualStatus={state.markDocument} onIdentity={state.checkIdentity} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} readError={state.readError} />
                 <RecordDownloads candidateId={id} applicationId={form.application?.id} recordName={[primaryId(ids), name].filter(Boolean).join('-')} dirty={dirty} canDownload={canWork} />
               </div>
               {canSeeInvoice && (

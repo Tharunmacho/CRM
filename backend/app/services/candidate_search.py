@@ -422,7 +422,7 @@ def export_candidates(db, filters):
     def read_uploaded(session):
         have, wrong_files = {}, {}
         for candidate_id, slot, rejected in session.execute(select(Attachment.entity_id, Attachment.slot, rejected_expression()).where(
-            Attachment.entity_type == "candidate", Attachment.entity_id.in_(matching_ids),
+            Attachment.entity_type == "candidate", Attachment.entity_id.in_(matching_ids), Attachment.deleted_at.is_(None),
         ).distinct()):
             (wrong_files if rejected else have).setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))
         return have, wrong_files

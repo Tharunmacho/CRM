@@ -3,15 +3,17 @@ import { Camera, Loader2, UserRound } from 'lucide-react'
 import { fileHref } from '@/shared/api/client'
 import { documentFileError } from '@/shared/lib/document-files'
 import type { DocumentKind, FormDocument } from '../types'
+import { ConfirmRemoveDialog } from '../components/confirm-remove'
 
 const PHOTO_TYPES = /^image\//
 const PHOTO_NAME = /\.(jpe?g|png|webp|heic)$/i
 
 /** The passport-size photo tile of the Personal information card: shows the photo and an Upload / Replace button. */
-export function PhotoTile({ photo, canWork, busy, upload }: { photo: FormDocument | null; canWork: boolean; busy: boolean; upload: (kind: DocumentKind, file: File) => Promise<void> }) {
+export function PhotoTile({ photo, canWork, busy, upload, onRemove }: { photo: FormDocument | null; canWork: boolean; busy: boolean; upload: (kind: DocumentKind, file: File) => Promise<void>; onRemove?: (attachmentId: string) => Promise<void> }) {
   const input = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const working = busy || sending
   const pick = async (file: File | undefined) => {
     if (!file) return
@@ -34,11 +36,14 @@ export function PhotoTile({ photo, canWork, busy, upload }: { photo: FormDocumen
       {canWork && (
         <>
           <button type="button" className="aff-photo-btn" disabled={working} onClick={() => input.current?.click()}>{photo ? 'Replace photo' : 'Upload photo'}</button>
+          {photo?.attachmentId && onRemove && <button type="button" className="aff-photo-btn is-remove" disabled={working} onClick={() => setRemoving(true)}>Remove photo</button>}
           <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/heic,.jpg,.jpeg,.png,.webp,.heic" className="sr-only" tabIndex={-1} aria-label="Choose a photo"
             onChange={(event) => { void pick(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
         </>
       )}
       {error && <p className="aff-note is-error" role="alert">{error}</p>}
+      {removing && photo?.attachmentId && onRemove && <ConfirmRemoveDialog title="Remove this photo?" description="The photo is hidden and the placeholder returns. The file is kept on the server and the audit trail records who removed it. An earlier photo, if there is one, takes its place."
+        detail={photo.fileName} confirmLabel="Remove photo" onClose={() => setRemoving(false)} onConfirm={() => onRemove(photo.attachmentId)} />}
     </div>
   )
 }

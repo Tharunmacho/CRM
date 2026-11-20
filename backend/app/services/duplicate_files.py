@@ -30,7 +30,7 @@ def processed_hashes(db, hashes, *, exclude_mail_message_id=None, exclude_whatsa
     for digest, row_id, candidate_id, name, ref, care_id, at in db.execute(
         select(Attachment.content_hash, Attachment.id, Candidate.id, Candidate.name, Candidate.ref, Candidate.care_id, Attachment.uploaded_at)
         .join(Candidate, Candidate.id == Attachment.entity_id)
-        .where(Attachment.entity_type == "candidate", Attachment.content_hash.in_(wanted))
+        .where(Attachment.entity_type == "candidate", Attachment.content_hash.in_(wanted), Attachment.deleted_at.is_(None))
         .order_by(Attachment.uploaded_at, Attachment.id)
     ):
         found.setdefault(digest, {"source": "candidate_file", "id": row_id, "candidateId": candidate_id,

@@ -569,6 +569,12 @@ class Attachment(Base, PkMixin):
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # Soft delete (migration 0054): a removed file keeps its row, its bytes and every earlier version; readers skip it.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        comment="When the file was removed from its document slot; the bytes and earlier versions are kept. NULL while the file is in use.")
+    deleted_by: Mapped[str | None] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="SET NULL"), comment="The CRM user who removed the file.")
 
     __table_args__ = (
         Index("ix_document_attachments_owner", "entity_type", "entity_id", "slot"),
@@ -1151,6 +1157,14 @@ class ApplicationFeedback(Base, PkMixin):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
         comment="When the note was last edited (edits are allowed for 15 minutes).")
+    # Soft delete and the "edited" mark (migration 0054).
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        comment="When the note was removed; it is hidden everywhere but the audit trail keeps its text. NULL while the note is shown.")
+    deleted_by: Mapped[str | None] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="SET NULL"), comment="The CRM user who removed the note.")
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="When the note was last edited by hand; NULL for a note never edited.")
 
 
 class Notification(Base, PkMixin):

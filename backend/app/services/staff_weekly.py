@@ -208,7 +208,7 @@ def _read_all(db, start, end, first, last, now, staff_id):
         try:
             F = m.ApplicationFeedback
             return dict(session.execute(select(F.author_id, func.count()).where(
-                F.created_at >= start, F.created_at < end, _scope(F.author_id, staff_id)).group_by(F.author_id)).all())
+                F.created_at >= start, F.created_at < end, F.deleted_at.is_(None), _scope(F.author_id, staff_id)).group_by(F.author_id)).all())
         except (ProgrammingError, AttributeError):
             session.rollback()
             return None

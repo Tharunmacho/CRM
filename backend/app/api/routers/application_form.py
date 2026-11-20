@@ -189,7 +189,7 @@ def add_feedback(candidate_id: str, body: FeedbackIn, response: Response, orderI
 def edit_feedback(candidate_id: str, feedback_id: str, body: FeedbackEditIn, response: Response,
                   orderId: str | None = Query(default=None, max_length=36), applicationId: str | None = Query(default=None, max_length=36),
                   db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    """Change your own note within 15 minutes of writing it."""
+    """Edit a note, at any time: its author, the candidate's recruiter, an admin or an MD (404 for a removed note, 403 for anyone else)."""
     _no_store(response)
     with applications_router._mutation(db):
         form_feedback.edit(db, user, candidate_id, feedback_id, kind=body.kind, reason=body.reason, body=body.body)
@@ -200,7 +200,7 @@ def edit_feedback(candidate_id: str, feedback_id: str, body: FeedbackEditIn, res
 def delete_feedback(candidate_id: str, feedback_id: str, response: Response, orderId: str | None = Query(default=None, max_length=36),
                     applicationId: str | None = Query(default=None, max_length=36),
                     db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    """Delete a note: an admin any note, anyone else their own within 15 minutes."""
+    """Remove a note (soft: it is hidden everywhere, the audit entry keeps its text): its author, the candidate's recruiter, an admin or an MD."""
     _no_store(response)
     with applications_router._mutation(db):
         form_feedback.delete(db, user, candidate_id, feedback_id)
@@ -265,6 +265,18 @@ def upload_document(candidate_id: str, response: Response, slot: str = Form(...)
     return {"document": document, "extraction": extraction, "form": form, **({"split": split} if split else {}),
             **({"alreadyUploaded": True, "message": stored["message"], "existing": stored["existing"]} if already else {}),
             **({"notes": notes} if notes else {})}
+
+
+@router.delete("/documents/{attachment_id}")
+def remove_document(candidate_id: str, attachment_id: str, response: Response,
+                    orderId: str | None = Query(default=None, max_length=36), applicationId: str | None = Query(default=None, max_length=36),
+                    db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """Remove one uploaded file of this candidate (a soft delete: bytes and earlier versions are kept, the slot falls back to the
+    previous version). The uploader, the candidate's recruiter, an admin or an MD. Answers the whole form."""
+    _no_store(response)
+    with applications_router._mutation(db):
+        files_router.remove_attachment(db, user, attachment_id, candidate_id=candidate_id)
+    return service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
 
 
 class IdentityCheckIn(_Section):

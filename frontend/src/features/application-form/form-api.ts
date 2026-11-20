@@ -83,6 +83,20 @@ export async function addFeedback(candidateId: string, note: FeedbackDraft): Pro
   return normalizeForm(await api.post<unknown>(`/candidates/${encodeURIComponent(candidateId)}/application-form/feedback`, body))
 }
 
+/** Change a note (its author, the candidate's recruiter, an admin or an MD, at any time). The answer is the whole form. */
+export async function editFeedback(candidateId: string, feedbackId: string, change: { body: string; kind?: FeedbackKind; reason?: FeedbackReason | '' }): Promise<ApplicationFormData> {
+  const body = { body: change.body.trim(), ...(change.kind ? { kind: change.kind } : {}), ...(change.reason !== undefined ? { reason: change.reason } : {}) }
+  return normalizeForm(await api.put<unknown>(`/candidates/${encodeURIComponent(candidateId)}/application-form/feedback/${encodeURIComponent(feedbackId)}`, body))
+}
+
+/**
+ * Remove one uploaded file (a soft delete: the server keeps the bytes and the earlier versions, and the slot falls back to the
+ * previous version). The answer is the whole form.
+ */
+export async function removeFormDocument(candidateId: string, attachmentId: string, target: FormTarget = {}): Promise<ApplicationFormData> {
+  return normalizeForm(await api.del<unknown>(formPath(candidateId, target, `/documents/${encodeURIComponent(attachmentId)}`)))
+}
+
 export async function deleteFeedback(candidateId: string, feedbackId: string): Promise<ApplicationFormData | null> {
   const result = await api.del<{ form?: unknown } | Record<string, unknown>>(`/candidates/${encodeURIComponent(candidateId)}/application-form/feedback/${encodeURIComponent(feedbackId)}`)
   // The contract does not say what a delete answers: use the form when it is one, otherwise the caller refetches.

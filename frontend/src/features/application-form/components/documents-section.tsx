@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import {
   Briefcase, CheckCircle2, Clock, Download, Eye, FileSignature, FileText, Files, GraduationCap, IdCard, Image as ImageIcon, Landmark,
-  ChevronDown, Loader2, Paperclip, Plane, ShieldCheck, Stamp, Star, Stethoscope, Upload, type LucideIcon,
+  ChevronDown, Loader2, Paperclip, Plane, ShieldCheck, Stamp, Star, Stethoscope, Trash2, Upload, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateTimeLabel } from '@/shared/lib/format'
@@ -19,6 +19,7 @@ import { loadDocumentReport, type IdentityCheck } from '../form-api'
 import { documentRowStates, documentRowsProgress, documentsCountText, groupDocumentRows, groupProgressText, type DocumentRowIcon, type DocumentRowState } from '../document-rows'
 import type { ApplicationFormData, DocumentKind, DocumentSlot, FormDocument } from '../types'
 import { SectionHeader } from './section-header'
+import { ConfirmRemoveDialog } from './confirm-remove'
 import { ExtractionLine } from './extraction-line'
 import { SlotReadingNote } from './slot-reading'
 import { ReadReport } from '@/features/candidates/components/read-report'
@@ -58,13 +59,13 @@ function CopyReportButton({ candidateId }: { candidateId: string }) {
 }
 
 /** One stored file on one line: its name (a link), then size and date, muted. The name is cut with an ellipsis, never wrapped. */
-function FileRow({ file, action }: { file: FormDocument; action?: ReactNode }) {
+function FileRow({ file, action, onRemove }: { file: FormDocument; action?: ReactNode; onRemove?: () => void }) {
   const detail = [sizeLabel(file.sizeKb), file.uploadedAt ? dateTimeLabel(file.uploadedAt) : 'Saving'].join(' · ')
   const splitNote = splitSourceCaption(file.splitFrom)
   return (
     <div className="af-docfile">
       <div className="af-docfile-copy">{file.url ? <a href={fileHref(file.url)} target="_blank" rel="noreferrer" title={file.fileName}>{file.fileName}</a> : <span title={file.fileName}>{file.fileName}</span>}<small>{detail}</small>{splitNote && <small className="af-docfile-split" title={splitNote}>{splitNote}</small>}</div>
-      {file.url && <div className="af-docfile-actions"><a href={fileHref(file.url)} target="_blank" rel="noreferrer" aria-label={`View ${file.fileName}`} title={`View ${file.fileName}`} className="af-docbtn is-icon"><Eye aria-hidden="true" /></a><FileLink url={file.url} download title={`Download ${file.fileName}`} className="af-docbtn is-icon"><Download aria-hidden="true" /><span className="sr-only">Download {file.fileName}</span></FileLink>{action || <span aria-hidden="true" />}</div>}
+      {file.url && <div className="af-docfile-actions"><a href={fileHref(file.url)} target="_blank" rel="noreferrer" aria-label={`View ${file.fileName}`} title={`View ${file.fileName}`} className="af-docbtn is-icon"><Eye aria-hidden="true" /></a><FileLink url={file.url} download title={`Download ${file.fileName}`} className="af-docbtn is-icon"><Download aria-hidden="true" /><span className="sr-only">Download {file.fileName}</span></FileLink>{action || <span aria-hidden="true" />}{onRemove && <button type="button" className="af-docbtn is-icon is-danger" aria-label={`Remove ${file.fileName}`} title={`Remove ${file.fileName}`} onClick={onRemove}><Trash2 aria-hidden="true" /></button>}</div>}
     </div>
   )
 }
@@ -89,12 +90,14 @@ function useSlotUpload(slot: DocumentSlot, canUpload: boolean, busy: boolean, on
  * One document on one compact row, on fixed columns so the rows line up from top to bottom:
  * status icon, name, status chip, file (name, size, date), actions (Upload or Replace, View).
  */
-function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, onExtract, readError, onIdentity, lineNotes }: {
+function DocumentRow({ slot, state, canUpload, busy, onUpload, onRemove, onManualStatus, onExtract, readError, onIdentity, lineNotes }: {
   slot: DocumentSlot
   state: DocumentRowState
   canUpload: boolean
   busy: boolean
   onUpload: (kind: DocumentKind, file: File) => Promise<void>
+  /** Removes one stored file (the slot then falls back to the previous version); throws the server's sentence. */
+  onRemove?: (attachmentId: string) => Promise<void>
   onIdentity?: (attachmentId: string, action: IdentityCheck) => Promise<void>
   onManualStatus?: (kind: DocumentKind, uploaded: boolean, note: string) => Promise<void>
   /** Reads stored files again. Nobody starts a first reading: the form does that by itself; this is for Read again. */
@@ -108,6 +111,7 @@ function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, o
   const [manualOpen, setManualOpen] = useState(false)
   const [manualNote, setManualNote] = useState('')
   const [manualBusy, setManualBusy] = useState(false)
+  const [removing, setRemoving] = useState<FormDocument | null>(null)
   const [manualError, setManualError] = useState('')
   const upload = useSlotUpload(slot, canUpload && !state.disabled, busy, onUpload)
   const failedReads = slotReadState(slot).failed
@@ -139,7 +143,7 @@ function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, o
       <b className="af-docrow-name" title={label}>{label}</b>
       <span className={cn('af-doc-chip', `is-${state.key}`, rejectedOnly && 'is-rejected')}>{working ? 'Uploading' : rejectedOnly ? 'Wrong document' : state.chip}</span>
       <div className="af-docrow-file">
-        {files.map((file, index) => <div key={file.attachmentId}><FileRow file={file} action={index === 0 && hasFile ? uploadButton : undefined} />{slot.multiple && file.extraction && <ExtractionLine kind={slot.slot} slot={{ ...slot, extraction: file.extraction }} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} attachmentId={file.attachmentId} onIdentity={canUpload ? onIdentity : undefined} onReadAgain={readAgain(file.attachmentId)} notes={lineNotes[extractionLineKey(slot.slot, file.attachmentId)]} />}</div>)}
+        {files.map((file, index) => <div key={file.attachmentId}><FileRow file={file} action={index === 0 && hasFile ? uploadButton : undefined} onRemove={canUpload && onRemove && file.attachmentId && !working ? () => setRemoving(file) : undefined} />{slot.multiple && file.extraction && <ExtractionLine kind={slot.slot} slot={{ ...slot, extraction: file.extraction }} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} attachmentId={file.attachmentId} onIdentity={canUpload ? onIdentity : undefined} onReadAgain={readAgain(file.attachmentId)} notes={lineNotes[extractionLineKey(slot.slot, file.attachmentId)]} />}</div>)}
         {marked && <div className="af-doc-manual"><b>Marked manually · No file attached</b><small>{slot.manualStatus?.by.name || 'Former team member'}{slot.manualStatus?.at ? ` · ${dateTimeLabel(slot.manualStatus.at)}` : ''}</small>{slot.manualStatus?.note && <p>{slot.manualStatus.note}</p>}</div>}
         {slot.multiple && !hasFile && !marked && <p className="af-doc-hint">{slot.slot === 'passport' ? 'Add the photo page, address page or other passport pages together.' : slot.slot === 'aadhaar' ? 'Add both the front and back pages.' : 'Choose or drop several files.'}</p>}
         {(!slot.multiple || !files.some((file) => file.extraction)) && <ExtractionLine kind={slot.slot} slot={slot} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} attachmentId={slot.current?.attachmentId} onIdentity={canUpload ? onIdentity : undefined} onReadAgain={readAgain(slot.current?.attachmentId)} notes={lineNotes[extractionLineKey(slot.slot)]} />}
@@ -151,6 +155,8 @@ function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, o
         {canUpload && onManualStatus && slot.manualStatusSupported && !hasFile && <button type="button" className="af-docbtn af-doc-manual-action" disabled={working || manualBusy} onClick={() => { setManualNote(''); setManualError(''); setManualOpen(true) }}>{marked ? 'Mark as pending' : 'Mark as uploaded'}</button>}
         {uploadButton}
       </div>}
+      {removing && onRemove && <ConfirmRemoveDialog title={`Remove this ${label.toLowerCase()}?`} description={slot.multiple || files.length > 1 ? 'The file is hidden from this document. It is kept on the server, and the audit trail records who removed it.' : 'The file is hidden from this document and from the exports. It is kept on the server, and the audit trail records who removed it. An earlier version, if there is one, takes its place.'}
+        detail={removing.fileName} confirmLabel="Remove file" onClose={() => setRemoving(null)} onConfirm={() => onRemove(removing.attachmentId)} />}
       {mayUpload && (
         <input
           ref={upload.input}
@@ -177,6 +183,7 @@ export function DocumentsSection({
   form,
   canUpload,
   onUpload,
+  onRemove,
   busyKinds,
   onManualStatus,
   onExtract,
@@ -186,6 +193,7 @@ export function DocumentsSection({
   form: ApplicationFormData
   canUpload: boolean
   onUpload: (kind: DocumentKind, file: File) => Promise<void>
+  onRemove?: (attachmentId: string) => Promise<void>
   onIdentity?: (attachmentId: string, action: IdentityCheck) => Promise<void>
   busyKinds: DocumentKind[]
   onManualStatus?: (kind: DocumentKind, uploaded: boolean, note: string) => Promise<void>
@@ -239,6 +247,7 @@ export function DocumentsSection({
                   canUpload={canUpload}
                   busy={busyKinds.includes(slot.slot)}
                   onUpload={onUpload}
+                  onRemove={onRemove}
                   onManualStatus={onManualStatus}
                   onExtract={onExtract}
                   readError={readError}

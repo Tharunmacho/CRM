@@ -72,7 +72,7 @@ def holders(db: Session, digests) -> dict[str, list[tuple[Attachment, Candidate]
         return found
     for row, candidate in db.execute(
         select(Attachment, Candidate).join(Candidate, Candidate.id == Attachment.entity_id)
-        .where(Attachment.content_hash.in_(wanted), Attachment.entity_type == "candidate")
+        .where(Attachment.content_hash.in_(wanted), Attachment.entity_type == "candidate", Attachment.deleted_at.is_(None))
         .order_by(Attachment.uploaded_at, Attachment.id)
     ).all():
         found.setdefault(row.content_hash, []).append((row, candidate))

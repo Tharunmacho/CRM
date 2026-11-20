@@ -221,7 +221,7 @@ def candidate_detail(candidate_id: str, response: Response,
             "call_interested", "call_remarks", "call_recorded_at").where(Candidate.id == candidate_id)),
         _rows("files", select(Attachment.id, Attachment.entity_id, Attachment.slot, Attachment.version,
             Attachment.file_name, Attachment.size_kb, Attachment.uploaded_by, Attachment.uploaded_at, pending_expression(), rejected_expression())
-            .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id), ("version", False)),
+            .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.deleted_at.is_(None)), ("version", False)),
         _rows("manual_documents", latest_statement([candidate_id])),
         # Which scan each split file was cut from, in the same statement (no extra round trip).
         _rows("splits", split_sources_statement(candidate_id)),

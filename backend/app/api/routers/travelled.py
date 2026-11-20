@@ -215,7 +215,7 @@ def _stored_documents_statement(user: User):
     if user.role.value == "staff":
         deployed = deployed.where(Application.owner_id == user.id)
     return select(Attachment.entity_id, Attachment.slot).where(
-        Attachment.entity_type == "candidate", Attachment.entity_id.in_(deployed), ~rejected_expression()).distinct()
+        Attachment.entity_type == "candidate", Attachment.entity_id.in_(deployed), Attachment.deleted_at.is_(None), ~rejected_expression()).distinct()
 
 
 def _add_documents(rows: list[dict], stored_rows, user: User | None = None) -> None:

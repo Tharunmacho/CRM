@@ -126,10 +126,13 @@ Form payload gains:
                               "needsReason": true } | null }   // needsReason: overdue and no delay/update note written since the stage began
 ```
 `POST /api/candidates/{id}/application-form/feedback` body `{kind, reason?, body, applicationId?}` (owner, admin, manager). Answers the whole form.
-Each item also carries `canEdit` (own note, within 15 minutes) and `canDelete` (admin always, own note within 15 minutes).
-`PUT /api/candidates/{id}/application-form/feedback/{feedbackId}` (body `{kind?, reason?, body?}`, own note within 15 minutes) edits a note;
-POST answers 201, PUT and DELETE 200, all with the whole form. A `delay` or `issue` note notifies the admins and managers (Notification kind `feedback`, link to the form). Recruiters cannot edit or delete
-a note after 15 minutes; admin can delete any (`DELETE /api/candidates/{id}/application-form/feedback/{feedbackId}`).
+Each item also carries `editedAt` (null until a note is edited by hand), `canEdit` and `canDelete`: true for the note's author, the candidate's
+recruiter (owner), an admin and an MD, at any time (no time limit; migration 0054).
+`PUT /api/candidates/{id}/application-form/feedback/{feedbackId}` (body `{kind?, reason?, body?}`) edits a note and sets `editedAt`; the audit entry keeps
+the text before and after. `DELETE .../feedback/{feedbackId}` is a SOFT delete (`deleted_at`, `deleted_by`): the note is hidden from the form, the stage
+clock, the record package and the weekly report, and the audit entry "Application form: feedback deleted" holds its text, who and when. Anyone else: 403;
+a missing or already removed note: 404. POST answers 201, PUT and DELETE 200, all with the whole form. A `delay` or `issue` note notifies the admins and
+managers (Notification kind `feedback`, link to the form).
 Live topic `feedback` (add the table to `change_feed.py`); the recruiter weekly report (`staff_weekly`) gets `feedbackNotes` per person (count in the range) if cheap.
 
 ## 4. Wording (frontend)

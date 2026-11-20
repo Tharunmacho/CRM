@@ -657,39 +657,99 @@ def test_only_the_owner_admin_and_manager_may_write_notes(desk):
         assert db.scalar(select(func.count()).select_from(ApplicationFeedback)) == 2
 
 
-def test_staff_can_delete_or_edit_their_own_note_only_for_fifteen_minutes_and_admin_always(desk):
+def test_author_owner_admin_and_manager_may_edit_and_delete_a_note_at_any_time(desk):
     mine = add_note(desk, "update", "Typo note").json()["feedback"]["items"][0]
-    assert mine["canEdit"] is True and mine["canDelete"] is True
+    assert mine["canEdit"] is True and mine["canDelete"] is True and mine["editedAt"] is None
+    age_note(desk, mine["id"], 60 * 24 * 30)   # a month later: no time limit any more
+    old = form(desk)["feedback"]["items"][0]
+    assert old["canEdit"] is True and old["canDelete"] is True
     edited = desk.client.put(url() + f"/feedback/{mine['id']}", json={"body": "Fixed note"})
-    assert edited.status_code == 200 and edited.json()["feedback"]["items"][0]["body"] == "Fixed note"
-    as_user(desk, "other", Role.staff)  # no other recruiter may touch it
+    assert edited.status_code == 200
+    item = edited.json()["feedback"]["items"][0]
+    assert item["body"] == "Fixed note" and item["editedAt"] and item["createdAt"] < item["editedAt"]
+
+    as_user(desk, "other", Role.staff)   # another recruiter, neither author nor owner: nothing
+    seen = form(desk)["feedback"]["items"][0]
+    assert seen["canEdit"] is False and seen["canDelete"] is False
     assert desk.client.delete(url() + f"/feedback/{mine['id']}").status_code == 403
     assert desk.client.put(url() + f"/feedback/{mine['id']}", json={"body": "Hijack"}).status_code == 403
-    as_user(desk, "manager", Role.manager)   # an MD may delete any note, like an admin
-    assert form(desk)["feedback"]["items"][0]["canDelete"] is True
-    as_user(desk, "staff", Role.staff)
-
-    age_note(desk, mine["id"], 14)
-    assert form(desk)["feedback"]["items"][0]["canDelete"] is True  # 14 minutes: still inside the window
-    age_note(desk, mine["id"], 16)
-    late = form(desk)["feedback"]["items"][0]
-    assert late["canEdit"] is False and late["canDelete"] is False
-    assert desk.client.put(url() + f"/feedback/{mine['id']}", json={"body": "Too late"}).status_code == 403
-    refused = desk.client.delete(url() + f"/feedback/{mine['id']}")
-    assert refused.status_code == 403 and "15 minutes" in refused.json()["detail"]
-
+    as_user(desk, "manager", Role.manager)
+    seen = form(desk)["feedback"]["items"][0]
+    assert seen["canEdit"] is True and seen["canDelete"] is True
+    assert desk.client.put(url() + f"/feedback/{mine['id']}", json={"body": "Manager fixed"}).json()["feedback"]["items"][0]["body"] == "Manager fixed"
     as_user(desk, "admin", Role.admin)
-    assert form(desk)["feedback"]["items"][0]["canDelete"] is True
-    deleted = desk.client.delete(url() + f"/feedback/{mine['id']}")
-    assert deleted.status_code == 200 and deleted.json()["feedback"]["items"] == []
-    assert desk.client.delete(url() + f"/feedback/{mine['id']}").status_code == 404
-    with desk.sessions() as db:
-        assert db.scalar(select(func.count()).select_from(ApplicationFeedback)) == 0
-        assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.action == "Application form: feedback deleted")) == 1
+    assert desk.client.put(url() + f"/feedback/{mine['id']}", json={"body": "Admin fixed"}).json()["feedback"]["items"][0]["body"] == "Admin fixed"
 
+    # the candidate's recruiter (owner) who did not write the note may edit and delete it
+    theirs = add_note(desk, "issue", "Written by the admin").json()["feedback"]["items"][0]
     as_user(desk, "staff", Role.staff)
-    fresh = add_note(desk, "issue", "Within the window").json()["feedback"]["items"][0]
-    assert desk.client.delete(url() + f"/feedback/{fresh['id']}").status_code == 200  # own note, inside the window
+    seen = form(desk)["feedback"]["items"][0]
+    assert seen["authorId"] == "admin" and seen["canEdit"] is True and seen["canDelete"] is True
+    assert desk.client.put(url() + f"/feedback/{theirs['id']}", json={"body": "Owner corrected"}).json()["feedback"]["items"][0]["body"] == "Owner corrected"
+    assert desk.client.delete(url() + f"/feedback/{theirs['id']}").status_code == 200
+
+    deleted = desk.client.delete(url() + f"/feedback/{mine['id']}")   # the author, a month later
+    assert deleted.status_code == 200 and deleted.json()["feedback"]["items"] == []
+    assert desk.client.delete(url() + f"/feedback/{mine['id']}").status_code == 404   # already removed
+    assert desk.client.put(url() + f"/feedback/{mine['id']}", json={"body": "Back"}).status_code == 404
+    assert desk.client.delete(url() + "/feedback/never-existed").status_code == 404
+    assert desk.client.delete(url("second-candidate") + f"/feedback/{mine['id']}").status_code == 404   # another candidate's note id
+
+
+def test_a_deleted_note_is_hidden_everywhere_but_kept_with_its_text_in_the_audit(desk):
+    app_id = mapped(desk)
+    note = add_note(desk, "delay", "Client has not replied for a week", reason="waiting_client").json()["feedback"]["items"][0]
+    keep = add_note(desk, "update", "Documents are in").json()["feedback"]["items"][0]
+    as_user(desk, "manager", Role.manager)
+    removed = desk.client.delete(url() + f"/feedback/{note['id']}")
+    assert removed.status_code == 200
+    assert [i["id"] for i in removed.json()["feedback"]["items"]] == [keep["id"]]
+    with desk.sessions() as db:
+        row = db.get(ApplicationFeedback, note["id"])
+        assert row is not None and row.deleted_at is not None and row.deleted_by == "manager" and row.body == "Client has not replied for a week"
+        entry = db.scalar(select(AuditEntry).where(AuditEntry.action == "Application form: feedback deleted"))
+        assert entry.actor_id == "manager" and entry.entity_id == "candidate" and entry.at is not None
+        assert entry.meta["text"] == "Client has not replied for a week" and entry.meta["feedback_id"] == note["id"]
+        assert entry.meta["author_id"] == "staff" and entry.meta["kind"] == "delay" and entry.meta["deleted_at"]
+        data = staff_weekly.build_report(db, None, None, "Asia/Kolkata")   # the weekly report does not count it
+        from app.services import candidate_exports
+        inspection = candidate_exports.load_inspection(db, "candidate", desk.actor)   # nor does the record package
+    assert {row["id"]: row["feedbackNotes"] for row in data["staff"]}["staff"] == 1
+    assert [n.id for n in inspection.feedback] == [keep["id"]]
+
+    # a deleted delay/update note no longer explains an overdue stage
+    long_ago = datetime.now(timezone.utc) - timedelta(hours=61)
+    with desk.sessions() as db:
+        db.execute(update(Task).where(Task.application_id == app_id, Task.completed_at.is_(None))
+                   .values(sla_started_at=long_ago, due_at=long_ago + timedelta(hours=48)))
+        db.execute(update(ApplicationFeedback).where(ApplicationFeedback.id == keep["id"]).values(deleted_at=datetime.now(timezone.utc)))
+        db.commit()
+    as_user(desk, "staff", Role.staff)
+    assert form(desk)["feedback"]["stageClock"]["needsReason"] is True
+    assert add_note(desk, "delay", "Candidate is travelling").status_code == 201
+    assert form(desk)["feedback"]["stageClock"]["needsReason"] is False
+
+
+def test_editing_and_deleting_a_note_stay_within_a_small_statement_budget(desk):
+    from sqlalchemy import event
+    first = add_note(desk, "update", "Statement budget note").json()["feedback"]["items"][0]
+    seen: list[str] = []
+    engine = desk.sessions.kw["bind"]
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        seen.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        assert desk.client.put(url() + f"/feedback/{first['id']}", json={"body": "Edited"}).status_code == 200
+        writes = [s for s in seen if s.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE"))]
+        assert len(writes) == 2   # the note and its audit entry
+        seen.clear()
+        assert desk.client.delete(url() + f"/feedback/{first['id']}").status_code == 200
+        writes = [s for s in seen if s.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE"))]
+        assert len(writes) == 2 and not any(s.lstrip().upper().startswith("DELETE") for s in seen)   # soft: an UPDATE, never a DELETE
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
 
 
 def test_delay_and_issue_notes_notify_admins_and_managers_but_not_the_writer(desk):

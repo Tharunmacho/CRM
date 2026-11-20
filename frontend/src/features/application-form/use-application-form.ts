@@ -3,7 +3,7 @@ import { ApiError } from '@/shared/api/client'
 import { classifyLoadError, type LoadErrorView } from './load-error'
 import { liveInterval } from '@/shared/state/live'
 import { isOtherRecord } from '@/shared/state/live-events'
-import { FORM_LIVE_TOPICS, addFeedback, checkDocumentIdentity, deleteFeedback, extractFormDocuments, loadApplicationForm, readPending, saveApplicationForm, saveAssignment, saveDocumentStatus, uploadFormDocument, type FeedbackDraft, type FormTarget, type IdentityCheck } from './form-api'
+import { FORM_LIVE_TOPICS, addFeedback, checkDocumentIdentity, deleteFeedback, editFeedback, removeFormDocument, extractFormDocuments, loadApplicationForm, readPending, saveApplicationForm, saveAssignment, saveDocumentStatus, uploadFormDocument, type FeedbackDraft, type FormTarget, type IdentityCheck } from './form-api'
 import { applyAssignmentChange, applyOptimisticUploads, buildSavePayload, changedPaths, completenessOf, isDirty, isReading, rebaseDraft, toDraft, unreadFileIds, validateDraft } from './form-model'
 import type { ApplicationFormData, AssignmentChange, AssignmentData, DocumentKind, FormDraft } from './types'
 
@@ -317,15 +317,38 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
     }
   }, [candidateId, apply])
 
+  /** Save the new words of a note. Resolves to true when saved; false keeps the editor open with the server's sentence in `feedbackError`. */
+  const changeFeedback = useCallback(async (feedbackId: string, body: string): Promise<boolean> => {
+    setFeedbackBusy(true); setFeedbackError('')
+    try {
+      const saved = await editFeedback(candidateId, feedbackId, { body })
+      lastSignature.current = JSON.stringify(saved)
+      apply(saved)
+      return true
+    } catch (cause) {
+      setFeedbackError(messageOf(cause, 'The note could not be changed.'))
+      return false
+    } finally {
+      setFeedbackBusy(false)
+    }
+  }, [candidateId, apply])
+
+  /** Remove an uploaded file; the answer is the whole form, so the slot shows the previous version (or empty) at once. Throws the server's sentence. */
+  const removeDocument = useCallback(async (attachmentId: string): Promise<void> => {
+    const saved = await removeFormDocument(candidateId, attachmentId, { orderId, applicationId: baseFormRef.current?.application?.id ?? applicationId })
+    lastSignature.current = JSON.stringify(saved)
+    apply(saved)
+  }, [candidateId, orderId, applicationId, apply])
+
+  /** Remove a note (soft: the server keeps its text in the audit trail). Throws the server's sentence for the confirm dialog to show. */
   const removeFeedback = useCallback(async (feedbackId: string): Promise<void> => {
-    setFeedbackError('')
     try {
       const saved = await deleteFeedback(candidateId, feedbackId)
       if (saved) { lastSignature.current = JSON.stringify(saved); apply(saved) } else await reload(true)
     } catch (cause) {
-      setFeedbackError(messageOf(cause, 'The note could not be deleted.'))
+      throw new Error(messageOf(cause, 'The note could not be deleted.'))
     }
   }, [candidateId, apply, reload])
 
-  return { form: view, draft, setDraft, editing, setEditing, loading, error, saving, saveError, dirty, errors, justUpdated, save, discard, reload, upload, markDocument, extractDocuments, readError, checkIdentity, reading, completeness, changeAssignment, assignmentSaving, assignmentErrors, sendFeedback, removeFeedback, feedbackBusy, feedbackError }
+  return { form: view, draft, setDraft, editing, setEditing, loading, error, saving, saveError, dirty, errors, justUpdated, save, discard, reload, upload, markDocument, extractDocuments, readError, checkIdentity, reading, completeness, changeAssignment, assignmentSaving, assignmentErrors, sendFeedback, changeFeedback, removeFeedback, removeDocument, feedbackBusy, feedbackError }
 }

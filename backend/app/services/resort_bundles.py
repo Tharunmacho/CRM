@@ -116,7 +116,7 @@ def _unmarked_files(db, candidate_ids: list[str]) -> list[Attachment]:
         DocumentExtractionJob.content_hash == Attachment.content_hash).exists()
     return list(db.scalars(select(Attachment).where(
         Attachment.entity_type == "candidate", Attachment.entity_id.in_(candidate_ids), Attachment.slot.in_(RESORT_SLOTS),
-        Attachment.content_type == "application/pdf", Attachment.content_hash.is_not(None), Attachment.content_hash != "", ~marked)
+        Attachment.content_type == "application/pdf", Attachment.content_hash.is_not(None), Attachment.content_hash != "", Attachment.deleted_at.is_(None), ~marked)
         .order_by(Attachment.entity_id, Attachment.version.desc())))
 
 
@@ -124,7 +124,7 @@ def _current_files(db, candidate_ids: list[str]) -> dict[tuple[str, str], tuple[
     """(candidate, field) -> (newest version, when it was uploaded), for the identity fields."""
     newest: dict[tuple[str, str], tuple[int, datetime | None]] = {}
     for entity, slot, version, uploaded in db.execute(select(Attachment.entity_id, Attachment.slot, Attachment.version, Attachment.uploaded_at).where(
-            Attachment.entity_type == "candidate", Attachment.entity_id.in_(candidate_ids), Attachment.slot.in_(IDENTITY_SLOTS))):
+            Attachment.entity_type == "candidate", Attachment.entity_id.in_(candidate_ids), Attachment.slot.in_(IDENTITY_SLOTS), Attachment.deleted_at.is_(None))):
         if (entity, slot) not in newest or version > newest[(entity, slot)][0]:
             newest[(entity, slot)] = (version, uploaded)
     return newest
@@ -251,7 +251,7 @@ def next_candidates(db, limit: int = RESORT_SWEEP_CANDIDATES) -> tuple[list[str]
     ids = list(db.scalars(
         select(Attachment.entity_id).join(Candidate, Candidate.id == Attachment.entity_id).where(
             Attachment.entity_type == "candidate", Attachment.slot.in_(RESORT_SLOTS), Attachment.content_type == "application/pdf",
-            Attachment.content_hash.is_not(None), Attachment.content_hash != "", ~marked)
+            Attachment.content_hash.is_not(None), Attachment.content_hash != "", Attachment.deleted_at.is_(None), ~marked)
         .group_by(Attachment.entity_id).order_by(Attachment.entity_id).limit(limit + 1)))
     return ids[:limit], len(ids) > limit
 
@@ -337,7 +337,7 @@ def _file_pieces(db, owner, candidate: Candidate, source: Attachment, plan, job,
         # A resume pulled out of a passport / Aadhaar / Other file never replaces a resume the candidate already has: its pages go to
         # Other documents instead (they are still on the record, and the whole file is kept).
         held = db.scalars(select(Attachment).where(
-            Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id, Attachment.slot == "resume")
+            Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id, Attachment.slot == "resume", Attachment.deleted_at.is_(None))
             .order_by(Attachment.version.desc())).all()
         if held:
             for piece in plan.pieces:

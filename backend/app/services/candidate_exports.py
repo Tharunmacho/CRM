@@ -101,6 +101,7 @@ def load_inspection(db: Session, candidate_id: str, user: User, *, application_i
         (Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id),
         (Attachment.entity_type == "application") & Attachment.entity_id.in_(app_ids),
     )
+    scope = scope & Attachment.deleted_at.is_(None)  # a removed file is not in the record package (it is kept in storage)
     if not can_see_invoices(user):
         scope = scope & (Attachment.slot != "invoice")  # invoice PDFs are the admin's, also in the record package
     task_scope = [Task.candidate_id == candidate_id]
@@ -119,7 +120,7 @@ def load_inspection(db: Session, candidate_id: str, user: User, *, application_i
         lambda session: list(session.scalars(select(ApplicationStage).where(ApplicationStage.application_id.in_(app_ids))
                                             .order_by(ApplicationStage.application_id, ApplicationStage.stage, ApplicationStage.attempt)
                                             .limit(MAX_HISTORY_ROWS + 1))),
-        lambda session: list(session.scalars(select(ApplicationFeedback).where(ApplicationFeedback.candidate_id == candidate_id)
+        lambda session: list(session.scalars(select(ApplicationFeedback).where(ApplicationFeedback.candidate_id == candidate_id, ApplicationFeedback.deleted_at.is_(None))
                                             .order_by(ApplicationFeedback.created_at, ApplicationFeedback.id).limit(MAX_HISTORY_ROWS + 1))),
         lambda session: list(session.scalars(select(Task).where(*task_scope).order_by(Task.created_at, Task.id).limit(MAX_HISTORY_ROWS + 1))),
         lambda session: list(session.scalars(select(Remark).where(Remark.deleted_at.is_(None), Remark.task_id.in_(select(Task.id).where(*task_scope)))

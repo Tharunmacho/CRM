@@ -241,7 +241,7 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
             db.scalar(select(Attachment).where(Attachment.object_key == raw)) if isinstance(raw, str) else None
         )
         expected = f"stage_{app.current_stage}_{field}"
-        owned = attachment is not None and (
+        owned = attachment is not None and attachment.deleted_at is None and (   # a removed file is never chosen again
             (attachment.entity_type == "application" and attachment.entity_id == app.id
              and attachment.slot in {expected, field})
             or (app.current_stage == PASSPORT_STAGE and field == "copy" and attachment.entity_type == "candidate"
@@ -537,7 +537,7 @@ def complete_stage(application_id: str, body: CompleteIn,
             if app.current_stage == PASSPORT_STAGE:
                 passport = db.scalar(select(Attachment).where(
                     Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
-                    Attachment.slot == "passport",
+                    Attachment.slot == "passport", Attachment.deleted_at.is_(None),
                 ).order_by(Attachment.version.desc()).limit(1))
                 if passport:
                     app.draft = {"copy": {"id": passport.id, "name": passport.file_name,

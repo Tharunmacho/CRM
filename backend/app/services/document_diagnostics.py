@@ -193,7 +193,7 @@ def build(db: Session, user: User, candidate_id: str) -> dict:
         lambda session: session.get(Candidate, candidate_id),
         lambda session: session.execute(select(Attachment.id, Attachment.slot, Attachment.version, Attachment.file_name, Attachment.size_kb,
                                                Attachment.content_type, Attachment.uploaded_at, rejected_expression())
-                                        .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
+                                        .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.deleted_at.is_(None),
                                                Attachment.slot.in_([slot for slot in form.STORED_SLOTS if slot != form.INVOICE_SLOT]))
                                         .order_by(Attachment.slot, Attachment.uploaded_at)).all(),
         lambda session: list(session.scalars(form.split_sources_statement(candidate_id))),
