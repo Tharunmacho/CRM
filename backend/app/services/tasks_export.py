@@ -11,7 +11,8 @@ ones with a stage waiting, then the furthest along; a candidate in both lists ap
 * Advance: the client tracker's Advance cell (`advance_text.advance_cell` over the stage-9 record); blank when none.
 * Stage: "Stage 10 - Visa arrival + Google review", or "Initial call" before a stage starts.
 * Today shows times for calls and stage movement, or the latest note time on a notes-only day.
-* Remark: the newest remark on the row. Notes lists all daily updates for today, newest first.
+* Remark: the newest remark on the row (what the Remarks select holds; typed notes are never a remark).
+* Notes: ALL the candidate's notes (typed in the NOTES column), newest first, one per line: "11:40 Asha - text" for today, "18 Nov 09:15 Asha - text" for an earlier day.
 Text is written as inline strings, which Excel never evaluates, so a value such as `=cmd|...` stays text.
 """
 from __future__ import annotations
@@ -45,6 +46,15 @@ def _day(moment) -> str:
 
 def _clock(moment) -> str:
     return moment.astimezone(daily_work.agency_zone()).strftime("%H:%M") if isinstance(moment, datetime) else ""
+
+
+def note_line(note: dict, today: str) -> str:
+    """One note of the Notes cell: the time (with the date when it is not today), the author and the text."""
+    at = note.get("at")
+    if isinstance(at, str):   # a JSON row (the tests' listing) carries the time as text
+        at = datetime.fromisoformat(at.replace("Z", "+00:00"))
+    when = _clock(at) if _day(at) == today else (at.astimezone(daily_work.agency_zone()).strftime("%d %b %H:%M") if isinstance(at, datetime) else "")
+    return f"{when} {note.get('by') or ''} - {note.get('body') or ''}".strip()
 
 
 def merge_rows(daily: list[dict], follow: list[dict], today: str) -> list[dict]:
@@ -127,7 +137,7 @@ def table(db, daily: list[dict], follow: list[dict], today: str) -> list[list]:
     out = [list(COLUMNS)]
     for number, row in enumerate(rows, 1):
         remark = (row.get("remark") or {}).get("body") or ""
-        notes = "\n".join(f"{_clock(note['at'])} {note['by']} - {note['body']}" for note in row.get("todayNotes", []))
+        notes = "\n".join(note_line(note, today) for note in sorted(row.get("notes") or row.get("todayNotes") or [], key=lambda n: n["at"], reverse=True))
         out.append([cell(v) for v in (
             number, doc_text(row.get("commencementDate")), owners.get(row.get("ownerId")) or "", row.get("position") or "",
             row.get("client") or "", row.get("country") or "", row.get("candidate") or "", row.get("candidateCareId") or "",

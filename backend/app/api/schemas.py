@@ -267,6 +267,7 @@ class RemarkOut(Wire):
     body: str
     author_id: str
     created_at: datetime
+    kind: str = "remark"
 
 
 class TodoOut(Wire):

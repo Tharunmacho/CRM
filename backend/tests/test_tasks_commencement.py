@@ -419,16 +419,18 @@ def test_notes_keep_every_update_today_across_stage_tasks(desk, candidate, endpo
                     application_id=app_id, stage=1, owner_id="asha", completed_at=TUESDAY))
         db.flush()
         for i, at in enumerate([start - timedelta(seconds=1), start, TUESDAY, TUESDAY, end]):
-            db.add(Remark(id=f"note-{i}", task_id="earlier", body=f"Update {i}", author_id="asha", created_at=at))
+            db.add(Remark(id=f"note-{i}", task_id="earlier", body=f"Update {i}", author_id="asha", created_at=at, kind="note"))
         db.commit()
     items = get(desk, "asha", f"/api/{endpoint}").json()["items"]
     row = next(item for item in items if item["candidateId"] == candidate)
     assert [n["body"] for n in row["todayNotes"]] == ["Update 2", "Update 3", "Update 1"]
-    assert all(n["by"] == "Asha" and n["id"] and n["at"] for n in row["todayNotes"])
-    assert all(not item["todayNotes"] for item in items if item["candidateId"] != candidate)
+    assert [n["body"] for n in row["notes"]] == ["Update 4", "Update 2", "Update 3", "Update 1", "Update 0"]   # NOTES: all days, newest first
+    assert all(n["by"] == "Asha" and n["id"] and n["at"] for n in row["notes"])
+    assert all(not item["todayNotes"] and not item["notes"] for item in items if item["candidateId"] != candidate)
     exported = sheet(get(desk, "asha", "/api/daily-work/export"))[1]
     note_cell = next(r[-1] for r in exported[1:] if r[7] == row["candidateCareId"])
-    assert note_cell.splitlines() == ["08:30 Asha - Update 2", "08:30 Asha - Update 3", "00:00 Asha - Update 1"]
+    assert note_cell.splitlines() == ["04 Nov 00:00 Asha - Update 4", "08:30 Asha - Update 2", "08:30 Asha - Update 3", "00:00 Asha - Update 1",
+                                      "02 Nov 23:59 Asha - Update 0"]   # all of them, newest first, the date shown for another day
 
 
 def test_the_excel_follows_the_scoping_of_the_list(desk):

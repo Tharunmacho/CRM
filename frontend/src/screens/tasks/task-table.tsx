@@ -1,11 +1,12 @@
-import { ArrowRight, Globe, Trash2, UserRound } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { ArrowRight, Globe, SendHorizontal, Trash2, UserRound } from 'lucide-react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { countryCode } from '@/shared/lib/country-flag'
 import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
+import { useAutoGrow } from '@/shared/ui/use-auto-grow'
 import { RecordIdentity } from '@/shared/ui/workspace'
-import { agencyLabel, clockTime, countryCell, isClosed, nothingYet, rowAction, showsNotesColumn, taskColumnsFor, todayChips, type DailyNote, type TaskRow } from '@/features/daily-work/daily-work-model'
+import { agencyLabel, clockTime, countryCell, isClosed, nothingYet, noteWhen, notesNewestFirst, PENDING_NOTE, rowAction, sendNote, taskColumnsFor, todayChips, todayPlace, type DailyNote, type TaskRow } from '@/features/daily-work/daily-work-model'
 import { DELETE_NOTE_HINT, DELETE_NOTE_LABEL, DELETE_NOTE_TITLE } from '@/features/daily-work/note-delete-model'
 import { OwnerTag } from './task-identity'
 import {
@@ -15,12 +16,16 @@ import {
 /**
  * One list for every recruiter's candidates, with what happened to each of them today. The columns and their widths are
  * TASK_LIST_COLUMNS in the daily-work model (S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY, REMARKS, NOTES, actions): the widths add
- * up to 1108px for a supervisor (1017px for a recruiter) and are used as percentages, so the table always fills its panel (1111px at a 1440px
+ * up to 1108px for a supervisor (1021px for a recruiter) without TODAY and are used as percentages, so the table always fills its panel (1111px at a 1440px
  * window with the sidebar open) and never scrolls sideways; under 1080px of panel width the list is a stack of cards instead. Headers and cells are
  * centred; text wraps (the full text is the tooltip) instead of being cut with an ellipsis. The rows arrive sorted by DOC (taskRows). A candidate
  * whose placement ended (Declined, Rejected, Travelled) shows its outcome in STAGE, a dash in TODAY and REMARKS, a read-only DOC and only View.
- * NOTES (today's notes of the candidate, newest first) is a column only on a panel wide enough for it (`showsNotesColumn`); on a narrower table
- * its cells are hidden by CSS and the notes show as a small second line under the remark, and in the cards as a row of their own.
+ * TODAY is a column of its own only when the panel holds the whole plan (`todayPlace`); on a narrower table its chip sits in the STAGE cell, under the
+ * stage chip and its dashes, and a phone card has a TODAY row.
+ * NOTES is a column of its own at every width and REMARKS holds only the select (a remark and a note are different things: the remark is the candidate's
+ * status line, notes are free text kept as a list): the NOTES cell has an always-visible input at the top (Enter saves, Shift+Enter is a new line, Escape clears;
+ * only for people who may work the candidate) and under it ALL the candidate's notes, newest on top, each with its time ("11:40", or "18 Nov 09:15" on an earlier
+ * day), its author and its text; the list is at most 168px tall and scrolls inside the cell. In the cards NOTES is a row of its own.
  * Every note has a small "Delete note" button for the people who may delete it (`canDeleteNote`: the note's author, the candidate's recruiter, Admin and
  * MD; the server enforces the same rule); it asks first in a small dialog, then `onDeleteNote` hides the note at once (the screen restores it and says so
  * when the server refuses). The Remarks dropdown's first entry, "Select remark", empties the cell through `onClearRemark`.
@@ -39,6 +44,10 @@ export interface TaskTableProps {
   onRemark: (row: TaskRow, text: string) => Promise<void>
   /** "Select remark": the candidate's remark cell reads empty again (the notes and the history stay). */
   onClearRemark?: (row: TaskRow) => Promise<void>
+  /** A note typed in the NOTES cell (kind "note": never the remark). Rejects with the server's message. Without it no cell has an input. */
+  onAddNote?: (row: TaskRow, text: string) => Promise<void>
+  /** The signed-in person's name, shown on a note until the server has answered. */
+  authorName?: string
   /** Whether this person may delete this note; without it no note has a delete button. */
   canDeleteNote?: (row: TaskRow, note: DailyNote) => boolean
   /** Delete the note: the screen hides it at once and reports a failure itself. */
@@ -75,17 +84,95 @@ function NoteDeleteButton({ note, zone, onAsk }: { note: DailyNote; zone?: strin
   )
 }
 
-export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, onProfile, onSaveDoc, onRemark, onClearRemark, canDeleteNote, onDeleteNote, labelledBy, busy }: TaskTableProps) {
+interface NotesCellProps {
+  row: TaskRow; zone?: string; canAdd: boolean; authorName?: string
+  onAdd?: (row: TaskRow, text: string) => Promise<void>
+  mayDelete: (row: TaskRow, note: DailyNote) => boolean
+  onAsk: (row: TaskRow, note: DailyNote) => () => void
+}
+
+/** The NOTES cell: the input (people who may work the candidate), then every note newest first in a list that scrolls inside the cell. */
+function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: NotesCellProps) {
+  const [text, setText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [pending, setPending] = useState<DailyNote[]>([])
+  const box = useRef<HTMLTextAreaElement>(null)
+  const typing = canAdd && !!onAdd
+  useAutoGrow(box, text, { minRows: 1, maxRows: 3, enabled: typing })
+  const notes = [...pending, ...notesNewestFirst(row.notes ?? row.todayNotes)]
+  const submit = async () => {
+    if (!onAdd || saving) return
+    const typed = text
+    if (!typed.trim()) return
+    setSaving(true); setError(''); setText('')
+    const result = await sendNote(typed, (body) => onAdd(row, body), {
+      pending: (note) => setPending((list) => [note, ...list]),
+      settled: (note) => setPending((list) => list.filter((item) => item.id !== note.id)),
+    }, authorName)
+    if (result.error) { setError(result.error); setText(result.body) }
+    setSaving(false)
+    if (result.error) window.setTimeout(() => box.current?.focus(), 0)
+  }
+  const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit() }
+    else if (event.key === 'Escape' && text) { event.preventDefault(); event.stopPropagation(); setText(''); setError('') }
+  }
+  return (
+    <div className="tw-notes-cell">
+      {typing && (
+        <div className="tw-note-add">
+          <textarea ref={box} className="tw-note-input" rows={1} value={text} placeholder="Add a note…" maxLength={10000} disabled={saving}
+            aria-label={`Add a note for ${row.candidate}`} aria-invalid={error ? true : undefined} onChange={(event) => { setText(event.target.value); if (error) setError('') }} onKeyDown={onKey} />
+          <button type="button" className="tw-note-send" aria-label={`Save note for ${row.candidate}`} title="Save note (Enter)" disabled={saving || !text.trim()} onClick={() => void submit()}>
+            <SendHorizontal size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+      {error && <p className="tw-note-error" role="alert">{error}</p>}
+      {notes.length > 0 ? (
+        <ul className="tw-note-list" aria-label={`Notes of ${row.candidate}, newest first`} tabIndex={notes.length > 2 ? 0 : undefined}>
+          {notes.map((note) => (
+            <li key={note.id} className={cn(note.id.startsWith(PENDING_NOTE) && 'is-pending')}>
+              <div className="tw-note-head">
+                <span className="tw-note-when"><time dateTime={note.at}>{noteWhen(note.at, zone)}</time><small>{note.by}</small></span>
+                {!note.id.startsWith(PENDING_NOTE) && mayDelete(row, note) && <NoteDeleteButton note={note} zone={zone} onAsk={onAsk(row, note)} />}
+              </div>
+              <p className="tw-note-body">{note.body}</p>
+            </li>
+          ))}
+        </ul>
+      ) : !typing && <span className="dw-none" title="No notes yet">&mdash;</span>}
+    </div>
+  )
+}
+
+/** The TODAY chips of a candidate: what was done today (called, stage moved, a note), or "Nothing yet". */
+function TodayChips({ row, zone, inStage }: { row: TaskRow; zone?: string; inStage?: boolean }) {
+  const chips = todayChips(row, zone)
+  const noteTime = notesNewestFirst(row.todayNotes)[0]?.at
+  return (
+    <span className={cn('tw-today', inStage && 'is-in-stage')}>
+      {chips.map((chip) => <span key={chip.key} className="tw-chip" title={chip.text}>{chip.key === 'moved' ? chip.text.replace(/^Stage moved/, 'Moved') : chip.text}</span>)}
+      {nothingYet(row.today) && <span className="tw-chip is-none" title="Nothing was done for this candidate today">Nothing yet</span>}
+      {row.today.remarked && chips.length === 0 && (noteTime
+        ? <span className="tw-chip" title="Latest note today">Note {clockTime(noteTime, zone)}</span>
+        : <span className="tw-chip" title="Remark set today">Remark{row.remark?.at && ` ${clockTime(row.remark.at, zone)}`}</span>)}
+    </span>
+  )
+}
+
+export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, onProfile, onSaveDoc, onRemark, onClearRemark, onAddNote, authorName, canDeleteNote, onDeleteNote, labelledBy, busy }: TaskTableProps) {
   const [measure, panelWidth] = useTableWidth()
   const [asking, setAsking] = useState<{ row: TaskRow; note: DailyNote } | null>(null)
   const mayDelete = (row: TaskRow, note: DailyNote) => !!onDeleteNote && !!canDeleteNote?.(row, note)
   const ask = (row: TaskRow, note: DailyNote) => () => setAsking({ row, note })
-  const wide = showsNotesColumn(supervisor, panelWidth)
-  const columns = taskColumnsFor(supervisor, wide)
+  const place = todayPlace(supervisor, panelWidth)
+  const columns = taskColumnsFor(supervisor, place !== 'stage')
   const layout = columnLayout(columns)
   return (
     <ScrollEdges label="Candidates, scroll sideways for more columns" labelledBy={labelledBy} busy={busy}>
-      <table ref={measure} className={cn('dw-table dw-main tw-table', wide && 'has-notes')} aria-label="Candidates">
+      <table ref={measure} className="dw-table dw-main tw-table" aria-label="Candidates">
         <colgroup>{columns.map((c) => <col key={c.key} style={{ width: layout.share(c) }} />)}</colgroup>
         <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn(c.key === 'actions' && 'is-actions')}>{c.quiet ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
         <tbody>
@@ -94,10 +181,7 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
             const action = rowAction(row)
             const closed = isClosed(row)
             const noCountry = countryCell(row, countryCode).names.length === 0
-            const { called, moved, remarked } = row.today
-            const chips = todayChips(row, zone)
-            const notes = row.todayNotes ?? []
-            const noteTime = row.todayNotes?.[0]?.at ?? row.remark?.at
+            const { called, moved } = row.today
             const work = canWork(row) && !closed
             return (
               <tr key={row.candidateId} className={cn('dw-row', closed && 'is-closed')}>
@@ -108,37 +192,17 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
                 <td data-label="CANDIDATE NAME"><RecordIdentity name={row.candidate} /></td>
                 {supervisor && <td data-label="Recruiter">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
                 <td data-label="AGENCY" className={cn(!agencyLabel(row) && 'is-empty')}><AgencyCell item={row} /></td>
-                <td data-label="STAGE"><StageCell item={row} zone={zone} /></td>
-                <td data-label="TODAY" className={cn(closed && 'is-empty')}>
-                  {closed ? <span className="dw-none" title="Nothing is worked on a candidate whose placement ended">—</span> : (
-                    <span className="tw-today">
-                      {chips.map((chip) => <span key={chip.key} className="tw-chip" title={chip.text}>{chip.key === 'moved' ? chip.text.replace(/^Stage moved/, 'Moved') : chip.text}</span>)}
-                      {nothingYet(row.today) && <span className="tw-chip is-none" title="Nothing was done for this candidate today">Nothing yet</span>}
-                      {remarked && chips.length === 0 && <span className="tw-chip" title="Latest note today">Note{noteTime && ` ${clockTime(noteTime, zone)}`}</span>}
-                    </span>
-                  )}
-                </td>
+                <td data-label="STAGE"><StageCell item={row} zone={zone} />{place === 'stage' && !closed && <TodayChips row={row} zone={zone} inStage />}</td>
+                {place !== 'stage' && (
+                  <td data-label="TODAY" className={cn(closed && 'is-empty')}>
+                    {closed ? <span className="dw-none" title="Nothing is worked on a candidate whose placement ended">—</span> : <TodayChips row={row} zone={zone} />}
+                  </td>
+                )}
                 <td data-label="REMARKS" className={cn((closed || (!row.remark && !work)) && 'is-empty')}>
                   {closed ? <span className="dw-none" title="Nothing is worked on a candidate whose placement ended">—</span> : <RemarkCell item={row} canWork={work} onSave={(text) => onRemark(row, text)} onClear={onClearRemark && row.taskId ? () => onClearRemark(row) : undefined} />}
-                  {!closed && notes.length > 0 && (
-                    <span className="tw-remark-notes" title={notes.map((note) => noteLine(note, zone)).join('\n')}>
-                      <span className="tw-remark-note-text"><time dateTime={notes[0].at}>{clockTime(notes[0].at, zone)}</time> {notes[0].body}{notes.length > 1 && ` (+${notes.length - 1} more)`}</span>
-                      {mayDelete(row, notes[0]) && <NoteDeleteButton note={notes[0]} zone={zone} onAsk={ask(row, notes[0])} />}
-                    </span>
-                  )}
                 </td>
-                <td data-label="NOTES" className={cn(!notes.length && 'is-empty')}>
-                  {notes.length ? (
-                    <ul className="tw-notes" aria-label="Today's notes">
-                      {notes.map((note) => (
-                        <li key={note.id}>
-                          <small><time dateTime={note.at}>{clockTime(note.at, zone)}</time> &middot; {note.by}</small>
-                          <span className="tw-note-body">{note.body}</span>
-                          {mayDelete(row, note) && <NoteDeleteButton note={note} zone={zone} onAsk={ask(row, note)} />}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : <span className="dw-none" title="No notes today">&mdash;</span>}
+                <td data-label="NOTES" className={cn(!work && !(row.notes ?? row.todayNotes)?.length && 'is-empty')}>
+                  <NotesCell row={row} zone={zone} canAdd={work && !!row.taskId} authorName={authorName} onAdd={onAddNote} mayDelete={mayDelete} onAsk={ask} />
                 </td>
                 <td data-label="Actions" className="is-actions">
                   <div className="dw-actions">

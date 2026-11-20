@@ -727,9 +727,10 @@ class Remark(Base, PkMixin):
     database, and only readers of the candidate's history show a cleared one."""
 
     __tablename__ = "workflow_task_remarks"
-    __table_args__ = {
-        "comment": "Dated staff updates attached to recruitment workflow tasks."
-    }
+    __table_args__ = (
+        CheckConstraint("kind IN ('remark', 'note')", name="ck_workflow_task_remarks_kind"),
+        {"comment": "Dated staff updates attached to recruitment workflow tasks."},
+    )
 
     task_id: Mapped[str] = mapped_column(
         ForeignKey("workflow_tasks.id", ondelete="CASCADE"), nullable=False, index=True
@@ -745,6 +746,9 @@ class Remark(Base, PkMixin):
         ForeignKey("auth_users.id", ondelete="SET NULL"), comment="Who deleted this note.")
     cleared_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), comment="Set when the Tasks page's Select remark cleared the candidate's remark cell: the note stays in the history and the day's notes, but is no longer the shown remark.")
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="remark", default="remark",
+        comment="remark: written by the Remarks select (the candidate's current remark); note: typed in the NOTES column (never a remark). Existing rows are remarks.")
 
 
 class TaskEvent(Base, PkMixin):

@@ -243,47 +243,52 @@ def fetch_rows(db, owner_ids, *, now: datetime | None = None, tz=None) -> list:
         .limit(MAX_ROWS)).all()
 
 
+REMARK, NOTE = "remark", "note"
+NOTE_CAP = 100   # notes of one candidate in one list
+
+
 def _remark_query(*where):
-    """Remarks (newest first) as (body, author name, time, task id, remark id, candidate id, application id, cleared at, author id) rows. A deleted note is
-    never listed. `cleared at` is set once the Remarks cell was cleared ("Select remark"): such a note is still one of the day's notes but is no
-    longer the shown remark. The author's name rides along in the same statement (no separate read of the whole user table)."""
-    return (select(Remark.body, User.name, Remark.created_at, Remark.task_id, Remark.id, Task.candidate_id, Task.application_id, Remark.cleared_at, Remark.author_id)
+    """The log (newest first) as (body, author name, time, task id, remark id, candidate id, application id, cleared at, author id, kind) rows: the
+    Remarks select's remarks AND the notes typed in the NOTES column (`_remark_summary` reads the first, `_candidate_notes` the others, so one
+    statement serves both). A deleted entry is never listed. `cleared at` is set once the Remarks cell was cleared ("Select remark"): such a
+    remark is no longer the shown one. The author's name rides along in the same statement (no separate read of the whole user table)."""
+    return (select(Remark.body, User.name, Remark.created_at, Remark.task_id, Remark.id, Task.candidate_id, Task.application_id, Remark.cleared_at, Remark.author_id, Remark.kind)
             .select_from(Remark).join(Task, Task.id == Remark.task_id)
             .outerjoin(User, User.id == Remark.author_id).where(Remark.deleted_at.is_(None), *where).order_by(Remark.created_at.desc(), Remark.id))
 
 
-def _written_today(now: datetime, tz=None):
-    """SQL condition: the remark was written on the agency day of `now`."""
-    start, end = day_bounds(agency_today(now, tz), tz)
-    return and_(Remark.created_at >= start, Remark.created_at < end)
-
-
 def _remark_summary(remark_rows, *, by_application: bool = False) -> dict[str, dict]:
     """{task id (or application id): newest remark, its author's name and how many there are} from `_remark_query` rows, newest first.
-    A remark the cell was cleared of ("Select remark") is not the shown remark: a row whose remarks are all cleared has none."""
+    Only remarks count (a typed note is never the remark). A remark the cell was cleared of ("Select remark") is not the shown remark: a row
+    whose remarks are all cleared has none."""
     result: dict[str, dict] = {}
-    for body, name, at, task_id, _note_id, _candidate_id, application_id, cleared_at, _author_id in remark_rows:
+    for body, name, at, task_id, _note_id, _candidate_id, application_id, cleared_at, _author_id, kind in remark_rows:
         key = application_id if by_application else task_id
-        if key is None or cleared_at is not None:
+        if key is None or cleared_at is not None or kind != REMARK:
             continue
         entry = result.setdefault(key, {"body": body, "at": at, "by": name or "Unknown", "count": 0})
         entry["count"] += 1
     return result
 
 
-def _daily_notes(remark_rows, *, now: datetime, tz=None) -> dict[str, list]:
-    """{candidate id: [(application id, note)]}: every note written on this agency day (finished tasks included), newest first."""
+def _candidate_notes(remark_rows) -> dict[str, list]:
+    """{candidate id: [(application id, note)]}: every NOTE (kind 'note', typed in the NOTES column; all days, finished tasks included), newest first."""
+    found: dict[str, list] = defaultdict(list)
+    for body, name, at, _task_id, note_id, candidate_id, application_id, _cleared_at, author_id, kind in remark_rows:
+        if kind == NOTE:
+            found[candidate_id].append((application_id, {"id": note_id, "body": body, "at": at, "by": name or "Unknown", "byId": author_id}))
+    return found
+
+
+def _row_notes(found, candidate_id, app_id):
+    """The candidate's initial-call notes and the notes on the placement shown in this row, newest first, at most NOTE_CAP."""
+    return [note for placement, note in found.get(candidate_id, ()) if placement is None or placement == app_id][:NOTE_CAP]
+
+
+def _note_fields(notes: list[dict], *, now: datetime, tz=None) -> dict:
+    """`notes` (all of the row's, newest first) and `todayNotes` (those written on the agency day of `now`: the TODAY chip and the Excel's Today cell)."""
     start, end = day_bounds(agency_today(now, tz), tz)
-    daily: dict[str, list] = defaultdict(list)
-    for body, name, at, _task_id, note_id, candidate_id, application_id, _cleared_at, author_id in remark_rows:
-        if start <= at < end:
-            daily[candidate_id].append((application_id, {"id": note_id, "body": body, "at": at, "by": name or "Unknown", "byId": author_id}))
-    return daily
-
-
-def _row_notes(daily, candidate_id, app_id):
-    """The candidate's initial-call notes and the notes on the placement shown in this row."""
-    return [note for placement, note in daily.get(candidate_id, ()) if placement is None or placement == app_id]
+    return {"notes": notes, "todayNotes": [note for note in notes if start <= note["at"] < end]}
 
 
 def _first_text(values) -> str | None:
@@ -482,9 +487,9 @@ def placement_reads(candidate_ids, *, now: datetime, tz=None) -> tuple:
     # Advance and Google review of the candidates' active placements.
     fact_query = stage_facts_query(Application.id == ApplicationStage.application_id, Application.candidate_id.in_(candidate_ids),
                                    Application.status == ApplicationStatus.active)
-    # The remarks of every open task of these candidates (each row then picks its own task's) plus every note written today, finished
+    # The remarks of every open task of these candidates (each row then picks its own task's) plus every note of theirs, finished
     # tasks included: no wait for the task ids.
-    remark_query = _remark_query(Task.candidate_id.in_(candidate_ids), or_(and_(*open_tasks[1:]), _written_today(now, tz)))
+    remark_query = _remark_query(Task.candidate_id.in_(candidate_ids), or_(and_(*open_tasks[1:]), Remark.kind == NOTE))
     return (lambda s: s.execute(app_query).all(), lambda s: s.execute(task_query).all(), lambda s: s.execute(fact_query).all(),
             lambda s: s.execute(remark_query).all())
 
@@ -512,7 +517,7 @@ def assemble_rows(rows, placed, task_rows, fact_rows, remark_rows, *, now: datet
         chosen[cand.id] = placement
         remark_tasks[cand.id] = (stage_tasks.get(placement[0].id) if placement else None) or call_tasks.get(cand.id)
     remarks = _remark_summary(remark_rows)
-    daily_notes = _daily_notes(remark_rows, now=now, tz=tz)
+    found_notes = _candidate_notes(remark_rows)
     out = []
     for cand, waiting, finished, agency, moved in rows:
         placement = chosen[cand.id]
@@ -533,7 +538,7 @@ def assemble_rows(rows, placed, task_rows, fact_rows, remark_rows, *, now: datet
             "orderRef": order.ref if order else None, **payment_fields(app, facts),
             "referral": {"source": cand.source.value, "label": SOURCE_LABELS.get(cand.source.value, "Other"),
                          "detail": cand.source_detail if cand.source == Source.referral else None},
-            "remark": remark, "todayNotes": _row_notes(daily_notes, cand.id, app.id if app else None),
+            "remark": remark, **_note_fields(_row_notes(found_notes, cand.id, app.id if app else None), now=now, tz=tz),
             "outcome": current_outcome(),
         })
     return out
@@ -676,7 +681,7 @@ def outcome_reads(app_ids) -> tuple:
     who made the last change to each placement (the closure), all in the same round."""
     remark_query = (select(Task.application_id, Remark.body, User.name, Remark.created_at).select_from(Remark)
                     .join(Task, Task.id == Remark.task_id).outerjoin(User, User.id == Remark.author_id)
-                    .where(Task.application_id.in_(app_ids), Remark.deleted_at.is_(None), Remark.cleared_at.is_(None))
+                    .where(Task.application_id.in_(app_ids), Remark.deleted_at.is_(None), Remark.cleared_at.is_(None), Remark.kind == REMARK)
                     .order_by(Remark.created_at.desc(), Remark.id))
     closed_by = (select(AuditEntry.entity_id, User.name).select_from(AuditEntry).outerjoin(User, User.id == AuditEntry.actor_id)
                  .where(AuditEntry.entity_type == "application", AuditEntry.entity_id.in_(app_ids))
@@ -752,7 +757,7 @@ def follow_up_reads(app_ids, candidate_ids, *, now: datetime, tz=None) -> tuple:
     """The three lookups behind the rows of Follow-up, for these placements and their candidates (ids, or selects of ids): the remarks
     written on any of the placement's tasks (the newest shows, and every note written on this agency day, whatever the candidate's task),
     the open stage task a new remark goes on, and the advance / review facts."""
-    remark_query = _remark_query(or_(Task.application_id.in_(app_ids), and_(Task.candidate_id.in_(candidate_ids), _written_today(now, tz))))
+    remark_query = _remark_query(or_(Task.application_id.in_(app_ids), and_(Task.candidate_id.in_(candidate_ids), Remark.kind == NOTE)))
     task_query = (select(Task.application_id, Task.id).where(
         Task.application_id.in_(app_ids), Task.kind.in_([TaskKind.stage, TaskKind.remedical]),
         Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.created_at, Task.id))
@@ -764,7 +769,7 @@ def assemble_follow_up(rows, remark_rows, task_rows, fact_rows, *, now: datetime
     """The Follow-up screen's rows from `fetch_follow_up` rows and the results of `follow_up_reads`."""
     now = now or datetime.now(timezone.utc)
     latest = _remark_summary(remark_rows, by_application=True)
-    daily_notes = _daily_notes(remark_rows, now=now, tz=tz)
+    found_notes = _candidate_notes(remark_rows)
     open_task: dict[str, str] = {}
     for application_id, task_id in task_rows:
         open_task.setdefault(application_id, task_id)
@@ -778,7 +783,7 @@ def assemble_follow_up(rows, remark_rows, task_rows, fact_rows, *, now: datetime
             "calledAt": cand.call_recorded_at if cand.call_called and cand.call_interested in ("yes", "no") else None,
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "agency": agency or None, "orderRef": order.ref,
-            **payment_fields(app, facts), "remark": latest.get(app.id), "todayNotes": _row_notes(daily_notes, cand.id, app.id),
+            **payment_fields(app, facts), "remark": latest.get(app.id), **_note_fields(_row_notes(found_notes, cand.id, app.id), now=now, tz=tz),
             "outcome": current_outcome(),
         })
     return out

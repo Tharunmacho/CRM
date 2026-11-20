@@ -1062,6 +1062,8 @@ def delete_client(client_id: str, db: Session = Depends(get_db), user: User = De
 class RemarkIn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     body: str = Field(min_length=1, max_length=10000)
+    # 'remark' (default, what older clients send) is the Remarks select's value; 'note' is typed in the NOTES column and is never the current remark.
+    kind: Literal["remark", "note"] = "remark"
 
 
 @router.post("/tasks/{task_id}/remarks", status_code=status.HTTP_201_CREATED)
@@ -1071,13 +1073,13 @@ def add_remark(task_id: str, body: RemarkIn, db: Session = Depends(get_db), user
     row = db.execute(text(
         "WITH t AS (SELECT id, owner_id, title, completed_at, cancelled_at FROM workflow_tasks WHERE id = :task FOR UPDATE), "
         "ok AS (SELECT id, title FROM t WHERE completed_at IS NULL AND cancelled_at IS NULL AND (CAST(:anyone AS boolean) OR owner_id = :me)), "
-        "r AS (INSERT INTO workflow_task_remarks (id, task_id, body, author_id) SELECT :remark_id, id, :body, :me FROM ok "
-        "RETURNING id, task_id, body, author_id, created_at), "
+        "r AS (INSERT INTO workflow_task_remarks (id, task_id, body, author_id, kind) SELECT :remark_id, id, :body, :me, :kind FROM ok "
+        "RETURNING id, task_id, body, author_id, created_at, kind), "
         "a AS (INSERT INTO system_audit_log (id, actor_id, action, target, entity_type, entity_id) "
-        "SELECT :audit_id, :me, 'Added task remark', title, 'task', id FROM ok) "
-        "SELECT t.owner_id, t.completed_at, t.cancelled_at, r.id, r.task_id, r.body, r.author_id, r.created_at FROM t LEFT JOIN r ON true"),
+        "SELECT :audit_id, :me, :action, title, 'task', id FROM ok) "
+        "SELECT t.owner_id, t.completed_at, t.cancelled_at, r.id, r.task_id, r.body, r.author_id, r.created_at, r.kind FROM t LEFT JOIN r ON true"),
         {"task": task_id, "anyone": user.role != Role.staff, "me": user.id, "remark_id": str(uuid4()), "audit_id": str(uuid4()),
-         "body": body.body.strip()}).one_or_none()
+         "body": body.body.strip(), "kind": body.kind, "action": "Added task note" if body.kind == "note" else "Added task remark"}).one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
     if row.id is None:
@@ -1086,7 +1088,7 @@ def add_remark(task_id: str, body: RemarkIn, db: Session = Depends(get_db), user
         raise HTTPException(409, "This task is closed, so its notes can no longer be changed")
     db.commit()
     return RemarkOut(id=row.id, task_id=row.task_id, body=row.body, author_id=row.author_id,
-                     created_at=row.created_at).model_dump(by_alias=True, mode="json")
+                     created_at=row.created_at, kind=row.kind).model_dump(by_alias=True, mode="json")
 
 
 @router.delete("/remarks/{remark_id}")
@@ -1121,13 +1123,13 @@ def delete_remark(remark_id: str, db: Session = Depends(get_db), user: User = De
 def clear_task_remark(task_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     """"Select remark" in the Remarks dropdown: the candidate's Remarks cell reads empty again (and so does the Excel's Remarks column).
 
-    The notes are NOT deleted: every not-yet-cleared remark on the candidate's tasks gets `cleared_at`, so they stay in the history, the day's
+    Only remarks (kind 'remark') are cleared; typed notes (kind 'note') stay. Nothing is deleted: every not-yet-cleared remark on the candidate's tasks gets `cleared_at`, so they stay in the history, the day's
     notes and the profile, and a remark written afterwards shows as before. An audit entry "Cleared task remark" records who and how many.
     Same permission as adding a remark: the task's recruiter, an MD or an admin. ONE statement."""
     row = db.execute(text(
         "WITH t AS (SELECT id, owner_id, title, candidate_id FROM workflow_tasks WHERE id = :task), "
         "ok AS (SELECT id, title, candidate_id FROM t WHERE CAST(:anyone AS boolean) OR owner_id = :me), "
-        "u AS (UPDATE workflow_task_remarks SET cleared_at = now() WHERE deleted_at IS NULL AND cleared_at IS NULL AND task_id IN "
+        "u AS (UPDATE workflow_task_remarks SET cleared_at = now() WHERE deleted_at IS NULL AND cleared_at IS NULL AND kind = 'remark' AND task_id IN "
         "(SELECT x.id FROM workflow_tasks x JOIN ok ON x.id = ok.id OR (ok.candidate_id IS NOT NULL AND x.candidate_id = ok.candidate_id)) RETURNING id), "
         "a AS (INSERT INTO system_audit_log (id, actor_id, action, target, entity_type, entity_id, meta) "
         "SELECT :audit_id, :me, 'Cleared task remark', ok.title, 'task', ok.id, jsonb_build_object('remarks', (SELECT count(*) FROM u)) "

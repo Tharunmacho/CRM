@@ -1,8 +1,8 @@
 /*
  * Tasks list (the .tw-table inside the Tasks panel): COMPACT and FITTING. Tokens only, no new colours.
- * Columns: S NO, DOC, CLIENT (name, and the country under it in a smaller muted line), JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY, REMARKS, NOTES (only on a panel
- * wide enough, class has-notes set by the table), actions (widths: TASK_LIST_COLUMNS in the daily-work model). Without has-notes the NOTES cells are hidden and
- * the notes are a second line under the remark (.tw-remark-notes).
+ * Columns: S NO, DOC, CLIENT (name, and the country under it in a smaller muted line), JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY (a column only when the panel
+ * holds the whole plan, otherwise its chip sits in the STAGE cell: .tw-today.is-in-stage), REMARKS (the select only), NOTES (always a column: an input and ALL the
+ * notes, newest on top), actions (widths: TASK_LIST_COLUMNS in the daily-work model; 6px cell padding).
  * The measurable rules, all asserted by tests/tasks-doc-remarks.test.mjs and checked in the browser:
  *   - NO sideways scrolling: the table is table-layout fixed at width 100% of its frame, its columns are percentages of the panel, so it always fills the
  *     panel exactly. It is a table from 1080px of panel width (a 1440px window with the sidebar open gives 1111px; 1366px gives about 1037px); below
@@ -28,7 +28,7 @@
 .dw { --table-frame-width: 1px; --table-frame-radius: 6px; --table-line: var(--border-main); --table-line-strong: var(--border-control); --table-column-line: color-mix(in srgb, var(--border-main) 55%, var(--bg-card)); }
 
 @container dw (min-width: 1080px) {
-  :root .dw .tw-table.dw-table.dw-main { --tw-pad-l: 8px; --tw-pad-r: 8px; width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
+  :root .dw .tw-table.dw-table.dw-main { --tw-pad-l: 6px; --tw-pad-r: 6px; width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
 
   /* ---- header: 44px, one line, one left edge with the cells ---- */
   :root .dw .tw-table.dw-table.dw-main thead th { height: 44px; padding: 0 8px 0 var(--tw-pad-l); overflow: hidden; border-left: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1; text-align: center; text-transform: uppercase; text-wrap: nowrap; white-space: nowrap; overflow-wrap: normal; }
@@ -42,7 +42,7 @@
   :root .dw .tw-table.dw-table.dw-main .dw-row:hover > td.is-actions { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
 
   /* S NO: narrow, tabular numerals (every column is centred, header and cells share the centre) */
-  :root .dw .tw-table.dw-table.dw-main :is(th, td):first-child { padding-inline: 8px; text-align: center; }
+  :root .dw .tw-table.dw-table.dw-main :is(th, td):first-child { padding-inline: 6px; text-align: center; }
   :root .dw .tw-table.dw-table.dw-main td.is-num { font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-muted); }
 
   /* text columns: wrap onto a second line, and only after two lines an ellipsis (the full text is always the tooltip) */
@@ -80,9 +80,10 @@
   .dw .tw-table .dw-stage-bar { gap: 2px; }
   .dw .tw-table .dw-stage-bar i { height: 3px; }
 
-  /* TODAY: chips stacked and centred, at least 28px tall, each on ONE line with its whole text (the column is planned for it); only a column narrower than the text wraps it inside the cell, never clips it */
-  :root .dw .tw-table.dw-table.dw-main td[data-label='TODAY'] { padding-right: 6px; }
-  .dw .tw-table td[data-label='TODAY'] .tw-today { flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 4px; }
+  /* TODAY: chips stacked and centred, at least 28px tall, each on ONE line with its whole text (the column is planned for it); only a column narrower than the text wraps it inside the cell, never clips it.
+   * The same chips sit under the stage chip and its dashes in a table too narrow for the TODAY column. */
+  .dw .tw-table .tw-today { flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 4px; }
+  .dw .tw-table .tw-today.is-in-stage { margin-top: 6px; }
   .dw .tw-table .tw-chip { display: block; box-sizing: border-box; width: max-content; max-width: 100%; min-height: 28px; padding: 5px 8px; overflow: visible; border-radius: 14px; font-size: 12px; line-height: 16px; text-align: center; white-space: normal; overflow-wrap: anywhere; }
 
   /* the shared skin gives every select a 40px minimum with a very specific selector (:root:root ... input.ui-input:not(...), skin.css), so this
@@ -95,7 +96,7 @@
   .dw .tw-table .dw-stage-text b { font-weight: 700; }
 
   /* REMARKS: a 36px select filling its cell; the status never adds a line */
-  :root .dw .tw-table.dw-table.dw-main td[data-label='REMARKS'] { padding-right: 8px; }
+  :root .dw .tw-table.dw-table.dw-main td[data-label='REMARKS'] { padding-right: 6px; }
   .dw .tw-table .dw-remark { position: relative; gap: 0; width: 100%; }
   .dw .tw-table .dw-remark-last { font-size: 12.5px; line-height: 1.35; text-align: center; }
   /* "Others": the inline box is the select's twin (36px, same width) with a small check button inside its right edge */
@@ -121,14 +122,32 @@
   .dw .tw-table .dw-more-btn:focus-visible, .dw .tw-table .dw-actions .dw-act:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 }
 
-.tw-notes { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; list-style: none; text-align: center; }
-.tw-remark-notes { display: none; }
-.tw-notes li { white-space: pre-wrap; overflow-wrap: anywhere; }
-.tw-notes li + li { border-top: 1px solid var(--table-line); padding-top: 6px; }
-.tw-notes small { display: block; color: var(--text-muted); font-size: .9em; font-variant-numeric: tabular-nums; }
+/* NOTES: an always-visible input at the top (people who may work the candidate), then EVERY note newest first in a list of at most 168px that scrolls inside the cell.
+ * A note is its time ("11:40", "18 Nov 09:15"), its author (small), its text (wraps at spaces, never cut) and its trash. */
+.tw-notes-cell { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; text-align: left; }
+.tw-note-add { position: relative; min-width: 0; }
+.tw-note-input { box-sizing: border-box; display: block; width: 100%; min-width: 0; min-height: 32px; margin: 0; padding: 6px 28px 6px 8px; border: 1px solid var(--border-control); border-radius: 6px; background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 12px; line-height: 18px; resize: none; overflow-wrap: break-word; }
+.tw-note-input::placeholder { color: var(--text-muted); }
+.tw-note-input:focus { outline: 2px solid var(--primary); outline-offset: 0; border-color: var(--primary); }
+.tw-note-input:disabled { opacity: .6; cursor: progress; }
+.tw-note-input[aria-invalid='true'] { border-color: var(--error-ink); }
+.tw-note-send { position: absolute; right: 3px; bottom: 3px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--primary); color: var(--on-primary); cursor: pointer; }
+.tw-note-send:disabled { opacity: .35; cursor: not-allowed; }
+.tw-note-send:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.tw-note-error { margin: 0; font-size: 11.5px; line-height: 1.3; color: var(--error-ink); overflow-wrap: break-word; }
+.tw-note-list { display: grid; gap: 0; max-height: 168px; margin: 0; padding: 0 2px 0 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
+.tw-note-list:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.tw-note-list li { padding: 5px 0; }
+.tw-note-list li:first-child { padding-top: 0; }
+.tw-note-list li + li { border-top: 1px solid var(--table-line); }
+.tw-note-list li.is-pending { opacity: .6; }
+.tw-note-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 2px; min-height: 18px; }
+.tw-note-when { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 5px; min-width: 0; font-size: 11.5px; line-height: 1.3; }
+.tw-note-when time { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-main); }
+.tw-note-when small { min-width: 0; font-size: 10.5px; color: var(--text-muted); overflow-wrap: anywhere; }
+.tw-note-body { margin: 1px 0 0; font-size: 12px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: break-word; }
 /* A note's "Delete note" button: a small quiet trash that turns red on hover or focus; 44px to touch on phones. The note itself stays centred. */
-.tw-notes li { position: relative; }
-.tw-note-del { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-top: 2px; border-radius: 6px; color: var(--text-muted); cursor: pointer; transition: background-color .12s, color .12s; }
+.tw-note-del { display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; margin: -3px 0 0 0; border-radius: 6px; color: var(--text-muted); cursor: pointer; transition: background-color .12s, color .12s; }
 .tw-note-del:hover { background: var(--error-fill); color: var(--error-ink); }
 .tw-note-del:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .tw-note-quote { margin: 0; padding: 10px 12px; border: 1px solid var(--border-main); border-radius: 8px; background: var(--tint-1); }
@@ -136,18 +155,16 @@
 .tw-note-quote p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (pointer: coarse) { .tw-note-del { width: 44px; height: 44px; } }
 
-/* Table mode (1080px and wider): NOTES is a column only with has-notes; otherwise its cells are hidden and the notes show under the remark. */
-@container dw (min-width: 1080px) {
-  .dw .tw-table:not(.has-notes) td[data-label='NOTES'] { display: none; }
-  .dw .tw-table:not(.has-notes) .tw-remark-notes { display: flex; align-items: flex-start; justify-content: center; gap: 2px; margin-top: 4px; color: var(--text-muted); font-size: 11.5px; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
-  .dw .tw-table:not(.has-notes) .tw-remark-note-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; min-width: 0; overflow: hidden; }
-  .dw .tw-table:not(.has-notes) .tw-remark-notes .tw-note-del { flex: none; width: 20px; height: 20px; margin-top: -1px; }
-}
-
 /* ---- cards (the panel is under 1080px wide: phones, tablets and a 1280px window with the sidebar open): 14px text, 16px inputs (no iOS zoom), 44px targets ---- */
 @container dw (max-width: 1079px) {
   .dw .tw-table .dw-row { font-size: 14px; }
   .dw .tw-table td[data-label='NOTES'] { grid-column: 1 / -1; }
+  .dw .tw-table .tw-note-input { min-height: 44px; padding: 10px 44px 10px 12px; font-size: 16px; line-height: 22px; }
+  .dw .tw-table .tw-note-send { right: 4px; bottom: 4px; width: 36px; height: 36px; }
+  .dw .tw-table .tw-note-list { max-height: 240px; }
+  .dw .tw-table .tw-note-when { font-size: 13px; }
+  .dw .tw-table .tw-note-when small { font-size: 12.5px; }
+  .dw .tw-table .tw-note-body { font-size: 14px; line-height: 1.4; }
   .dw .tw-table .dw-row > td[data-label]::before { font-size: 13px; }
   .dw .tw-table .dw-row .record-name { font-size: 15px; }
   .dw .tw-table .dw-doc, .dw .tw-table .dw-cell-strong, .dw .tw-table .dw-remark-last { font-size: 14px; }

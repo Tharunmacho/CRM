@@ -64,12 +64,12 @@ test('the server note carries its author id (byId) so the button knows who may d
 
 /* ------------------------------------------------------------------ the screen */
 
-test('every note of the table, the fallback line and the phone card has a "Delete note" icon button that asks first in a dialog (never window.confirm)', async () => {
+test('every note of the NOTES list (table and phone card) has a "Delete note" icon button that asks first in a dialog (never window.confirm)', async () => {
   const table = await code('../src/screens/tasks/task-table.tsx')
   assert.match(table, /aria-label=\{DELETE_NOTE_LABEL\}/)
-  assert.equal((table.match(/<NoteDeleteButton /g) ?? []).length, 2, 'the NOTES list (table and card) and the second line under the remark')
+  assert.equal((table.match(/<NoteDeleteButton /g) ?? []).length, 1, 'one button per note of the NOTES list (the table and the phone card are the same cell)')
   assert.match(table, /mayDelete\(row, note\)/)
-  assert.match(table, /mayDelete\(row, notes\[0\]\)/)
+  assert.match(table, /note\.id\.startsWith\(PENDING_NOTE\)/, 'a note that is not saved yet has no delete button')
   assert.match(table, /<Dialog open=\{!!asking\}/)
   assert.match(table, /variant="danger"/)
   assert.doesNotMatch(table, /window\.confirm|confirm\(/)

@@ -24,11 +24,16 @@ def only_row(desk, user="asha"):
     return listing(desk, user)["items"][0]
 
 
-def put(desk, task_id, body, *, author="asha", minutes=0, key=None):
-    """A note written on the agency day (08:30 on Tuesday + minutes), straight into the table; its id is returned."""
+def row_remark(row):
+    return row["remark"]["body"], row["remark"]["count"]
+
+
+def put(desk, task_id, body, *, author="asha", minutes=0, key=None, kind="remark"):
+    """A remark (the Remarks select's) or, with kind="note", a note of the NOTES column, written on the agency day (08:30 on Tuesday + minutes),
+    straight into the table; its id is returned."""
     key = key or f"note-{body.lower().replace(' ', '-')}"
     with desk.sessions() as db:
-        db.add(Remark(id=key, task_id=task_id, body=body, author_id=author, created_at=TUESDAY + timedelta(minutes=minutes)))
+        db.add(Remark(id=key, task_id=task_id, body=body, author_id=author, created_at=TUESDAY + timedelta(minutes=minutes), kind=kind))
         db.commit()
     return key
 
@@ -103,21 +108,25 @@ def test_a_deleted_note_leaves_the_row_the_count_the_export_and_follow_up(desk):
     first = put(desk, task, "First call done")
     second = put(desk, task, "Second call: interested", minutes=30)
     row = only_row(desk)
-    assert row["remark"]["body"] == "Second call: interested" and row["remark"]["count"] == 2 and [n["body"] for n in row["todayNotes"]] == [
-        "Second call: interested", "First call done"]
-    assert [n["id"] for n in row["todayNotes"]] == [second, first]
-    assert {n["byId"] for n in row["todayNotes"]} == {"asha"}          # the screen decides from this who gets a "Delete note" button
+    n_first = put(desk, task, "Note one", minutes=1, kind="note")
+    n_second = put(desk, task, "Note two", minutes=31, kind="note")
+    assert row_remark(only_row(desk)) == ("Second call: interested", 2)
+    row = only_row(desk)
+    assert [n["body"] for n in row["notes"]] == ["Note two", "Note one"] and [n["id"] for n in row["todayNotes"]] == [n_second, n_first]
+    assert {n["byId"] for n in row["notes"]} == {"asha"}          # the screen decides from this who gets a "Delete note" button
 
     assert delete(desk, "asha", second).status_code == 200
     row = only_row(desk)
     assert row["remark"]["body"] == "First call done" and row["remark"]["count"] == 1
-    assert [n["id"] for n in row["todayNotes"]] == [first]
+    assert delete(desk, "asha", n_second).status_code == 200
+    assert [n["id"] for n in only_row(desk)["notes"]] == [n_first]
     xlsx = sheet_texts(desk.client.get("/api/daily-work/export").content)
-    assert "First call done" in " ".join(xlsx) and "Second call" not in " ".join(xlsx)
+    assert "First call done" in " ".join(xlsx) and "Second call" not in " ".join(xlsx) and "Note two" not in " ".join(xlsx)
 
     assert delete(desk, "asha", first).status_code == 200
+    assert delete(desk, "asha", n_first).status_code == 200
     row = only_row(desk)
-    assert row["remark"] is None and row["todayNotes"] == []
+    assert row["remark"] is None and row["todayNotes"] == [] and row["notes"] == []
     with desk.sessions() as db:
         sheet = tasks_export.table(db, listing(desk, "asha")["items"], [], TODAY)
     assert sheet[1][12] == "" and sheet[1][13] == ""        # Remark and Notes columns of the Excel
@@ -131,7 +140,7 @@ def test_a_deleted_note_leaves_the_row_the_count_the_export_and_follow_up(desk):
     assert follow(desk, "asha")["items"][0]["remark"]["body"] == "Interview booked"
     assert delete(desk, "asha", noted).status_code == 200
     gone = follow(desk, "asha")["items"][0]
-    assert gone["remark"] is None and gone["todayNotes"] == []
+    assert gone["remark"] is None and gone["todayNotes"] == [] and gone["notes"] == []
     assert gone["lastUpdateAt"] == followed["lastUpdateAt"]
 
 
@@ -199,20 +208,21 @@ def test_clearing_empties_the_cell_and_the_excel_remark_but_keeps_every_note_in_
     task = only_row(desk)["taskId"]
     older = put(desk, task, "Ringing")
     newer = put(desk, task, "Not interested now", minutes=10)
+    typed = put(desk, task, "Typed in the NOTES column", minutes=11, kind="note")
     assert only_row(desk)["remark"]["body"] == "Not interested now"
 
     response = clear(desk, "asha", task)
     assert response.status_code == 200 and response.json() == {"cleared": 2}
     row = only_row(desk)
     assert row["remark"] is None                                              # the cell reads "Select remark" again
-    assert [n["id"] for n in row["todayNotes"]] == [newer, older]             # the day's notes are untouched
+    assert [n["id"] for n in row["notes"]] == [typed]                         # a typed note is untouched by clearing the remark
     with desk.sessions() as db:
         sheet = tasks_export.table(db, listing(desk, "asha")["items"], [], TODAY)
         assert sheet[1][12] == ""                                              # the Excel's Remark column is empty
-        assert "Ringing" in sheet[1][13]                                       # ...and Notes still lists the day's notes
-        assert {r["id"] for r in desk_snapshot.read_snapshot(db, "asha")["remarks"]} == {older, newer}   # the profile history is intact
+        assert "Typed in the NOTES column" in sheet[1][13]                     # ...and Notes still lists the note
+        assert {r["id"] for r in desk_snapshot.read_snapshot(db, "asha")["remarks"]} == {older, newer, typed}   # the profile history is intact
         assert [r["remarks"] for r in client_tracker._read_rows(db, db.get(User, "manager"))] == [""]
-    assert stored(desk, older).cleared_at is not None and stored(desk, older).deleted_at is None
+    assert stored(desk, older).cleared_at is not None and stored(desk, older).deleted_at is None and stored(desk, typed).cleared_at is None
     (entry,) = audits(desk, "Cleared task remark")
     assert entry.actor_id == "asha" and entry.entity_id == task and entry.meta == {"remarks": 2}
 

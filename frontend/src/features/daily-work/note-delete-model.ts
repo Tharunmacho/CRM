@@ -22,9 +22,11 @@ export function canDeleteNote(note: NoteOwner, row: NoteRow, me: NoteViewer | nu
 }
 
 /** The row without these notes (the screen hides a deleted note at once, before the server answers and the list is read again). */
-export function withoutNotes<T extends { todayNotes?: { id: string }[] }>(row: T, hidden: ReadonlySet<string>): T {
-  if (!hidden.size || !row.todayNotes?.some((note) => hidden.has(note.id))) return row
-  return { ...row, todayNotes: row.todayNotes.filter((note) => !hidden.has(note.id)) }
+export function withoutNotes<T extends { notes?: { id: string }[]; todayNotes?: { id: string }[] }>(row: T, hidden: ReadonlySet<string>): T {
+  const listed = (notes?: { id: string }[]) => !!notes?.some((note) => hidden.has(note.id))
+  if (!hidden.size || !(listed(row.notes) || listed(row.todayNotes))) return row
+  const kept = (notes?: { id: string }[]) => notes?.filter((note) => !hidden.has(note.id))
+  return { ...row, ...(row.notes ? { notes: kept(row.notes) } : {}), ...(row.todayNotes ? { todayNotes: kept(row.todayNotes) } : {}) }
 }
 
 /** The text of a failed delete: the server's own words when it said something, else the calm default. */

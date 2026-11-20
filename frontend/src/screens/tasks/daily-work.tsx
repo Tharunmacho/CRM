@@ -59,7 +59,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   // A deleted note leaves the screen at once (its id waits here until the server answers and the list is read again); a refusal brings it back.
   const [hiddenNotes, setHiddenNotes] = useState<ReadonlySet<string>>(() => new Set())
   const [noteError, setNoteError] = useState('')
-  const hide = <T extends { todayNotes?: { id: string }[] }>(items: T[]): T[] => (hiddenNotes.size ? items.map((item) => withoutNotes(item, hiddenNotes)) : items)
+  const hide = <T extends { notes?: { id: string }[]; todayNotes?: { id: string }[] }>(items: T[]): T[] => (hiddenNotes.size ? items.map((item) => withoutNotes(item, hiddenNotes)) : items)
 
   const setStaff = (value: string) => setParams((previous) => {
     const next = new URLSearchParams(previous)
@@ -179,6 +179,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
             onSaveDoc={async (row, iso) => { if (!row.applicationId) return; await saveApplicationForm(row.candidateId, { applicationId: row.applicationId }, { application: { commencementDate: iso } }); await refreshAll() }}
             onRemark={async (row, text) => { if (row.taskId) { await store.addRemark(row.taskId, text); await refreshAll() } }}
             onClearRemark={async (row) => { if (row.taskId) { await store.clearRemark(row.taskId); await refreshAll() } }}
+            onAddNote={async (row, text) => { if (row.taskId) { await store.addRemark(row.taskId, text, 'note'); await refreshAll() } }} authorName={store.me?.name}
             canDeleteNote={(row, note) => canDeleteNote(note, row, store.me)} onDeleteNote={(_row, note) => deleteNote(note.id)} />
         )}
       </section>

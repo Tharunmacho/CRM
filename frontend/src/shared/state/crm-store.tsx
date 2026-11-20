@@ -178,7 +178,8 @@ interface StoreValue extends Data {
   completeStage: (applicationId: string, lockVersion: number) => Promise<void>
   mapCandidate: (candidateId: string, orderId: string) => Promise<{ refreshed: boolean; closedInitialCall: boolean } | null>
   unmap: (applicationId: string) => Promise<void>
-  addRemark: (taskId: string, body: string) => Promise<void>
+  /** Write on a candidate's task: a remark (default, the Remarks select) or, with kind "note", a note of the Tasks page's NOTES column (never the current remark). */
+  addRemark: (taskId: string, body: string, kind?: 'remark' | 'note') => Promise<void>
   /** Delete one note (soft delete on the server: the author, the candidate's recruiter, an Admin or an MD). Throws the server's message. */
   deleteRemark: (remarkId: string) => Promise<void>
   /** "Select remark": the candidate's remark cell reads empty again; the notes and the history stay. */
@@ -700,8 +701,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           'Removed from the order. Open tasks were cancelled and the candidate is back in the Data Bank.',
         )
       },
-      addRemark: async (taskId, body) => {
-        await run(() => api.post(`/tasks/${taskId}/remarks`, { body }), 'Remark added')
+      addRemark: async (taskId, body, kind = 'remark') => {
+        await run(() => api.post(`/tasks/${taskId}/remarks`, kind === 'note' ? { body, kind } : { body }), kind === 'note' ? 'Note added' : 'Remark added')
       },
       deleteRemark: async (remarkId) => {
         await run(() => api.del(`/remarks/${encodeURIComponent(remarkId)}`), 'Note deleted')

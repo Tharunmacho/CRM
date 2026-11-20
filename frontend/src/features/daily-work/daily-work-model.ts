@@ -6,7 +6,7 @@
 
 export type GoogleReview = 'obtained' | 'pending' | null
 
-/** One note written on the agency day. `byId` is its author (the people who may delete it: the author, the candidate's recruiter, Admin and MD). */
+/** One note of the NOTES column (kind "note" on the server; the Remarks select's remarks are not notes). `byId` is its author (the people who may delete it: the author, the candidate's recruiter, Admin and MD). */
 export interface DailyNote { id: string; body: string; at: string; by: string; byId?: string | null }
 
 export interface DailyItem {
@@ -55,6 +55,9 @@ export interface DailyItem {
   referral: { source: string; label: string; detail: string | null }
   /** The recorded agency, or null. Older servers may omit this field. */
   agency?: string | null
+  /** ALL the candidate's notes (typed in the NOTES column; every day, newest first, at most 100). A note is never the remark. Older servers send none. */
+  notes?: DailyNote[]
+  /** The notes written today only (the TODAY chip). */
   todayNotes?: DailyNote[]
   remark: { body: string; at: string; by: string; count: number } | null
   /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form (an older server sends nothing). */
@@ -149,6 +152,9 @@ export interface FollowUpItem {
   advanceCurrency: string | null
   /** Stage 10 Google review: obtained, pending (stage 10 or later, not obtained yet) or null (not applicable yet). */
   googleReview: GoogleReview
+  /** ALL the candidate's notes (typed in the NOTES column; every day, newest first, at most 100). A note is never the remark. Older servers send none. */
+  notes?: DailyNote[]
+  /** The notes written today only (the TODAY chip). */
   todayNotes?: DailyNote[]
   remark: { body: string; at: string; by: string; count: number } | null
   /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form. */
@@ -511,51 +517,100 @@ export interface TodayWork { called: boolean; moved: boolean; remarked: boolean;
 
 export interface TaskRow extends DailyItem { today: TodayWork }
 
-export interface TaskColumn { key: string; title: string; width: number; left?: boolean; supervisor?: boolean; quiet?: boolean; /** Only a column of a wide panel (see TASK_LIST_COLUMNS). */ wide?: boolean }
+export interface TaskColumn { key: string; title: string; width: number; left?: boolean; supervisor?: boolean; quiet?: boolean; /** Only a column of a roomy panel: below it the same content sits inside another cell (see TASK_LIST_COLUMNS). */ roomy?: boolean }
+
+/** A panel narrower than this shows every candidate as a labelled card instead of a table row (daily-work.css, tasks-table.css). */
+export const TASK_CARD_BREAKPOINT = 1080
 
 /**
  * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), CLIENT (the name, and under it the country in
- * a smaller muted line), JOB, CANDIDATE, Recruiter (supervisors only), AGENCY, STAGE, TODAY, REMARKS, NOTES (the day's notes, wide panels only) and
- * the untitled actions cell. Every header is one short word so it never wraps. Widths are the column plan in px: they add up to 1108px for a
- * supervisor (1017px without the Recruiter column), the most a 1440px window gives the table (its panel is about 1111px). The table never scrolls
- * sideways: its columns are those widths as percentages of the panel (columnLayout), so it fills the panel at any width from 1080px (below that the
- * Tasks list is a stack of cards). Every column is centred (header and cells), the actions included (the 72px Open / Complete / View button, the 4px
- * gap and the 36px row menu fill their 116px cell).
+ * a smaller muted line), JOB, CANDIDATE, Recruiter (supervisors only), AGENCY, STAGE, TODAY, REMARKS, NOTES and the untitled actions cell. Every
+ * header is one short word so it never wraps. The table never scrolls sideways: its columns are these widths as percentages of the panel
+ * (columnLayout), so it fills the panel at any width from 1080px (below that the Tasks list is a stack of cards). Every column is centred (header and
+ * cells), the actions included (the 72px Open / Complete / View button, the 4px gap and the 36px row menu fill their 116px cell).
  *
- * Every width is its longest word plus the cell's 17px (8px padding on both sides and the 1px column line), measured in Poppins at the table's
+ * Every width is its longest word plus the cell's 13px (6px padding on both sides and the 1px column line), measured in Poppins at the table's
  * sizes: CLIENT "International" (86px at 13px / 600), CANDIDATE "EMAYAVARAMBAN" (121px), JOB "SUPERVISOR" (78px), AGENCY "LAVOROTECH" (86px), Recruiter
- * "Srivathsala" (74px), STAGE "Prescreening" (77px in its 16px chip), TODAY the whole "Moved 10:45" chip (75px + 18px), and the headers S NO (29px),
+ * "Srivathsala" (74px), STAGE "Prescreening" (77px in its 16px chip), TODAY the whole "Moved 10:45" chip (75px + 16px chip padding), and the headers S NO (29px),
  * CANDIDATE (70px) and RECRUITER (65px). DOC and REMARKS are the two with give: the empty "dd/mm/yyyy" hint may lose its last pixels and the remark
- * dropdown clips a long remark to two lines (its full text is the tooltip).
+ * dropdown clips a long remark to two lines (its full text is the tooltip). NOTES gets 140px: the newest note, up to three lines, and its trash button.
  *
- * NOTES has no room at 1108px: it is a column only when the panel is at least `taskPlanWidth(supervisor, true)` px wide (1280px for a supervisor, 1189px
- * for a recruiter: a 1920px window); on a narrower table the day's notes are the second line under the remark (the full text is its tooltip), and in
- * the cards they are a row of their own.
+ * NOTES is a column of every table. TODAY is a column only when the panel has room for the whole plan (`taskPlanWidth(supervisor, true)`: 1212px for a
+ * supervisor, 1125px for a recruiter); a narrower table needs only `taskPlanWidth(supervisor, false)` (1108px / 1021px: a 1440px window gives the
+ * table 1111px) and shows the TODAY chip inside the STAGE cell, under the stage chip and its dashes. A phone card has a TODAY row of its own.
  */
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
-  { key: 'no', title: 'S NO', width: 46 },
+  { key: 'no', title: 'S NO', width: 42 },
   { key: 'doc', title: 'DOC', width: 90 },
-  { key: 'client', title: 'CLIENT', width: 103 },
-  { key: 'position', title: 'JOB', width: 96 },
-  { key: 'candidate', title: 'CANDIDATE', width: 138 },
-  { key: 'staff', title: 'Recruiter', width: 91, supervisor: true },
-  { key: 'agency', title: 'AGENCY', width: 103 },
-  { key: 'stage', title: 'STAGE', width: 110 },
-  { key: 'today', title: 'TODAY', width: 108 },
-  { key: 'remarks', title: 'REMARKS', width: 107 },
-  { key: 'notes', title: 'NOTES', width: 172, wide: true },
+  { key: 'client', title: 'CLIENT', width: 99 },
+  { key: 'position', title: 'JOB', width: 92 },
+  { key: 'candidate', title: 'CANDIDATE', width: 134 },
+  { key: 'staff', title: 'Recruiter', width: 87, supervisor: true },
+  { key: 'agency', title: 'AGENCY', width: 99 },
+  { key: 'stage', title: 'STAGE', width: 106 },
+  { key: 'today', title: 'TODAY', width: 104, roomy: true },
+  { key: 'remarks', title: 'REMARKS', width: 103 },
+  { key: 'notes', title: 'NOTES', width: 140 },
   { key: 'actions', title: 'Actions', width: 116, quiet: true },
 ]
 
-/** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own). */
-export const taskColumnsFor = (supervisor: boolean, wide = true): TaskColumn[] =>
-  TASK_LIST_COLUMNS.filter((column) => (supervisor || !column.supervisor) && (wide || !column.wide))
+/** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own); `roomForToday` keeps the TODAY column. */
+export const taskColumnsFor = (supervisor: boolean, roomForToday = true): TaskColumn[] =>
+  TASK_LIST_COLUMNS.filter((column) => (supervisor || !column.supervisor) && (roomForToday || !column.roomy))
 
-/** The plan's width in px for one person's columns: the panel width from which they all keep their measured room (`wide`: with NOTES). */
-export const taskPlanWidth = (supervisor: boolean, wide: boolean): number => taskColumnsFor(supervisor, wide).reduce((total, column) => total + column.width, 0)
+/** The plan's width in px for one person's columns: the panel width from which they all keep their measured room. */
+export const taskPlanWidth = (supervisor: boolean, roomForToday: boolean): number => taskColumnsFor(supervisor, roomForToday).reduce((total, column) => total + column.width, 0)
 
-/** Whether a panel this wide (px) has room for the NOTES column; a narrower one shows the day's notes under the remark. */
-export const showsNotesColumn = (supervisor: boolean, panelWidth: number): boolean => panelWidth >= taskPlanWidth(supervisor, true)
+/**
+ * Where the TODAY chip is for a panel this wide (px; 0 = not measured yet): its own `column` when the whole plan fits, a `row` of a phone card under
+ * 1080px, otherwise inside the `stage` cell.
+ */
+export function todayPlace(supervisor: boolean, panelWidth: number): 'column' | 'stage' | 'row' {
+  if (panelWidth >= taskPlanWidth(supervisor, true)) return 'column'
+  return panelWidth > 0 && panelWidth < TASK_CARD_BREAKPOINT ? 'row' : 'stage'
+}
+
+/** The notes of a candidate, newest first whatever order they arrived in (equal times keep the arrival order). */
+export function notesNewestFirst<T extends { at: string }>(notes: readonly T[] | null | undefined): T[] {
+  const time = (note: T) => { const value = Date.parse(note.at); return Number.isFinite(value) ? value : 0 }
+  return (notes ?? []).map((note, index) => ({ note, index })).sort((a, b) => time(b.note) - time(a.note) || a.index - b.index).map((entry) => entry.note)
+}
+
+/** When a note was written: "11:40" today, "18 Nov 09:15" on an earlier day (agency clock; `now` is injectable for tests). */
+export function noteWhen(iso: string, timeZone?: string, now: Date | string = new Date()): string {
+  const clock = clockTime(iso, timeZone)
+  const day = dayOf(iso, timeZone)
+  if (!day) return clock
+  const today = dayOf(typeof now === 'string' ? now : now.toISOString(), timeZone)
+  if (day === today) return clock
+  const [, month, date] = day.split('-')
+  return `${Number(date)} ${SHORT_MONTHS[Number(month) - 1]} ${clock}`
+}
+
+/** What typing a note does: the note appears at once (`pending`), is sent, and `settled` runs when the server and the list have answered (the screen drops the pending copy then). */
+export interface NoteHooks { pending?: (note: DailyNote) => void; settled?: (note: DailyNote) => void }
+
+/** Send a typed note: nothing for an empty text; otherwise show it at once, call `add`, and report `{ sent }` or the server's own words in `error` (the text comes back so the box can keep it). */
+export async function sendNote(
+  typed: string, add: (body: string) => Promise<unknown>, hooks: NoteHooks = {}, author = 'You', now: Date = new Date(),
+): Promise<{ sent: boolean; body: string; error?: string }> {
+  const body = noteText(typed)
+  if (!body) return { sent: false, body: '' }
+  const note: DailyNote = { id: `${PENDING_NOTE}${now.getTime()}`, body, at: now.toISOString(), by: author || 'You', byId: null }
+  hooks.pending?.(note)
+  try { await add(body); return { sent: true, body } }
+  catch (failure) { return { sent: false, body, error: failure instanceof Error && failure.message ? failure.message : 'The note could not be saved. Please try again.' } }
+  finally { hooks.settled?.(note) }
+}
+
+/** The id prefix of a note that is shown but not saved yet: it has no delete button. */
+export const PENDING_NOTE = 'pending-'
+
+/** The text of a typed note, ready to send: trimmed, never empty (null), at most 10000 characters like the server's limit. */
+export function noteText(typed: string): string | null {
+  const text = typed.trim().slice(0, 10000)
+  return text || null
+}
 
 export interface TodayChip { key: 'called' | 'moved'; text: string }
 

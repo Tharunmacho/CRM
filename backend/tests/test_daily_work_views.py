@@ -220,7 +220,7 @@ def test_saving_a_remark_is_one_statement_and_keeps_its_refusals(desk):
     assert len(seen) == 1, seen
     remark = response.json()
     assert remark["taskId"] == task_id and remark["body"] == "Called, will send documents" and remark["authorId"] == "asha" and remark["createdAt"]
-    assert set(remark) == {"id", "taskId", "body", "authorId", "createdAt"}
+    assert set(remark) == {"id", "taskId", "body", "authorId", "createdAt", "kind"} and remark["kind"] == "remark"
     with desk.sessions() as db:
         assert db.scalar(text("SELECT count(*) FROM system_audit_log WHERE action = 'Added task remark' AND entity_id = :t"), {"t": task_id}) == 1
     assert listing(desk, "asha")["items"][0]["remark"]["body"] == "Called, will send documents"
