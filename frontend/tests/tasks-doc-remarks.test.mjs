@@ -39,14 +39,14 @@ test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (superviso
 test('the supervisor column plan fits the 1111px panel at a 1440px window', () => {
   const sum = (list) => list.reduce((total, c) => total + c.width, 0)
   assert.ok(sum(daily.taskColumnsFor(true)) <= 1108, `${sum(daily.taskColumnsFor(true))}px`)
-  assert.ok(sum(daily.taskColumnsFor(false)) <= 1012, 'the plan without the Recruiter column (no Recruiter column) is narrower still')
+  assert.ok(sum(daily.taskColumnsFor(false)) <= 1030, 'the plan without the Recruiter column (no Recruiter column) is narrower still')
   const width = (key) => daily.taskColumnsFor(true).find((c) => c.key === key).width
   assert.ok(width('actions') >= 116, 'the 72px Open / Complete button, the 36px menu, the gap and the right padding are not clipped')
-  assert.ok(width('remarks') >= 126, 'the dropdown keeps room for a remark')
-  assert.ok(width('doc') >= 84, '"19 Nov" / "2026" or the "Add date" button fit at 10px padding')
+  assert.ok(width('remarks') >= 130, 'the dropdown keeps room for a remark')
+  assert.ok(width('doc') >= 92, '"19 Nov" / "2026" or the "Add date" button fit at 10px padding')
   assert.ok(width('stage') >= 120, 'the stage chip keeps room for "1 · Prescreening"')
   assert.ok(width('today') >= 100, 'the TODAY chip keeps room for "Moved 10:45" on one line')
-  assert.equal(width('no') <= 44, true, 'S NO is narrow')
+  assert.equal(width('no') <= 48, true, 'S NO is narrow')
 })
 
 test('the Tasks table renders the model columns and no longer has a "Remark added" chip', async () => {
@@ -93,13 +93,16 @@ test('DOC reads as "19 Nov 2026"; an empty or impossible date is blank', () => {
   for (const bad of [null, undefined, '', 'soon', '2026-02-30', '2026-13-01']) assert.equal(daily.docLabel(bad), '', String(bad))
 })
 
-test('the DOC cell is a link to the form when empty, and only where there is a placement to date', async () => {
+test('the DOC cell is a typed dd/mm/yyyy box, and only where there is a placement to date', async () => {
   const table = await code('../src/screens/tasks/daily-table.tsx')
   assert.match(table, /export function DocCell/)
-  assert.match(table, /Add date/)
-  assert.match(table, /!canAdd \|\| !item\.applicationId/)
+  assert.match(table, /<DocInput/)
+  assert.match(table, /canAdd && item\.applicationId/)
   const screen = await code('../src/screens/tasks/daily-work.tsx')
-  assert.match(screen, /applicationFormHref\(row\.candidateId, null, row\.applicationId\)\}#overview/)
+  assert.match(screen, /saveApplicationForm\(row\.candidateId, \{ applicationId: row\.applicationId \}, \{ application: \{ commencementDate: iso \} \}\)/)
+  const input = await code('../src/screens/tasks/doc-input.tsx')
+  assert.match(input, /placeholder="dd\/mm\/yyyy"/)
+  assert.match(input, /event\.key === 'Enter'/)
 })
 
 /* ------------------------------------------------------------------ Excel */
@@ -413,8 +416,7 @@ test('the professional pass: one 60px row, a 44px one-line header, one padding f
   assert.match(rule(`${P} tbody td`), /height: 60px/, 'at least 60px; a row grows when a name or client wraps')
   assert.match(rule(`${P} tbody td`), /vertical-align: middle/)
   assert.match(rule(`${P} tbody td`), /border: 0; border-bottom: var\(--table-line-width\) solid var\(--table-line\)/, 'a line under every row and nothing else')
-  assert.doesNotMatch(css, /tbody td[^{]*\{[^}]*border-(right|left): var\(--table-line/, 'NO vertical column line in the body')
-  assert.doesNotMatch(css, /td \+ td|td:not\(:last-child\)/, 'no column-line rule on body cells')
+  assert.match(css, /tbody td:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-column-line\); \}/, 'a LIGHT column line in the body (fainter than the row line)')
   assert.doesNotMatch(css, /tr:last-child > td \{ border-bottom: 0/, 'the last row has its line too')
   assert.match(rule(`${P} thead th`), /height: 44px/)
   assert.match(rule(`${P} thead th`), /font-size: 11\.5px; font-weight: 600; letter-spacing: \.04em/)

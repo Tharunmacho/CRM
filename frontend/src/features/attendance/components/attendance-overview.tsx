@@ -31,15 +31,15 @@ export function AttendanceOverview({ rows, requests, own, month, onRecord, onReq
 }) {
   const title = monthTitle(month)
   const columns: Column<EmployeeMonth>[] = [
-    { key: 'name', header: 'Employee', width: '20%', render: (row) => <RecordIdentity name={row.name} detail={roleLabel(row.role) + (row.active ? '' : ' · Inactive')} /> },
+    { key: 'name', header: 'Employee', width: '19%', render: (row) => <RecordIdentity name={row.name} detail={roleLabel(row.role) + (row.active ? '' : ' · Inactive')} /> },
     { key: 'rate', header: 'Attendance', width: '14%', render: (row) => {
       const percentage = row.summary.attendancePercentage ?? null
       return percentage === null
         ? <span className="att-muted">No working days yet</span>
         : <div className="att-rate"><strong>{percentage}%</strong><div className="att-meter" role="meter" aria-label={`${row.name} attendance`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}><span style={{ width: `${Math.min(100, Math.max(0, percentage))}%` }} /></div></div>
     } },
-    { key: 'days', header: 'Working days', width: '12%', render: (row) => <div className="att-two"><strong>{row.summary.attendedDays ?? 0} of {row.summary.scheduledDays ?? 0}</strong><small>{row.days[0]?.date ? `From ${dayLabel(row.days[0].date)}` : row.trackingStart ? 'No records this month' : 'Not started yet'}</small></div> },
-    { key: 'exceptions', header: 'Problem days', width: '31%', render: (row) => {
+    { key: 'days', header: 'Working days', width: '14%', render: (row) => <div className="att-two"><strong>{row.summary.attendedDays ?? 0} of {row.summary.scheduledDays ?? 0}</strong><small>{row.days[0]?.date ? `From ${dayLabel(row.days[0].date)}` : row.trackingStart ? 'No records this month' : 'Not started yet'}</small></div> },
+    { key: 'exceptions', header: 'Problem days', width: '27%', render: (row) => {
       const requestCount = requests.filter((request) => request.userId === row.userId).length
       const items = [
         { label: 'absent', value: row.summary.absenceDays ?? row.summary.absentDays, tone: 'A' },
@@ -51,7 +51,7 @@ export function AttendanceOverview({ rows, requests, own, month, onRecord, onReq
         <button type="button" className="att-tag att-tag-link" aria-label={`View ${requestCount} attendance requests for ${row.name}`} onClick={() => onRequests(row.userId)}>{requestCount} {requestCount === 1 ? 'request' : 'requests'}<ChevronRight size={12} /></button>
       </div>
     } },
-    { key: 'unpaid', header: 'Unpaid time', width: '11%', render: (row) => <div className="att-two"><strong className={cn(row.summary.unpaidMinutes > 0 && 'att-warn')}>{minutesLabel(row.summary.unpaidMinutes)}</strong><small>After overtime</small></div> },
+    { key: 'unpaid', header: 'Unpaid time', width: '13%', render: (row) => <div className="att-two"><strong className={cn(row.summary.unpaidMinutes > 0 && 'att-warn')}>{minutesLabel(row.summary.unpaidMinutes)}</strong><small>After overtime</small></div> },
     { key: 'open', header: 'Actions', width: '8%', actions: true, render: (row) => <Button size="sm" aria-label={`Open attendance record for ${row.name}`} title={`Open attendance record for ${row.name}`} onClick={() => onRecord(row.userId)}>Open<ChevronRight size={14} /></Button> },
   ]
   return <Panel flush className="att-card">

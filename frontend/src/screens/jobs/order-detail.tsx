@@ -28,6 +28,7 @@ import { RecordAudit } from '@/features/master-data/components/record-audit'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { SnapshotState } from '@/shared/ui/page-loading'
 import '@/styles/jobs.css'
+import '@/styles/ops-tables.css'
 import { idSearchText } from '@/features/candidates/candidate-ids'
 
 type AppFilter = 'all' | 'active' | 'selected' | 'deployed' | 'closed'
@@ -314,7 +315,7 @@ export default function OrderDetailPage() {
         </Panel>
       </div>
 
-      <Panel flush className="jv-matched tb-blue">
+      <Panel flush className="jv-matched tb-blue ops-fit ops-matched">
         <PanelHeader
           title="Matched candidates"
           meta={`${apps.length} ${apps.length === 1 ? 'candidate' : 'candidates'} on this job, with their stage and recruiter`}

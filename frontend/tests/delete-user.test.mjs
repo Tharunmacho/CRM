@@ -57,9 +57,46 @@ test('the request carries the chosen recruiter or the explicit leave-unassigned 
 
 test('the success toast names who took the work, or says it is unassigned', () => {
   const work = { candidates: 29, openTasks: 26, leads: 0 }
-  assert.equal(model.successText('Asha', work, 'Ravi'), 'Asha was deleted. 29 candidates and 26 open tasks moved to Ravi.')
-  assert.equal(model.successText('Asha', work, null), 'Asha was deleted. 29 candidates and 26 open tasks are now unassigned.')
-  assert.equal(model.successText('Tharun .v', { candidates: 0, openTasks: 0, leads: 0 }, null), 'Tharun .v was deleted.')
+  assert.equal(model.successText('Asha', work, 'Ravi'), 'Asha was deleted permanently. 29 candidates and 26 open tasks moved to Ravi.')
+  assert.equal(model.successText('Asha', work, null), 'Asha was deleted permanently. 29 candidates and 26 open tasks are now unassigned.')
+  assert.equal(model.successText('Tharun .v', { candidates: 0, openTasks: 0, leads: 0 }, null), 'Tharun .v was deleted permanently.')
+})
+
+test('the wording says the account is deleted permanently and the history stays under Former user, never "kept with their name"', async () => {
+  assert.equal(model.FORMER_USER_LABEL, 'Former user')
+  for (const words of [model.DELETE_DESCRIPTION, model.DELETE_NOTE]) {
+    assert.match(words, /Former user/)
+    assert.doesNotMatch(words, /keep their name|kept with their name|marked as a former user/i)
+  }
+  assert.match(model.DELETE_DESCRIPTION, /deleted permanently/)
+  assert.match(model.DELETE_NOTE, /cannot be undone/)
+  assert.match(model.DELETE_NOTE, /email address can be used again/)
+  const dialog = await read('screens/users/delete-user-dialog.tsx')
+  assert.match(dialog, /description=\{DELETE_DESCRIPTION\}/)
+  assert.match(dialog, /\{DELETE_NOTE\}/)
+  assert.doesNotMatch(dialog, /marked as a former user|keep their name/i)
+})
+
+test('while deleting the dialog shows a busy state, locks the choices and says what is happening; a failure shows the server message', async () => {
+  const dialog = await read('screens/users/delete-user-dialog.tsx')
+  assert.match(dialog, /busy \? <Loader2 className="animate-spin"/)
+  assert.match(dialog, /aria-busy=\{busy\}/)
+  assert.match(dialog, /\{busy \? 'Deleting…' : 'Delete user'\}/)
+  assert.match(dialog, /\{busy && <p role="status" className="uv-note">\{DELETING_TEXT\}<\/p>\}/)
+  assert.match(dialog, /<Button disabled=\{busy\} variant="ghost" onClick=\{close\}>Cancel<\/Button>/)
+  assert.match(dialog, /disabled=\{busy \|\| availability\.loading/)
+  assert.match(dialog, /catch \(err\) \{ setError\(failureText\(err\)\)/)
+  assert.match(dialog, /\{error && <p role="alert" className="uv-error">\{error\}<\/p>\}/)
+  assert.match(model.DELETING_TEXT, /Deleting the account/)
+})
+
+test('on success the person leaves the Users list at once, before the store refresh finishes', async () => {
+  const users = await read('screens/users/users.tsx')
+  assert.match(users, /const \[goneIds, setGoneIds\] = useState<ReadonlySet<string>>\(new Set\(\)\)/)
+  assert.match(users, /const people = useMemo\(\(\) => store\.users\.filter\(\(u\) => !goneIds\.has\(u\.id\)\), \[store\.users, goneIds\]\)/)
+  assert.match(users, /onDeleted=\{async \(message, userId\) => \{ setGoneIds\(\(current\) => new Set\(current\)\.add\(userId\)\); setDeleting\(null\); await refreshSaved\(message\) \}\}/)
+  const dialog = await read('screens/users/delete-user-dialog.tsx')
+  assert.match(dialog, /await onDeleted\(successText\(user\.name, summary, chosen \? chosen\.name : null\), user\.id\)/)
 })
 
 test('the screen wires the item last in the row menu, separated and destructive, and the dialog asks the required question', async () => {

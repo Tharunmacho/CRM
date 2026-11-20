@@ -1,4 +1,7 @@
-"""Deleting a Recruiter's account: Admin and MD only, never an Admin, an MD or yourself, never damaging history.
+"""Deleting a Recruiter's account PERMANENTLY: Admin and MD only, never an Admin, an MD or yourself, never damaging history.
+
+The auth_users row is physically removed (the email is free again); every row that pointed at it moves to the ONE system account
+named "Former user" (created on first use, disabled, hidden from every list and picker).
 
 Disposable PostgreSQL only (TEST_DATABASE_URL, a loopback crm_schema_test* database); the whole schema is built from the models.
 """
@@ -16,8 +19,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.core.security import SESSION_COOKIE, hash_password
-from app.db.models import (Application, ApplicationStatus, AssignmentPointer, AuditEntry, Base, Candidate, CandidateStatus, ClientStaff, DailyGoal,
-                           Lead, Notification, Remark, Role, Session as LoginSession, Source, Task, TaskEvent, TaskKind, TodoItem, User)
+from app.db.models import (FORMER_USER_EMAIL, FORMER_USER_NAME, Application, ApplicationStatus, AssignmentPointer, AuditEntry, Base, Candidate,
+                           CandidateStatus, ClientStaff, DailyGoal, Lead, Notification, Remark, Role, Session as LoginSession, Source, Task,
+                           TaskEvent, TaskKind, TodoItem, User)
 from app.db.session import get_db
 from app.services import user_admin
 from test_database_naming import _guard_test_url
@@ -89,10 +93,19 @@ def give_work(env, owner="a", candidates=3, with_remark=True):
         db.add(Notification(user_id=owner, kind="x", title="Something for them"))
         db.add(TodoItem(owner_id=owner, title="Private", due_at=NOW))
         db.add(DailyGoal(user_id=owner, metric="candidates", target=5))
-        db.execute(text("INSERT INTO crm_client_contacts (id, name) VALUES ('client-1', 'Client One')"))
+        db.execute(text("INSERT INTO crm_client_contacts (id, name) VALUES ('client-1', 'Client One') ON CONFLICT (id) DO NOTHING"))
         db.add(ClientStaff(client_id="client-1", user_id=owner))
-        db.add(AssignmentPointer(id=1, last_user_id=owner))
+        db.merge(AssignmentPointer(id=1, last_user_id=owner))
         db.commit()
+
+
+def former_id(db):
+    """The id of the one "Former user" system account (None until a delete has needed it)."""
+    return db.scalar(select(User.id).where(User.email == FORMER_USER_EMAIL))
+
+
+def gone(db, user_id):
+    return db.get(User, user_id) is None
 
 
 # ----------------------------------------------------------------------------------------- who may delete whom
@@ -136,18 +149,18 @@ def test_a_recruiter_cannot_even_ask_what_deleting_would_move(env):
 
 # ----------------------------------------------------------------------------------------- the account itself
 
-def test_the_login_is_removed_and_the_person_vanishes_from_the_list(env):
+def test_the_row_is_physically_deleted_and_the_person_vanishes_from_the_list(env):
     assert delete(env, "md", "d").status_code == 200
     with env.factory() as db:
-        person = db.get(User, "d")
-        assert person.deleted and not person.active and person.password_hash is None and person.phone is None
-        assert person.email == "deleted-d@deleted.invalid" and person.name == "D Person (former user)"
-        assert not person.receives_auto_assign and not person.on_leave
+        assert gone(db, "d"), "no tombstone row remains"
+        assert db.scalar(select(func.count()).select_from(User).where(User.email.like("d@%"))) == 0
+        assert db.scalar(select(func.count()).select_from(User).where(User.name.like("%former user%"))) == 0
         assert db.scalar(select(func.count()).select_from(LoginSession).where(LoginSession.user_id == "d")) == 0
+        assert db.scalar(select(func.count()).select_from(User)) == 7, "seven people, minus one, plus the Former user account"
     act_as(env, "admin")
     listed = {row["id"] for row in env.client.get("/api/users").json()}
     assert "d" not in listed and {"a", "b", "c", "admin", "md"} <= listed
-    # They cannot sign in (no password, no session), the cookie of the deleted person is dead, and they cannot be edited.
+    # The cookie of the deleted person is dead, and they cannot be edited, reset or deleted again.
     env.client.cookies.clear()
     env.client.cookies.set(SESSION_COOKIE, "session-d")
     assert env.client.get("/api/users").status_code == 401
@@ -156,12 +169,40 @@ def test_the_login_is_removed_and_the_person_vanishes_from_the_list(env):
     assert env.client.post("/api/users/d/password", json={"password": "another-long-password"}).status_code == 404
 
 
-def test_the_email_address_is_free_again_and_the_reserved_domain_is_refused(env):
+def test_the_former_user_account_is_one_disabled_account_nobody_can_see_use_or_sign_into(env):
+    assert delete(env, "admin", "d").status_code == 200
+    assert delete(env, "admin", "c").status_code == 200
+    with env.factory() as db:
+        formers = list(db.scalars(select(User).where(User.email == FORMER_USER_EMAIL)))
+        assert len(formers) == 1, "ONE permanent account, however many people are deleted"
+        former = formers[0]
+        assert former.name == FORMER_USER_NAME and former.deleted
+        assert not former.active and former.password_hash is None and former.phone is None
+        assert not former.receives_auto_assign and not former.on_leave and former.role == Role.staff
+        assert db.scalar(select(func.count()).select_from(LoginSession).where(LoginSession.user_id == former.id)) == 0
+        fid = former.id
+    act_as(env, "admin")
+    assert fid not in {row["id"] for row in env.client.get("/api/users").json()}
+    assert env.client.patch(f"/api/users/{fid}", json={"active": True}).status_code == 404
+    assert env.client.post(f"/api/users/{fid}/password", json={"password": "another-long-password"}).status_code == 404
+    assert env.client.delete(f"/api/users/{fid}").status_code == 404
+    give_work(env, "a")
+    assert delete(env, "admin", "a", reassignTo=fid).status_code == 404, "work can never be handed to the Former user"
+    refused = env.client.post("/api/users", json={"name": "X", "email": FORMER_USER_EMAIL, "role": "staff", "password": "a-long-password"})
+    assert refused.status_code == 422
+    with env.factory() as db:
+        from app.services import staff_directory
+        assert fid not in {row["id"] for row in staff_directory.staff_availability(db, "Asia/Kolkata")["staff"]}
+
+
+def test_the_email_address_is_free_again_and_the_reserved_domains_are_refused(env):
     delete(env, "admin", "d")
     act_as(env, "admin")
     again = env.client.post("/api/users", json={"name": "New D", "email": "d@example.test", "role": "staff", "password": "a-long-password"})
     assert again.status_code == 201, again.text
     refused = env.client.post("/api/users", json={"name": "Sneaky", "email": "x@deleted.invalid", "role": "staff", "password": "a-long-password"})
+    assert refused.status_code == 422
+    refused = env.client.post("/api/users", json={"name": "Sneaky", "email": "x@system.invalid", "role": "staff", "password": "a-long-password"})
     assert refused.status_code == 422
 
 
@@ -196,16 +237,19 @@ def test_reassigning_moves_candidates_open_tasks_and_leads_and_keeps_history(env
     with env.factory() as db:
         assert {c.owner_id for c in db.scalars(select(Candidate))} == {"b"}
         assert {t.owner_id for t in db.scalars(select(Task).where(Task.completed_at.is_(None)))} == {"b"}
-        assert db.get(Task, "done-a").owner_id == "a", "a finished task stays as it was"
+        assert db.get(Task, "done-a").owner_id == former_id(db), "a finished task stays, under Former user"
         assert db.get(Lead, "lead-a").owner_id == "b"
-        # History is kept and keeps the name: the remark, the audit entry the person made, the finished task's owner.
+        # History is kept and now belongs to "Former user": the remark, the audit entry the person made, the finished task's owner.
+        fid = former_id(db)
+        assert fid and gone(db, "a")
         remark = db.scalars(select(Remark)).one()
-        assert remark.author_id == "a" and db.get(User, remark.author_id).name == "A Person (former user)"
+        assert remark.author_id == fid and db.get(User, remark.author_id).name == FORMER_USER_NAME
         made = db.scalars(select(AuditEntry).where(AuditEntry.action == "Recorded a call")).one()
-        assert made.actor_id == "a"
+        assert made.actor_id == fid
         assert db.scalar(select(func.count()).select_from(TaskEvent).where(TaskEvent.kind == "assignment")) == 3
         reassigned = list(db.scalars(select(AuditEntry).where(AuditEntry.action == "Candidate reassigned during account change")))
         assert len(reassigned) == 3 and all(e.meta["toUserId"] == "b" and e.meta["fromUserId"] == "a" for e in reassigned)
+        assert all(e.actor_id == "admin" for e in reassigned)
         # The new recruiter is told; the deleted person's own notices, to-dos, goals and client allocation are gone.
         assert db.scalar(select(func.count()).select_from(Notification).where(Notification.user_id == "b")) >= 1
         assert db.scalar(select(func.count()).select_from(Notification).where(Notification.user_id == "a")) == 0
@@ -223,10 +267,10 @@ def test_leaving_unassigned_frees_candidates_and_leads_and_cancels_what_remains(
     with env.factory() as db:
         assert {c.owner_id for c in db.scalars(select(Candidate))} == {None}
         assert db.get(Lead, "lead-a").owner_id is None
-        open_tasks = list(db.scalars(select(Task).where(Task.owner_id == "a", Task.completed_at.is_(None), Task.cancelled_at.is_(None))))
+        open_tasks = list(db.scalars(select(Task).where(Task.owner_id.in_(["a", former_id(db)]), Task.completed_at.is_(None), Task.cancelled_at.is_(None))))
         assert open_tasks == [], "no open task is left with a person who is gone"
-        assert db.get(Task, "done-a").completed_at is not None
-        assert db.scalars(select(Remark)).one().author_id == "a"
+        assert db.get(Task, "done-a").completed_at is not None and db.get(Task, "done-a").owner_id == former_id(db)
+        assert db.scalars(select(Remark)).one().author_id == former_id(db)
         assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.action == "Candidate unassigned")) == 3
 
 
@@ -298,7 +342,79 @@ def test_a_failed_commit_is_one_calm_sentence_offering_deactivate_and_rolls_ever
         assert not db.get(User, "a").deleted and db.get(Candidate, "cand-a-0").owner_id == "a"
 
 
-# ----------------------------------------------------------------------------------------- the rest of the app tolerates the tombstone
+# ----------------------------------------------------------------------------------------- every reference is re-pointed, nothing breaks
+
+FOREIGN_KEYS = """
+SELECT k.relname AS tbl, a.attname AS col, cardinality(c.conkey) AS width
+  FROM pg_constraint c JOIN pg_class k ON k.oid = c.conrelid JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+ WHERE c.contype = 'f' AND c.confrelid = 'auth_users'::regclass ORDER BY 1, 2"""
+
+
+def test_every_foreign_key_to_auth_users_is_single_column_and_the_policy_lists_name_real_columns(env):
+    with env.factory() as db:
+        keys = list(db.execute(text(FOREIGN_KEYS)).all())
+    assert len(keys) > 50 and all(row.width == 1 for row in keys), "the catalog block handles single-column keys"
+    found = {f"{row.tbl}.{row.col}" for row in keys}
+    for named in (*user_admin._VANISH, *user_admin._BLANK):
+        assert named in found, f"{named} is named in the delete policy but is not a foreign key to auth_users"
+
+
+def test_no_row_anywhere_still_points_at_the_deleted_person_even_in_a_table_the_code_has_never_heard_of(env):
+    give_work(env, "a")
+    with env.factory() as db:
+        db.execute(text("CREATE TABLE zz_extra (id serial PRIMARY KEY, who varchar(36) NOT NULL REFERENCES auth_users(id), note text)"))
+        db.execute(text("INSERT INTO zz_extra (who, note) VALUES ('a', 'history')"))
+        db.add(TaskEvent(kind="assignment", task_id="done-a", candidate_id="cand-a-0", owner_id="a", event_key="k-a", occurred_at=NOW, meta={}))
+        db.commit()
+    assert delete(env, "admin", "a", reassignTo="b").status_code == 200
+    with env.factory() as db:
+        fid = former_id(db)
+        assert db.scalar(text("SELECT who FROM zz_extra")) == fid
+        leftovers = []
+        for row in db.execute(text(FOREIGN_KEYS)).all():
+            if row.tbl == "zz_extra":
+                continue
+            count = db.scalar(text(f'SELECT count(*) FROM "{row.tbl}" WHERE "{row.col}" = \'a\''))
+            if count:
+                leftovers.append((row.tbl, row.col, count))
+        assert leftovers == []
+        assert db.scalar(select(TaskEvent.owner_id).where(TaskEvent.event_key == "k-a")) == fid
+
+
+def test_two_deleted_people_with_a_clashing_unique_row_and_open_attendance_do_not_block_each_other(env):
+    from app.db.models import AttendanceCalendarDay, StaffAttendanceSession, StaffPresenceInterval
+    with env.factory() as db:
+        for who in ("c", "d"):
+            db.add(AttendanceCalendarDay(user_id=who, attendance_date=NOW.date(), status="PL", reason="leave", actor_id="admin"))
+            db.add(StaffAttendanceSession(user_id=who, checked_in_at=NOW, checkin_request_key=f"in-{who}"))
+            db.add(StaffPresenceInterval(user_id=who, client_id="tab", state="online", started_at=NOW, last_seen_at=NOW))
+        db.commit()
+    assert delete(env, "admin", "c").status_code == 200
+    assert delete(env, "admin", "d").status_code == 200
+    with env.factory() as db:
+        fid = former_id(db)
+        sessions = list(db.scalars(select(StaffAttendanceSession).order_by(StaffAttendanceSession.checkin_request_key)))
+        assert [s.user_id for s in sessions] == [fid, fid] and all(s.checked_out_at is not None for s in sessions), "ended, then kept as history"
+        assert all(i.user_id == fid and i.ended_at is not None for i in db.scalars(select(StaffPresenceInterval)))
+        assert db.scalar(select(func.count()).select_from(AttendanceCalendarDay)) == 0, "personal schedule rows go with the person"
+
+
+def test_the_former_user_never_appears_in_the_attendance_report_or_the_daily_work_roster(env):
+    from app.db.models import StaffAttendanceSession
+    from app.services import staff_activity
+    with env.factory() as db:
+        db.add(StaffAttendanceSession(user_id="d", checked_in_at=NOW, checked_out_at=NOW + timedelta(hours=1), checkin_request_key="in-d"))
+        db.commit()
+    assert delete(env, "admin", "d").status_code == 200
+    with env.factory() as db:
+        fid = former_id(db)
+        assert db.scalar(select(func.count()).select_from(StaffAttendanceSession).where(StaffAttendanceSession.user_id == fid)) == 1
+        report = staff_activity.attendance_report(db, db.get(User, "admin"), NOW.date(), "Asia/Kolkata")
+        text_of_report = repr(report)
+        assert fid not in text_of_report and FORMER_USER_NAME not in text_of_report
+
+
+# ----------------------------------------------------------------------------------------- the rest of the app tolerates it
 
 def test_screens_that_list_people_skip_the_deleted_account(env):
     from app.services import staff_directory
@@ -308,16 +424,54 @@ def test_screens_that_list_people_skip_the_deleted_account(env):
         assert "d" not in ids and {"a", "b", "c", "admin"} <= ids
 
 
-def test_statement_budget_for_a_recruiter_with_many_candidates(env):
-    give_work(env, "a", candidates=30)
+# ----------------------------------------------------------------------------------------- speed: round trips are the cost on the hosted database
+
+def statements(env, action):
     counted: list[str] = []
 
     def count(conn, cursor, statement, parameters, context, executemany):
         counted.append(statement)
     event.listen(env.engine, "before_cursor_execute", count)
     try:
-        assert delete(env, "admin", "a", reassignTo="b").status_code == 200
+        action()
     finally:
         event.remove(env.engine, "before_cursor_execute", count)
-    # One transaction; the transfer is batched (inserts are executemany), so thirty candidates must not cost thirty round trips each.
-    assert len(counted) < 80, len(counted)
+    return counted
+
+
+def test_the_summary_is_one_statement(env):
+    give_work(env, "a")
+    with env.factory() as db:
+        counted = statements(env, lambda: user_admin.delete_summary(db, "a"))
+    assert len(counted) == 1, counted
+
+
+def test_statement_budget_for_a_recruiter_with_nothing_to_move(env):
+    with env.factory() as db:
+        actor = db.get(User, "admin")
+        counted = statements(env, lambda: user_admin.delete_user(db, actor, "d"))
+    # lock + directory (2), what they hold (1), the audit entry, ONE block that re-points every foreign key, the DELETE; begin/commit are not statements.
+    assert len(counted) <= 7, [c[:60] for c in counted]
+    assert sum(1 for c in counted if c.lstrip().startswith("DO ")) == 1, "one server-side block, no per-table loop in Python"
+
+
+def test_statement_budget_for_a_recruiter_with_many_candidates(env):
+    give_work(env, "a", candidates=30)
+    with env.factory() as db:
+        actor = db.get(User, "admin")
+        counted = statements(env, lambda: user_admin.delete_user(db, actor, "a", "b"))
+    # The transfer is batched (writes are executemany), so thirty candidates cost the same round trips as three.
+    assert len(counted) <= 25, [c[:60] for c in counted]  # measured: 25 (it was 41 with auth, before)
+    give_work(env, "c", candidates=3)
+    with env.factory() as db:
+        actor = db.get(User, "admin")
+        few = statements(env, lambda: user_admin.delete_user(db, actor, "c", "b"))
+    assert abs(len(few) - len(counted)) <= 2, (len(few), len(counted))
+
+
+def test_the_whole_request_stays_within_a_small_statement_budget(env):
+    give_work(env, "a", candidates=30)
+    counted = statements(env, lambda: delete(env, "admin", "a", reassignTo="b"))
+    assert len(counted) <= 28, len(counted)  # measured 26; it was 41 before this change (tombstone, one query per table)
+    quiet = statements(env, lambda: delete(env, "admin", "d"))
+    assert len(quiet) <= 10, len(quiet)

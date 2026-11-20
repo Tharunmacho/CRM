@@ -1,7 +1,7 @@
 /*
  * Travelled: the same flat cards as Reports (12px radius, 1px hairline, no shadows), one filter card, a row of
  * clickable breakdowns and the list. Colours are the palette's tokens, so light and dark both follow the theme.
- * Below 720px the table turns into one card per candidate (each cell carries its own label).
+ * Below 900px the table turns into one card per candidate (each cell carries its own label).
  */
 .tv { min-width: 0; font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif; }
 .tv :is(button, input, select) { font-family: inherit; }
@@ -58,16 +58,20 @@
 .tv-more { margin-top: 8px; padding: 2px 8px; font-size: 13px; font-weight: 500; color: var(--primary); }
 .tv-more:hover { text-decoration: underline; }
 
-/* The list */
-.tv-table-wrap { max-height: 72vh; overflow: auto; }
-.tv-table { width: 100%; min-width: 820px; table-layout: fixed; border-collapse: collapse; font-size: 13.5px; }
-.tv-c-date { width: 12%; } .tv-c-who { width: 20%; } .tv-c-client { width: 15%; } .tv-c-country { width: 9%; }
-.tv-c-job { width: 14%; } .tv-c-agency { width: 12%; } .tv-c-docs { width: 10%; } .tv-c-recruiter { width: 8%; }
-.tv-table td { overflow-wrap: anywhere; }
-.tv-table th { position: sticky; top: 0; z-index: 2; height: 44px; padding: 0 14px; border-bottom: var(--table-line-width) solid var(--table-line); background: var(--tint-2); text-align: left; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1.2; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tv-table td { height: 56px; padding: 8px 14px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: middle; color: var(--text-main); }
+/* The list: the SAME look as the approved Tasks table. table-layout fixed at 100% of its frame (no sideways scroll), header 44px / 11.5px / 600 uppercase on one
+   line with 8px side padding, rows of at least 60px with every cell centred, a faint var(--table-line) line under every row and a LIGHT var(--table-column-line)
+   between body columns. Words wrap at spaces (a link or a name is never cut); under 900px the rows are labelled cards. */
+.tv-table-wrap { max-height: 72vh; overflow-x: hidden; overflow-y: auto; }
+.tv-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
+.tv-c-date { width: 11%; } .tv-c-who { width: 20%; } .tv-c-client { width: 15%; } .tv-c-country { width: 9%; }
+.tv-c-job { width: 14%; } .tv-c-agency { width: 12%; } .tv-c-docs { width: 10%; } .tv-c-recruiter { width: 9%; }
+.tv-table td { overflow-wrap: break-word; }
+.tv-table th { position: sticky; top: 0; z-index: 2; box-sizing: border-box; height: 44px; padding: 0 8px; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); text-align: left; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 16px; text-transform: uppercase; color: var(--on-primary); white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.tv-table th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
+.tv-table td { box-sizing: border-box; height: 60px; padding: 8px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: middle; text-align: left; color: var(--text-main); }
+.tv-table td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
 .tv-table tbody tr:last-child td { border-bottom: var(--table-line-width) solid var(--table-line); }
-.tv-table tbody tr:hover { background: color-mix(in srgb, var(--tint-2) 55%, var(--bg-card)); }
+.tv-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
 .tv-table td small { display: block; margin-top: 2px; font-size: 12px; color: var(--text-muted); }
 .tv-table a { color: var(--primary); font-weight: 500; }
 .tv-table a:hover { text-decoration: underline; }
@@ -97,15 +101,6 @@
   .tv-search-row .tv-search { flex-basis: 100%; }
   .tv-chips { padding: 10px 16px 14px; }
   .tv-breakdowns { grid-template-columns: minmax(0, 1fr); }
-  .tv-table { min-width: 0; table-layout: auto; }
-  .tv-table colgroup { display: none; }
-  .tv-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .tv-table, .tv-table tbody, .tv-table tr, .tv-table td { display: block; }
-  :root:root:root .tv-table { overflow: visible; border: 0; border-radius: 0; }
-  .tv-table tr { padding: 12px 16px; border-bottom: var(--table-line-width) solid var(--table-line); }
-  .tv-table tbody tr:last-child { border-bottom: var(--table-line-width) solid var(--table-line); }
-  .tv-table td { height: auto; padding: 8px 0; border: 0; font-size: 14px; }
-  .tv-table td::before { content: attr(data-label); display: block; margin-bottom: 1px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
 }
 @media (max-width: 420px) {
   .tv-filter-grid { grid-template-columns: minmax(0, 1fr); }
@@ -128,10 +123,6 @@
   .tv-alert { padding: 10px 12px; }
   .tv-break { padding: 14px 16px 12px; }
   .tv-toggle { width: 100%; justify-content: center; }
-  .tv-table td { overflow-wrap: anywhere; }
-  .tv-table td::before { margin-bottom: 2px; }
-  .tv-table a { display: inline-flex; align-items: center; min-height: 44px; }
-  .tv-table .tv-hint { margin-left: 4px; }
   .tv-foot { padding: 12px 16px; }
   .tv-doc-details ul { min-width: 0; }
 }
@@ -141,17 +132,35 @@
   .tv-bars.is-days { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* Tablets and phones: links inside the table are 44 px tall targets, and the table text reads at 14 px. */
+/* Tablets and phones: links inside the table are 44 px tall targets. */
 @media (max-width: 1023px), (pointer: coarse) {
   .tv-table { font-size: 14px; }
   .tv-table a { display: inline-flex; align-items: center; min-height: 44px; }
   .tv-table small { font-size: 12.5px; }
 }
-/* the outer frame: the scroll box around the table (whole even when the table scrolls), radius kept; the card around it gives up its own border.
-   Under 721px the rows are cards: no frame, the card keeps its single var(--table-line) border. */
-@media (min-width: 721px) {
-  :root:root .tv-table-wrap { box-sizing: border-box; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
+
+/* the outer frame: the scroll box around the table, the same thin frame as the Tasks table (tokens: theme.css); the card around it gives up its own border.
+   Under 900px the rows are cards: no frame, each card keeps its single thin border. */
+@media (min-width: 900px) {
+  :root:root .tv-table-wrap { box-sizing: border-box; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); }
   :root:root .tv-table-wrap .tv-table thead th { border-top-width: 0; }
 }
 :root:root .tv-table-card { border-color: var(--table-line); }
-@media (min-width: 721px) { :root:root .tv-table-card { border-color: transparent; } }
+@media (min-width: 900px) { :root:root .tv-table-card { border-color: transparent; } }
+
+/* under 900px (a phone or a narrow tablet) every row is a labelled card with one thin 6px border, words wrap at spaces */
+@media (max-width: 899px) {
+  .tv-table { min-width: 0; table-layout: auto; }
+  .tv-table colgroup { display: none; }
+  .tv-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .tv-table, .tv-table tbody, .tv-table tr, .tv-table td { display: block; }
+  :root:root:root .tv-table { overflow: visible; border: 0; border-radius: 0; }
+  .tv-table tr { padding: 12px 16px; }
+  :root:root .tv-table td { height: auto; padding: 8px 0; border: 0; font-size: 14px; }
+  .tv-table td::before { content: attr(data-label); display: block; margin-bottom: 1px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
+  .tv-table td { overflow-wrap: break-word; }
+  .tv-table td::before { margin-bottom: 2px; }
+  .tv-table a { display: inline-flex; align-items: center; min-height: 44px; }
+  .tv-table .tv-hint { margin-left: 4px; }
+  .tv-table tr { border: var(--table-line-width) solid var(--table-line); border-radius: var(--table-frame-radius, 6px); margin: 0 0 12px; }
+}

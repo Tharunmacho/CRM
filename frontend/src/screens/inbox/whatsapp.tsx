@@ -13,6 +13,7 @@ import { dateTimeLabel, smartTime } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/cn'
 import '@/features/inbox/mailbox.css'
 import '@/styles/inbox-v2.css'
+import '@/styles/ops-tables.css'
 import { WhatsAppChat } from '@/features/whatsapp/whatsapp-chat'
 import { conversationFromSearch } from '@/features/whatsapp/chat-types'
 import { CandidateChip, FileIcon } from '@/features/inbox/mail-parts'
@@ -95,17 +96,17 @@ export default function WhatsAppPage() {
   }
   const candidateName = (id: string) => store.candidates.find((candidate) => candidate.id === id)?.name || 'Open candidate'
   const columns: Column<Message>[] = [
-    { key: 'sender', header: 'Sender', width: '19%', render: (row) => <RecordIdentity name={row.senderName || row.senderNumber} detail={row.senderNumber} icon={row.senderName ? undefined : Phone} /> },
-    { key: 'message', header: 'Message or document', width: '27%', render: (row) => <div className="wa-doc">
+    { key: 'sender', header: 'Sender', width: '20%', render: (row) => <RecordIdentity name={row.senderName || row.senderNumber} detail={row.senderNumber} icon={row.senderName ? undefined : Phone} /> },
+    { key: 'message', header: 'Message or document', width: '26%', render: (row) => <div className="wa-doc">
       {row.fileName ? <FileIcon name={row.fileName} /> : <span className="mb-file is-doc" aria-hidden="true"><MessageCircle size={17} /></span>}
-      <div className="min-w-0"><p className="wa-doc-name" title={row.fileName || row.type}>{row.fileName || `${row.type.charAt(0).toUpperCase()}${row.type.slice(1)} message`}</p><p className="wa-doc-caption" title={row.body || undefined}>{row.body || 'No caption'}</p>{row.lastError && <p className="wa-doc-error">{row.lastError}</p>}</div>
+      <div className="min-w-0"><p className="wa-doc-name" title={row.fileName || row.type}>{row.fileName || `${row.type.charAt(0).toUpperCase()}${row.type.slice(1)} message`}</p>{row.body && <p className="wa-doc-caption" title={row.body}>{row.body}</p>}{row.lastError && <p className="wa-doc-error">{row.lastError}</p>}</div>
     </div> },
     { key: 'received', header: 'Received', width: '13%', render: (row) => <span className="wa-when" title={dateTimeLabel(row.receivedAt)}>{smartTime(row.receivedAt)}</span> },
     { key: 'status', header: 'Status', width: '15%', render: (row) => <div className="wa-state"><Badge tone={statusTone(row.status)} variant="dot">{statusLabel(row.status)}</Badge>
       {row.documentBundle?.candidateIds.map((id) => <CandidateChip key={id} label={candidateName(id)} title="Open the candidate" onClick={() => navigate(`/candidates/${id}`)} />)}
       {row.candidateId && !row.documentBundle && <CandidateChip label={candidateName(row.candidateId)} title="Open the candidate" onClick={() => navigate(`/candidates/${row.candidateId}`)} />}
     </div> },
-    { key: 'actions', header: 'Actions', width: '26%', align: 'center', render: (row) => <div className="wa-doc-actions">
+    { key: 'actions', header: 'Actions', width: '26%', align: 'left', render: (row) => <div className="wa-doc-actions">
       {row.hasFile && <><a className="wa-act" href={fileHref(`/api/whatsapp/messages/${row.id}/file`)} target="_blank" rel="noreferrer" title={`View ${row.fileName ?? 'document'}`}><ExternalLink size={14} />View</a><a className="wa-act is-icon" aria-label={`Download ${row.fileName}`} title="Download" href={fileHref(`/api/whatsapp/messages/${row.id}/file?download=true`)}><Download size={14} /></a></>}
       {admin && row.hasFile && <Button size="sm" disabled={!!busy || PENDING.includes(row.status)} onClick={() => setBundleSource(row.id)}>Review people</Button>}
       {!row.candidateId && !row.documentBundle && admin && !PENDING.includes(row.status) && <>
@@ -139,7 +140,7 @@ export default function WhatsAppPage() {
       {channel.lastError && <p className="wa-channel-error">{channel.lastError}</p>}
       <IntakeAcknowledgements sourceKind="whatsapp" channelId={channel.id} channelLabel={channel.displayNumber || channel.id} canManage={admin} />
     </Panel>)}</div>}
-    {view === 'intake' && <Panel flush className="wa-intake"><PanelHeader title="Incoming candidate documents" meta={data ? `${data.total} messages found` : 'Messages for the chosen filters'} />
+    {view === 'intake' && <Panel flush className="wa-intake tb-blue ops-fit ops-whatsapp"><PanelHeader title="Incoming candidate documents" meta={data ? `${data.total} messages found` : 'Messages for the chosen filters'} />
       <div className="wa-toolbar"><SearchInput placeholder="Search sender or message" value={query} onChange={(value) => { setQuery(value); setPage(1) }} /><Select aria-label="Processing status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }}><option value="">All statuses</option>{STATUSES.map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</Select></div>
       {!data ? <p className="wa-loading" role="status">Loading messages…</p> : <>
         <DataTable compact stackBelow={1280} rows={data.messages} columns={columns} rowKey={(row) => row.id} pageSize={20} empty={<EmptyState icon={<FileText size={22} />} title={query || status ? 'No messages match these filters' : 'No documents received yet'} description={query || status ? 'Clear the search or the status filter to see more.' : 'Documents candidates send to the business number appear here for review.'} />} />

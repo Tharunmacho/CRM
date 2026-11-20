@@ -15,8 +15,8 @@ export type ColumnChoices = Record<string, boolean>
 
 export const fitsIn = (width: number, boxWidth: number) => width <= boxWidth - FIT_GUTTER
 
-/** Spacing and type tighten to this share of the comfortable widths before any column is hidden. */
-export const COMPACT_RATIO = 0.88
+/** Columns are never squeezed below their stated width (a heading or a word would be cut): the ratio is 1, so a column is hidden before any is narrowed. Only the person's own Compact choice tightens the spacing. */
+export const COMPACT_RATIO = 1
 /** Special keys in the person's choices (besides one boolean per column). */
 export const CHOICE_COMPACT = '__compact'
 export const CHOICE_WIDE = '__wide'

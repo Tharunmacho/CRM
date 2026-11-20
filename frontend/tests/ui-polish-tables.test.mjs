@@ -10,8 +10,8 @@ const src = (relative) => readFile(path.join(root, 'src', relative), 'utf8')
 
 test('every table follows one set of rules: 44 px header, single-line uppercase 11.5px labels, 56 px rows, 14 px side padding', async () => {
   const travelled = await css('travelled.css')
-  assert.match(travelled, /\.tv-table th \{[^}]*position: sticky;[^}]*height: 44px;[^}]*padding: 0 14px;[^}]*font-size: 11\.5px;[^}]*text-transform: uppercase;[^}]*white-space: nowrap;/)
-  assert.match(travelled, /\.tv-table td \{ height: 56px; padding: 8px 14px;[^}]*vertical-align: middle;/)
+  assert.match(travelled, /\.tv-table th \{[^}]*position: sticky;[^}]*height: 44px;[^}]*padding: 0 8px;[^}]*font-size: 11\.5px;[^}]*text-transform: uppercase;[^}]*white-space: nowrap;/)
+  assert.match(travelled, /\.tv-table td \{[^}]*height: 60px; padding: 8px;[^}]*vertical-align: middle;/)
   const jobs = await css('jobs-simple.css')
   assert.match(jobs, /\.js-jobs-table \.ui-data-table\.is-grid thead th \{ height: 44px; padding: 0 14px; font-size: 11\.5px;[^}]*text-transform: uppercase; white-space: nowrap; \}/)
   assert.match(jobs, /\.js-jobs-table \.ui-data-table\.is-grid tbody td \{ height: 56px; padding: 8px 14px; vertical-align: middle;/)
@@ -28,12 +28,14 @@ test('the card-style stacking of the shared table is left alone: the desktop tab
   const settings = await css('agency-settings.css')
   assert.match(settings, /@media \(min-width: 768px\) \{\s*:root:root \.as-currencies \.ui-data-table\.is-grid thead th/)
   const screen = await src('screens/clients/clients.tsx')
-  assert.match(screen, /<DataTable compact sticky maxHeight="72vh" stackBelow=\{1024\}/)
+  assert.match(screen, /<DataTable compact stackBelow=\{1024\}/)
+  assert.doesNotMatch(screen, /sticky maxHeight/, 'the page scrolls, never an inner scroll box')
 })
 
-test('the currencies list scrolls inside its card with the header in view and shows a dash, not the word None', async () => {
+test('the currencies list is a table from 1024px with no inner scroll box and shows a dash, not the word None', async () => {
   const card = await src('screens/users/currency-card.tsx')
-  assert.match(card, /<DataTable compact sticky maxHeight="560px" pageSize=\{50\}/)
+  assert.match(card, /<DataTable compact stackBelow=\{1024\} pageSize=\{50\}/)
+  assert.doesNotMatch(card, /sticky/)
   assert.doesNotMatch(card, />None</)
   assert.match(card, /aria-label="None">—</)
 })

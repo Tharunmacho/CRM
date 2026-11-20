@@ -41,9 +41,16 @@ export function deleteQuery(choice: string): string {
   return choice ? `?reassignTo=${encodeURIComponent(choice)}` : ''
 }
 
+/** What stays after a delete: the account is gone for good; the history is re-pointed to the one system account with this name. */
+export const FORMER_USER_LABEL = 'Former user'
+export const DELETE_DESCRIPTION = `The account is deleted permanently. Everything they did stays in the history under “${FORMER_USER_LABEL}”.`
+export const DELETE_NOTE = `They can no longer sign in, they disappear from the team list and every picker, and their email address can be used again. `
+  + `Their notes, calls, remarks, uploads and audit entries stay, shown as “${FORMER_USER_LABEL}”. This cannot be undone.`
+export const DELETING_TEXT = 'Deleting the account and moving its history. This can take a few seconds; please keep this window open.'
+
 export function successText(name: string, summary: DeleteSummary, recipientName: string | null): string {
-  if (!hasWorkToMove(summary)) return `${name} was deleted.`
+  if (!hasWorkToMove(summary)) return `${name} was deleted permanently.`
   return recipientName
-    ? `${name} was deleted. ${workSummaryText(summary)} moved to ${recipientName}.`
-    : `${name} was deleted. ${workSummaryText(summary)} are now unassigned.`
+    ? `${name} was deleted permanently. ${workSummaryText(summary)} moved to ${recipientName}.`
+    : `${name} was deleted permanently. ${workSummaryText(summary)} are now unassigned.`
 }

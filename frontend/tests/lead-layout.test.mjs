@@ -43,11 +43,13 @@ test('lead table restores Actions, Created and Uploaded before the requested ide
   assert.deepEqual(visible.slice(0, 3).map(column => column.key), ['actions', 'created', 'uploaded'])
   assert.deepEqual(visible.slice(0, 4).map(column => column.sticky), ['start', 'start', 'start', 'start'])
   assert.deepEqual(visible.slice(3, 10).map(column => column.key), requested)
-  assert.deepEqual(visible.slice(3, 10).map(column => column.header), ['Name / Age / Contact', 'Job applied', 'Education', 'India exp.', 'Abroad exp.', 'Total exp.', 'Location'])
+  assert.deepEqual(visible.slice(3, 10).map(column => column.header), ['Name', 'Job applied', 'Education', 'India exp.', 'Abroad exp.', 'Total exp.', 'Location'])
   assert.deepEqual(visible.slice(10).map(column => column.key), ['campaign', 'status', 'resume'])
   // the shortened headings keep the full name as the header tooltip, so the Columns menu and hover still say what they mean
   assert.deepEqual(visible.slice(6, 9).map(column => column.headerTitle), ['India experience', 'Abroad experience', 'Total experience'])
-  assert.ok(visible.filter(column => !['experienceIndia', 'experienceAbroad', 'experience'].includes(column.key)).every(column => column.headerTitle === undefined))
+  // 'Name' is short so the heading fits one line; the full 'Name / Age / Contact' is its tooltip
+  assert.equal(visible[3].headerTitle, 'Name / Age / Contact')
+  assert.ok(visible.filter(column => !['name', 'experienceIndia', 'experienceAbroad', 'experience'].includes(column.key)).every(column => column.headerTitle === undefined))
   assert.equal(new Set(columns.map(column => column.key)).size, columns.length)
 })
 
@@ -66,14 +68,19 @@ test('India, abroad and total render distinct supplied categories with no restau
   assert.equal(byKey.name.render(lead).type, 'NameCell')
 })
 
-test('essential supplied facts remain available at desktop widths while optional duplicates start off', () => {
+test('essential supplied facts stay at desktop widths; the least important columns hide first instead of being squeezed', () => {
+  const essential = ['name', 'position', 'experienceIndia', 'experienceAbroad']
   for (const width of [900, 1100, 1450, 1700]) {
     const result = fit.fitColumns(columns, width)
-    for (const key of requested) assert.ok(result.keys.includes(key), `${key} omitted at ${width}px`)
+    for (const key of essential) assert.ok(result.keys.includes(key), `${key} omitted at ${width}px`)
     assert.deepEqual(result.keys.slice(0, 2), ['actions', 'created'])
     assert.ok(!result.keys.includes('uploaded') || result.keys.indexOf('uploaded') === 2, 'Uploaded sits right after Created')
     for (const key of ['contact', 'state', 'profile']) assert.equal(result.keys.includes(key), false, `${key} should begin off`)
+    // nothing is ever narrower than its stated width: the shown columns add up to no more than the box
+    const total = result.keys.reduce((sum, key) => sum + columns.find(column => column.key === key).width, 0)
+    assert.ok(total <= width - fit.FIT_GUTTER, `the shown columns fit at ${width}px`)
   }
+  for (const key of requested) assert.ok(fit.fitColumns(columns, 1450).keys.includes(key) || key === 'education', `${key} is shown at 1450px`)
   assert.ok(fit.fitColumns(columns, 1700).keys.includes('campaign'), 'the original campaign column is shown when it fits')
   const explicit = fit.fitColumns(columns, 1700, { campaign:true })
   assert.ok(explicit.keys.includes('campaign'), 'the full campaign column remains available by choice')

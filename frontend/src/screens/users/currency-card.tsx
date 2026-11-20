@@ -9,6 +9,7 @@ import { DataTable, type Column } from '@/shared/ui/table'
 import { Dialog } from '@/shared/ui/overlay'
 import { Button, Field, Input, Switch } from '@/shared/ui/primitives'
 import { PanelHead, failureText } from './user-ui'
+import '@/styles/ops-tables.css'
 
 const BLANK: CurrencyForm = { code: '', name: '', symbol: '' }
 
@@ -39,9 +40,9 @@ export function CurrencyCard({ editable, defaultOrder, defaultAdvance }: { edita
   const columns: Column<CurrencyOption>[] = [
     { key: 'code', header: 'Code', width: '9%', align: 'left', render: (c) => <strong className="as-code">{c.code}</strong> },
     { key: 'name', header: 'Name', width: '22%', align: 'left', render: (c) => <span className="as-name">{c.name}</span> },
-    { key: 'symbol', header: 'Symbol', width: '9%', align: 'left', render: (c) => c.symbol ? <b className="as-symbol">{c.symbol}</b> : <span className="uv-none" aria-label="None">—</span> },
+    { key: 'symbol', header: 'Symbol', width: '10%', align: 'left', render: (c) => c.symbol ? <b className="as-symbol">{c.symbol}</b> : <span className="uv-none" aria-label="None">—</span> },
     {
-      key: 'offered', header: 'Offered', width: '16%', align: 'left',
+      key: 'offered', header: 'Offered', width: '18%', align: 'left',
       render: (c) => <label className="as-switch"><Switch compact checked={c.active} disabled={!editable || !!pending} label={`${c.code} is offered`} onChange={(on) => void toggle(c, on)} /><span>{c.active ? 'Offered' : 'Not offered'}</span></label>,
     },
     {
@@ -59,12 +60,12 @@ export function CurrencyCard({ editable, defaultOrder, defaultAdvance }: { edita
       </div>,
     },
   ]
-  return <Panel flush className="uv-panel as-currencies">
+  return <Panel flush className="uv-panel as-currencies tb-blue ops-fit ops-currencies">
     <PanelHead id="as-currencies-title" title="Currencies"
       description="The currencies offered on orders and for the advance payment. Switch one off to stop offering it; orders and payments that already use it keep it."
       actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} disabled={!editable} onClick={() => { setError(''); setEditing('new') }}>Add currency</Button>} />
     {error && <p role="alert" className="uv-error as-inline">{error}</p>}
-    <DataTable compact sticky maxHeight="560px" pageSize={50} rows={sorted} columns={columns} rowKey={(c) => c.code} rowClassName={(c) => c.active ? undefined : 'uv-row-off'}
+    <DataTable compact stackBelow={1024} pageSize={50} rows={sorted} columns={columns} rowKey={(c) => c.code} rowClassName={(c) => c.active ? undefined : 'uv-row-off'}
       empty={<EmptyState title="No currencies yet" description="Add the currencies your orders are priced in." />} />
     {editing && <CurrencyDialog key={editing === 'new' ? 'new' : editing.code} item={editing === 'new' ? null : editing} existing={rows}
       onClose={() => setEditing(null)} onSaved={afterChange} />}

@@ -13,13 +13,14 @@ import { ClientDialog } from '@/features/clients/components/client-dialog'
 import { AgencyDialog } from '@/features/clients/components/agency-dialog'
 import { AgencyImportDialog } from '@/features/clients/components/agency-import-dialog'
 import { ActiveToggle } from '@/features/clients/components/active-toggle'
-import { Avatar, CopyButton, Flag, hueOf } from '@/features/clients/components/parts'
+import { Avatar, CopyButton, hueOf } from '@/features/clients/components/parts'
 import { agencyApi, useReferenceAgencies } from '@/features/clients/agency-api'
 import { agencyDisplayName, agencyPayloadFor, firstName } from '@/features/clients/client-form'
 import { activeFirst, agencyFilterParams, COUNTRY_OPTIONS, describeAgencyFilters, hasAgencyFilters, matchesAgencyFilters, NO_FILTERS, parseAgencyFilters, SPEC_OPTIONS, type ActivityFilter, type AgencyFilters } from '@/features/clients/agency-filters'
 import { highlightPhone, highlightPieces, matchesSearch, type Searchable } from '@/features/clients/client-search'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import '@/styles/clients-simple.css'
+import '@/styles/ops-tables.css'
 import '@/styles/touch-targets.css'
 import '@/styles/table-theme.css'
 
@@ -78,15 +79,14 @@ function ContactCell({ name, phone, email, query }: { name: string; phone: strin
     {name && <b title={name}><Hi text={name} query={query} /></b>}
     {phone && <span className="cl-line ident"><a href={`tel:${phone.replace(/[^\d+]/g, '')}`} title={phone} onClick={(event) => event.stopPropagation()}><HiPhone text={phone} query={query} /></a></span>}
     {email && <span className="cl-line"><a href={`mailto:${email}`} title={email} onClick={(event) => event.stopPropagation()}><Hi text={email} query={query} /></a><CopyButton value={email} label={`Copy email of ${name}`} /></span>}
-    {!phone && !email && <span className="cl-quiet">No phone or email</span>}
+    
   </div>
 }
 
-/** Flag in its own colours (a globe when no country is saved), the main place in bold and the finer detail under it. */
-function Location({ primary, secondary, country, query }: { primary: string; secondary?: string; country?: string; query: string }) {
+/** The main place in bold and the finer detail under it (no flag: the Tasks table look). */
+function Location({ primary, secondary, query }: { primary: string; secondary?: string; query: string }) {
   if (!primary && !secondary) return <Quiet />
   return <span className="cl-place is-stacked">
-    {country !== undefined && <Flag country={country} />}
     <span className="cl-place-text">
       <b title={primary || secondary}><Hi text={primary || secondary} query={query} /></b>
       {primary && secondary && <small title={secondary}><Hi text={secondary} query={query} /></small>}
@@ -95,11 +95,11 @@ function Location({ primary, secondary, country, query }: { primary: string; sec
 }
 
 /** A client's place is its country and city (the client and company records carry no state). */
-const clientPlace = (row: { country: string; city: string }) => ({ primary: row.country || row.city, secondary: row.country ? row.city : '', country: row.country })
+const clientPlace = (row: { country: string; city: string }) => ({ primary: row.country || row.city, secondary: row.country ? row.city : '' })
 
 /** Overlapping small avatars with the first names beside them, or a muted line when nobody is allocated. */
 function StaffStack({ staff, query }: { staff: { id: string; name: string }[]; query: string }) {
-  if (staff.length === 0) return <Quiet>No recruiter assigned</Quiet>
+  if (staff.length === 0) return <span className="cl-quiet" aria-label="No recruiter assigned">—</span>
   const shown = staff.slice(0, 4)
   const more = staff.length - shown.length
   const label = staff.map((person) => person.name).join(', ')
@@ -179,12 +179,12 @@ function AgencyCards({ rows, query, active, onEdit, onDelete }: { rows: AgencyRo
 /** The tables use the shared DataTable (the old directory's look and column alignment); on a phone it stacks into labelled rows. */
 function ClientTable({ rows, query, loading, onOpen, onEdit, onDelete }: { rows: ClientRow[]; query: string; loading: boolean; onOpen: (c: Client) => void; onEdit?: (c: Client) => void; onDelete?: (c: Client) => void }) {
   const columns: Column<ClientRow>[] = [
-    { key: 'agency', header: 'Company', width: '24%', minWidth: '12rem', render: (row) => <Identity name={row.agencyName || row.client.name} query={query} /> },
-    { key: 'contact', header: 'Contact person', width: '25%', align: 'left', render: (row) => <ContactCell name={row.client.name} phone={row.phone} email={row.email} query={query} /> },
-    { key: 'location', header: 'Location', width: '17%', align: 'left', render: (row) => <Location {...clientPlace(row)} query={query} /> },
-    { key: 'staff', header: 'Recruiter', width: '18%', align: 'left', render: (row) => <StaffStack staff={row.staff} query={query} /> },
+    { key: 'agency', header: 'Company', width: '24%', render: (row) => <Identity name={row.agencyName || row.client.name} query={query} /> },
+    { key: 'contact', header: 'Contact person', width: '26%', align: 'left', render: (row) => <ContactCell name={row.client.name} phone={row.phone} email={row.email} query={query} /> },
+    { key: 'location', header: 'Location', width: '14%', align: 'left', render: (row) => <Location {...clientPlace(row)} query={query} /> },
+    { key: 'staff', header: 'Recruiter', width: '15%', align: 'left', render: (row) => <StaffStack staff={row.staff} query={query} /> },
     {
-      key: 'actions', header: 'Actions', actions: true, minWidth: onDelete ? '12.5rem' : '10.5rem',
+      key: 'actions', header: 'Actions', actions: true,
       render: (row) => <span className="cs-row-actions">
         {onEdit && <button type="button" className="cs-icon-act" onClick={(event) => { event.stopPropagation(); onEdit(row.client) }} aria-label={`Edit ${row.agencyName || row.client.name}`} title="Edit"><Pencil size={14} aria-hidden="true" /></button>}
         {onDelete && <button type="button" className="cs-icon-act is-danger" onClick={(event) => { event.stopPropagation(); onDelete(row.client) }} aria-label={`Delete ${row.agencyName || row.client.name}`} title="Delete"><Trash2 size={14} aria-hidden="true" /></button>}
@@ -192,7 +192,7 @@ function ClientTable({ rows, query, loading, onOpen, onEdit, onDelete }: { rows:
       </span>,
     },
   ]
-  return <Panel flush className="tb-blue"><DataTable compact loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.client.id} onRowClick={(row) => onOpen(row.client)} /></Panel>
+  return <Panel flush className="tb-blue ops-fit ops-clients"><DataTable compact loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.client.id} onRowClick={(row) => onOpen(row.client)} /></Panel>
 }
 
 /**
@@ -202,22 +202,22 @@ function ClientTable({ rows, query, loading, onOpen, onEdit, onDelete }: { rows:
 function AgencyTable({ rows, query, pageKey = query, loading, active, onEdit, onDelete }: { rows: AgencyRow[]; query: string; pageKey?: string; loading: boolean; active?: ActiveControl; onEdit?: (a: ReferenceAgency) => void; onDelete?: (a: ReferenceAgency) => void }) {
   const empty = <span className="cl-quiet" aria-label="Not added">—</span>
   const columns: Column<AgencyRow>[] = [
-    { key: 'agency', header: 'Agency', width: '19%', minWidth: '10rem', render: ({ agency }) => <Identity avatar={false} name={agencyDisplayName(agency)} query={query} /> },
-    { key: 'contact', header: 'Contact', width: '20%', align: 'left', render: ({ agency }) => <ContactCell name={agency.name === agency.agencyName ? '' : agency.name} phone={agency.phone ?? ''} email={agency.email ?? ''} query={query} /> },
-    { key: 'location', header: 'Location', width: '13%', align: 'left', render: ({ agency }) => agency.place || agency.state || agency.address
+    { key: 'agency', header: 'Agency', width: '14%', render: ({ agency }) => <Identity avatar={false} name={agencyDisplayName(agency)} query={query} /> },
+    { key: 'contact', header: 'Contact', width: '16%', align: 'left', render: ({ agency }) => <ContactCell name={agency.name === agency.agencyName ? '' : agency.name} phone={agency.phone ?? ''} email={agency.email ?? ''} query={query} /> },
+    { key: 'location', header: 'Location', width: '11%', align: 'left', render: ({ agency }) => agency.place || agency.state || agency.address
       ? <Location primary={[agency.place, agency.state].filter(Boolean).join(', ')} secondary={agency.address} query={query} /> : empty },
-    { key: 'specialisation', header: 'Specialisation', width: '15%', align: 'left', render: ({ agency }) => <ChipList values={agency.specialisations} label="Specialisation" /> },
-    { key: 'country', header: 'Country', width: '10%', align: 'left', render: ({ agency }) => <ChipList values={agency.preferredCountries} label="Preferred country" /> },
+    { key: 'specialisation', header: 'Specialisation', width: '16%', align: 'left', render: ({ agency }) => <ChipList values={agency.specialisations} label="Specialisation" /> },
+    { key: 'country', header: 'Country', width: '9%', align: 'left', priority: 'low', render: ({ agency }) => <ChipList values={agency.preferredCountries} label="Preferred country" /> },
     {
-      key: 'actions', header: 'Actions', actions: true, pin: 'none', align: 'left', minWidth: '8.5rem',
+      key: 'actions', header: 'Actions', actions: true, pin: 'none', align: 'left',
       render: ({ agency }) => <span className="cs-row-actions">
         {onEdit && <button type="button" className="cl-open" onClick={() => onEdit(agency)} aria-label={`Edit ${agencyDisplayName(agency)}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
         {onDelete && <button type="button" className="cs-icon-act is-danger" onClick={() => onDelete(agency)} aria-label={`Delete ${agencyDisplayName(agency)}`} title="Delete"><Trash2 size={14} aria-hidden="true" /></button>}
       </span>,
     },
-    { key: 'active', header: 'Active', width: '9.5rem', align: 'left', pin: 'end', render: ({ agency }) => toggleOf(active, agency) },
+    { key: 'active', header: 'Active', width: '19%', align: 'left', pin: 'none', render: ({ agency }) => toggleOf(active, agency) },
   ]
-  return <Panel flush className="cs-agency-table"><DataTable compact sticky maxHeight="72vh" stackBelow={1024} loading={loading} resetPageKey={pageKey} rows={rows} columns={columns} rowKey={({ agency }) => agency.id} /></Panel>
+  return <Panel flush className="cs-agency-table tb-blue ops-fit ops-agencies"><DataTable compact stackBelow={1024} loading={loading} resetPageKey={pageKey} rows={rows} columns={columns} rowKey={({ agency }) => agency.id} /></Panel>
 }
 
 function Skeleton({ layout, side }: { layout: Layout; side: Side }) {

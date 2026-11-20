@@ -15,8 +15,9 @@ import { OrderDialog } from '@/features/jobs/components/job-dialogs'
 import { RecordAudit } from '@/features/master-data/components/record-audit'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { orderCounts } from '@/features/jobs/order-counts'
-import { AgreementPill, Avatar, Flag, Place, Progress, StageMini } from '@/features/clients/components/parts'
+import { AgreementPill, Avatar, Place, Progress, StageMini } from '@/features/clients/components/parts'
 import '@/styles/clients.css'
+import '@/styles/ops-tables.css'
 
 export default function ClientDetailPage() {
   const { id } = useParams()
@@ -80,7 +81,7 @@ export default function ClientDetailPage() {
           <h1>{title}<StatusPill status={client.status} /></h1>
           <p className="cd-sub">
             <span><UserRound size={14} aria-hidden="true" />{client.name}</span>
-            {location && <span><Flag country={client.country} />{location}</span>}
+            {location && <span>{location}</span>}
             {companies.length > 0 && <span><AgreementPill filed={filedCount} total={companies.length} short /></span>}
           </p>
         </div>
@@ -167,11 +168,11 @@ export default function ClientDetailPage() {
                               <td className="c-name">
                                 <button type="button" className="cd-cand" onClick={(event) => { event.stopPropagation(); setOpenApp(application.id) }} aria-label={`Open stages for ${candidate.name}`}>
                                   <Avatar name={candidate.name} size="sm" />
-                                  <span className="cd-cand-text"><b title={candidate.name}>{candidate.name}</b><small title={candidate.phone || candidate.email || undefined}>{candidate.phone || candidate.email || 'No contact added'}</small></span>
+                                  <span className="cd-cand-text"><b title={candidate.name}>{candidate.name}</b><small title={candidate.phone || candidate.email || undefined}>{candidate.phone || candidate.email}</small></span>
                                 </button>
                               </td>
                               <td className="c-stage"><StageMini no={application.currentStage} state={state} /></td>
-                              <td className="c-owner">{owner ? <span className="cd-owner"><Avatar name={owner.name} size="sm" /><span title={owner.name}>{owner.name.split(' ')[0]}</span></span> : <span className="cd-muted">Not assigned</span>}</td>
+                              <td className="c-owner">{owner ? <span className="cd-owner"><Avatar name={owner.name} size="sm" /><span title={owner.name}>{owner.name.split(' ')[0]}</span></span> : <span className="cd-muted" aria-label="Not assigned">—</span>}</td>
                               <td className="c-updated cd-muted">{ago(application.updatedAt)}</td>
                               <td className="c-status"><StatusPill status={application.status} /></td>
                               <td className="c-profile"><span className="cd-profile-actions"><ApplicationFormButton size="sm" iconOnly candidateId={candidate.id} orderId={application.orderId} /><Link to={`/candidates/${candidate.id}`} className="cd-profile" aria-label={`Open profile of ${candidate.name}`} onClick={(event) => event.stopPropagation()}>Profile</Link></span></td>

@@ -28,7 +28,7 @@ def _who(user: User, staff: str | None):
     """Whose candidates the caller may read: (supervisor, owner ids or a select of them for the rows, select of every recruiter or None)."""
     supervisor = is_admin_level(user)
     if supervisor:
-        everyone = select(User.id).where(User.role == Role.staff)
+        everyone = select(User.id).where(User.role == Role.staff, not_deleted_user())
         return supervisor, [staff] if staff not in (None, "all") else everyone, everyone
     if staff not in (None, "all", user.id):
         raise HTTPException(403, "You can only see your own candidates.")

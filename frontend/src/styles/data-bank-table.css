@@ -1,17 +1,19 @@
 /*
- * The Data Bank candidate table: Candidate, Contact, Source, Agent, Recruiter, Status, Actions.
- * Header and body cells share one padding (16px sides) and one alignment (text left, Actions right); widths are shares of the row;
- * every cell is a single line cut with an ellipsis; rows are 64px with a hairline between them. The job groups (data-bank-positions.css)
- * and the mobile cards use the same cells. Rules carry :root:root so they beat the shared grid skin (data-bank-v2.css, db-fit.css, skin.css).
+ * The Data Bank candidate table: Actions, Candidate, Contact, Source, Agency, Recruiter, Status. The look is the approved Tasks table (candidate-tables.css).
+ * Header and body cells share one padding (8px sides) and one alignment (text left); widths are shares of the row, never less than the least a column needs
+ * (dataBankColumns); words wrap at spaces, rows are at least 60px and grow. The job groups (data-bank-positions.css) and the mobile cards use the same
+ * cells. Rules carry :root:root so they beat the shared grid skin (data-bank-v2.css, db-fit.css, skin.css).
  */
 
 /* ---- cell content (table, job groups, cards) */
 .dbt-stack { display: flex; flex: 1 1 auto; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; max-width: 100%; text-align: left; }
 .dbt-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.dbt-main { min-width: 0; overflow: hidden; font-size: 13.5px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; color: var(--text-main); }
+.dbt-main { min-width: 0; font-size: 13px; line-height: 18px; overflow-wrap: break-word; color: var(--text-main); }
 strong.dbt-main { font-weight: 600; }
 .dbt-main.is-unread { font-style: italic; font-weight: 400; color: var(--text-muted); }
-.dbt-sub { display: block; min-width: 0; overflow: hidden; font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.dbt-sub { display: block; min-width: 0; font-size: 12px; line-height: 16px; overflow-wrap: break-word; color: var(--text-muted); }
+/* the e-mail is the one unbounded text: one line, an ellipsis, the whole address is the tooltip */
+.dbt-sub.is-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbt-flag { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--warning-fill); font-size: 11px; font-weight: 600; line-height: 16px; white-space: nowrap; color: var(--warning-ink); }
 .dbt-agent { display: block; max-width: 100%; font-size: 13px; font-weight: 400; }
 .db-status-summary { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
@@ -36,52 +38,39 @@ strong.dbt-main { font-weight: 600; }
 .dbt-line .db-wa { flex: none; width: 22px; height: 22px; }
 .dbt-line .db-wa svg { width: 16px; height: 16px; }
 
-/* recruiter, stage and status keep to one line wherever they sit */
+/* recruiter, stage and status: words wrap at spaces wherever they sit (the table, the job groups and the cards) */
 :is(.db-tbl.is-bank, .dbp-row, .db-mini) .db-owner { gap: 8px; max-width: 100%; font-size: 13px; justify-content: flex-start; text-align: left; }
-:is(.db-tbl.is-bank, .dbp-row, .db-mini) .db-owner > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(.db-tbl.is-bank, .dbp-row, .db-mini) .db-owner > span:last-child { min-width: 0; overflow-wrap: break-word; }
 :is(.db-tbl.is-bank, .dbp-row, .db-mini) .db-owner.is-empty { font-size: 13px; }
 :is(.db-tbl.is-bank, .dbp-row, .db-mini) .db-owner.is-empty svg { display: none; }
-:root:root :is(.db-tbl.is-bank, .dbp-row, .db-mini) .db-owner.is-empty > span { overflow: hidden; overflow-wrap: normal; white-space: nowrap; line-height: 18px; }
+:root:root :is(.db-tbl.is-bank, .dbp-row, .db-mini) .db-owner.is-empty > span { overflow: visible; overflow-wrap: break-word; white-space: normal; line-height: 18px; }
 :is(.db-tbl.is-bank, .dbp-row) .db-track { width: 100%; align-items: flex-start; gap: 5px; }
 :is(.db-tbl.is-bank, .dbp-row) .db-track-bar { width: 100%; max-width: 120px; }
 :root:root :is(.db-tbl.is-bank, .dbp-row) .db-track-text { align-items: center; justify-content: flex-start; gap: 6px; max-width: 100%; font-size: 12px; line-height: 18px; text-align: left; }
-:root:root :is(.db-tbl.is-bank, .dbp-row) .db-track-text span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root:root :is(.db-tbl.is-bank, .dbp-row) .db-track-text span { display: block; min-width: 0; overflow: visible; overflow-wrap: break-word; white-space: normal; }
 :is(.db-tbl.is-bank, .dbp-row, .db-mini) .db-pill { max-width: 100%; font-size: 12px; }
 :is(.db-tbl.is-bank, .dbp-row) .db-acts { flex-wrap: nowrap; justify-content: flex-end; gap: 4px; }
 :is(.db-tbl.is-bank, .dbp-row) .db-act, :is(.db-tbl.is-bank, .dbp-row) .db-menu-trigger { width: 32px; min-width: 32px; height: 32px; padding: 0; }
 
-/* ---- the table */
+/* ---- the table: the SAME look as the Tasks table (frame, header, row and column lines come from candidate-tables.css); this adds the Data Bank's cells.
+   Names, ids, agencies, recruiters and statuses WRAP at spaces; only the e-mail (unbounded, whole in the tooltip) is cut with an ellipsis. */
 :root:root .db-tbl.is-grid.is-fit.is-bank { font-size: 13px; }
-:root:root .db-tbl.is-grid.is-fit.is-bank thead th {
-  height: 48px; padding: 0 16px; overflow: hidden; text-align: left; vertical-align: middle; white-space: nowrap;
-  font-size: 12.5px; font-weight: 600; line-height: 16px; color: var(--text-muted);
-  background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card)); border-right: var(--table-line-width) solid var(--table-header-line); border-bottom: var(--table-frame-width) solid var(--table-line-strong);
-}
-:root:root .db-tbl.is-grid.is-fit.is-bank thead th.is-right { text-align: right; }
-:root:root .db-tbl.is-grid.is-fit.is-bank tbody tr:not(.db-xrow) > td {
-  height: 64px; padding: 8px 16px; overflow: hidden; text-align: left; vertical-align: middle;
-  background: var(--bg-card); border-right: 0; border-bottom: var(--table-line-width) solid var(--table-line);
-}
-:root:root .db-tbl.is-grid.is-fit.is-bank tbody tr:not(.db-xrow) > td.is-right { text-align: right; }
-:root:root .db-tbl.is-grid.is-fit.is-bank tbody tr.is-clickable:not(.db-xrow):hover > td { background: var(--tint-1); }
-:root:root .db-tbl.is-grid.is-fit.is-bank tbody tr.is-open:not(.db-xrow) > td { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
-:root:root .db-tbl.is-grid.is-fit.is-bank tbody tr.is-selected:not(.db-xrow) > td { background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); }
-/* Actions: the last column keeps its right padding, the buttons sit at the edge */
-:root:root .db-tbl.is-grid.is-fit.is-bank :is(th, td).is-right { padding-left: 0; }
-/* first cell: arrow, checkbox and name in one row */
-:root:root .db-tbl.is-grid.is-fit.is-bank :is(th, td).is-select { padding-left: 16px; padding-right: 16px; overflow: hidden; }
+:root:root .db-tbl.is-grid.is-fit.is-bank thead th { overflow: hidden; text-overflow: clip; }
+:root:root .db-tbl.is-grid.is-fit.is-bank tbody tr:not(.db-xrow) > td { overflow: hidden; }
+/* Actions: the buttons sit at the left edge of the first cell, next to the arrow */
+:root:root .db-tbl.is-grid.is-fit.is-bank :is(th, td).is-right { padding-left: 8px; }
+/* first cell: arrow, checkbox and buttons in one row */
+:root:root .db-tbl.is-grid.is-fit.is-bank :is(th, td).is-select { padding-left: 8px; padding-right: 8px; overflow: hidden; }
 .db-tbl.is-bank .db-selcell { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; min-width: 0; max-width: 100%; }
 .db-tbl.is-bank .db-selcell > * { flex: none; }
 .db-tbl.is-bank .db-selcell > .dbt-stack, .db-tbl.is-bank .db-selcell > .db-th-sort { flex: 1 1 auto; min-width: 0; }
 .db-tbl.is-bank .db-expand-gap { display: inline-block; width: 20px; }
 /* sort caret sits beside the label, not at the cell edge */
-.db-tbl.is-bank .db-th-sort { justify-content: flex-start; gap: 4px; font-weight: 600; text-align: left; }
+.db-tbl.is-bank .db-th-sort { justify-content: flex-start; gap: 4px; text-align: left; }
 .db-tbl.is-bank .db-th-caret { position: static; margin: 0; }
-.db-tbl.is-bank .db-th-sort.is-on .db-th-caret { color: var(--primary); opacity: 1; }
-.db-tbl.is-bank .db-th-label { overflow: hidden; text-overflow: ellipsis; }
-/* off-by-default columns (country, registry fields) stay on one line too */
-.db-tbl.is-bank .db-clamp { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; text-align: left; -webkit-line-clamp: unset; }
-.db-tbl.is-bank .db-cpills { flex-wrap: nowrap; justify-content: flex-start; overflow: hidden; }
+/* off-by-default columns (country, registry fields): free text is three lines, then an ellipsis (whole in the tooltip) */
+.db-tbl.is-bank .db-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: break-word; text-overflow: ellipsis; white-space: normal; font-size: 13px; line-height: 18px; text-align: left; }
+.db-tbl.is-bank .db-cpills { flex-wrap: wrap; justify-content: flex-start; }
 .db-tbl.is-bank .db-muted { font-size: 13px; }
 
 /* ---- mobile cards: name and status on top, contact, source and recruiter below */

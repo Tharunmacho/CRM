@@ -124,7 +124,7 @@ def attendance_report(db, user, day, agency_timezone, staff_id=None, *, at=None)
     team = is_admin_level(user)
     if not team and staff_id and staff_id != user.id:
         raise HTTPException(403, "You can view only your own attendance")
-    people = select(User).where(or_(User.role.in_([Role.staff, Role.manager]), User.id.in_(select(Attendance.user_id))))
+    people = select(User).where(or_(User.role.in_([Role.staff, Role.manager]), User.id.in_(select(Attendance.user_id))), not_deleted_user())
     if not team: people = people.where(User.id == user.id)
     elif staff_id: people = people.where(User.id == staff_id)
     # The shift and presence reads filter on the same people query, so all three can run at once.

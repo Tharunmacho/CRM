@@ -72,13 +72,18 @@ test('the Reports screen has a Client tracker entry with an Export Excel button 
   assert.match(api, /downloadClientTracker/)
 })
 
-test('the sheet cuts long cells with an ellipsis and a title; the address follows the stage filter', async () => {
+test('the sheet is the Tasks look: names wrap at spaces, only Remarks stops at three lines with a title; the address follows the stage filter', async () => {
   const css = await readFile(new URL('../src/styles/client-tracker.css', import.meta.url), 'utf8')
-  assert.match(css, /td:nth-child\(3\) \.ct-cell \{ -webkit-line-clamp: 1; \}/)
-  // Table rules: 44 px header kept in view, 56 px rows centred, 14 px side padding on header and cells, numbers right with tabular numerals.
-  assert.match(css, /\.ct-table th \{[^}]*position: sticky;[^}]*height: 44px;[^}]*padding: 0 14px;[^}]*font-size: 11\.5px;[^}]*text-transform: uppercase;[^}]*white-space: nowrap;/)
-  assert.match(css, /\.ct-table td \{[^}]*height: 56px;[^}]*padding: 8px 14px;[^}]*vertical-align: middle;/)
-  assert.match(css, /\.ct-table td\.is-num \{ font-variant-numeric: tabular-nums; \}/)
+  assert.match(css, /\.ct-cell \{ display: block; overflow-wrap: break-word; \}/) // no mid-word breaks, no ellipsis for names, clients, jobs
+  assert.ok(!/overflow-wrap: anywhere/.test(css))
+  assert.match(css, /td\.is-remarks \.ct-cell \{[^}]*-webkit-line-clamp: 3;/)
+  // Table rules: 44 px blue header kept in view, 56 px rows centred, 10px side padding on header and cells, S.No 8px and centred; a table from 1080px, cards below: never a sideways scroll.
+  assert.match(css, /@container ct \(min-width: 1080px\)/)
+  assert.match(css, /@container ct \(max-width: 1079px\)/)
+  assert.match(css, /thead th \{[^}]*position: sticky;[^}]*height: 44px;[^}]*padding: 0 8px 0 10px;[^}]*background: var\(--primary\);[^}]*font-size: 11\.5px;[^}]*text-transform: uppercase;[^}]*white-space: nowrap;/)
+  assert.match(css, /tbody td \{[^}]*height: 56px;[^}]*padding: 8px 8px 8px 10px;[^}]*vertical-align: middle;/)
+  assert.match(css, /overflow: auto; overflow-x: hidden; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--table-frame-radius, 6px\)/)
+  assert.ok(!/min-width: 1060px/.test(css))
   const view = await readFile(new URL('../src/features/reports/client-tracker.tsx', import.meta.url), 'utf8')
   assert.match(view, /next\.delete\('stage'\)/)   // Reset / another stage must not leave a stale ?stage= in the address
 })

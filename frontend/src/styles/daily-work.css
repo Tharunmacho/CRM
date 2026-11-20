@@ -68,13 +68,13 @@
    It sits on the scroll wrapper (.tk-table-wrap), so it stays whole when the table scrolls sideways; a table without a wrapper carries it itself.
    Only where it is a table (the panel is over 760px wide); below that each row is a card with its own single var(--table-line) border. */
 @container dw (min-width: 1080px) {
-  .dw .tk-table-wrap { box-sizing: border-box; overflow-x: auto; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: 0; }
+  .dw .tk-table-wrap { box-sizing: border-box; overflow-x: auto; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); }
   .dw .tk-table-wrap .dw-table thead th { border-top-width: 0; }
   .dw .dw-table:where(:not(.tk-table-wrap .dw-table)) { box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: 16px; overflow: hidden; }
 }
 /* one frame, never two: from 1100px wide (a panel over 760px) the panel gives up its own border around the framed table; as a card list
    (a phone) the panel's own single 1px border is the card border, the same var(--table-line) */
-.dw-panel:has(> .dw-scroll, > .tk-table-wrap) { border: var(--table-line-width) solid var(--table-line); border-radius: 0; }
+.dw-panel:has(> .dw-scroll, > .tk-table-wrap) { border: var(--table-line-width) solid var(--table-line); border-radius: 6px; }
 /* ONE set of edges: from 1360px (the table is a table, the cards are in rows) the panels that hold the recruiter cards, My day or a table frame
    have no chrome of their own (no border, no fill, no padding around the content), so the heading row, the cards and the table frame all start
    and end on the page's content edges, 16px apart (margin-bottom of .dw-panel), with the same 16px radius. Narrower, a panel is the card. */

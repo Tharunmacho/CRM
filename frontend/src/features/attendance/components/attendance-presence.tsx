@@ -78,12 +78,12 @@ export function PresenceView({ initialStaffId, initialDate, onUpdated }: { initi
   const hasTrackedStaff = rows.some((row) => row.presence.tracked)
 
   const columns: Column<StaffAttendance>[] = [
-    { key: 'name', header: 'Employee', width: '22%', render: (row) => <RecordIdentity name={row.name + (row.userId === store.me.id ? ' (you)' : '')} detail={roleLabel(row.role) + (!row.active ? ' · Inactive account' : '')} /> },
-    { key: 'state', header: 'Now', width: '17%', render: (row) => <div className="presence-state-stack"><Badge variant="dot" tone={row.attendance.status === 'checked_in' ? 'green' : 'neutral'}>{row.attendance.status === 'checked_in' ? 'Checked in' : 'Checked out'}</Badge>{row.presence.tracked ? <PresenceBadge status={row.presence.status} /> : <span className="att-muted">CRM use not tracked</span>}</div> },
+    { key: 'name', header: 'Employee', width: '18%', render: (row) => <RecordIdentity name={row.name + (row.userId === store.me.id ? ' (you)' : '')} detail={roleLabel(row.role) + (!row.active ? ' · Inactive account' : '')} /> },
+    { key: 'state', header: 'Now', width: '14%', render: (row) => <div className="presence-state-stack"><Badge variant="dot" tone={row.attendance.status === 'checked_in' ? 'green' : 'neutral'}>{row.attendance.status === 'checked_in' ? 'Checked in' : 'Checked out'}</Badge>{row.presence.tracked ? <PresenceBadge status={row.presence.status} /> : <span className="att-muted">CRM use not tracked</span>}</div> },
     { key: 'checked', header: 'Checked in', width: '12%', render: (row) => <div className="att-two"><strong>{durationLabel(row.attendance.totalSeconds)}</strong><small>{row.attendance.sessions.length} {row.attendance.sessions.length === 1 ? 'check-in' : 'check-ins'}</small></div> },
-    { key: 'online', header: 'Online in CRM', width: '11%', render: (row) => <span className="tnum">{row.presence.tracked ? durationLabel(row.presence.activeSeconds) : 'Not tracked'}</span> },
-    { key: 'idle', header: 'Idle in CRM', width: '10%', render: (row) => <span className="tnum">{row.presence.tracked ? durationLabel(row.presence.idleSeconds) : 'Not tracked'}</span> },
-    { key: 'away', header: 'Away or offline', width: '12%', render: (row) => <span className="tnum">{row.presence.tracked ? durationLabel(row.presence.offlineSeconds) : 'Not tracked'}</span> },
+    { key: 'online', header: 'Online in CRM', width: '14%', render: (row) => <span className="tnum">{row.presence.tracked ? durationLabel(row.presence.activeSeconds) : 'Not tracked'}</span> },
+    { key: 'idle', header: 'Idle in CRM', width: '13%', render: (row) => <span className="tnum">{row.presence.tracked ? durationLabel(row.presence.idleSeconds) : 'Not tracked'}</span> },
+    { key: 'away', header: 'Away or offline', width: '15%', render: (row) => <span className="tnum">{row.presence.tracked ? durationLabel(row.presence.offlineSeconds) : 'Not tracked'}</span> },
     { key: 'record', header: 'Record', width: '9%', actions: true, align: 'right', render: (row) => <Button size="sm" icon={<ArrowDown size={14} />} aria-label={'View check-ins for ' + row.name} title={'View check-ins for ' + row.name} onClick={() => inspect(row.userId)}>Check-ins</Button> },
   ]
 

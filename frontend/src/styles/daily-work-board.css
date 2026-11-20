@@ -98,3 +98,13 @@
   .tw-table .dw-row > td[data-label='DOC'] .dw-doc-add { padding-left: 0; }
 }
 @media (max-width: 640px), (pointer: coarse) { .dw-doc-add { min-height: 44px; } }
+
+/* ONE set of edges at every width: the Recruiters board has no chrome of its own (no border, fill or padding around its content), so its heading and
+ * cards start and end exactly where the table frame below them does (the table's frame, or its card list's border, is the same width as the page's
+ * content). At 1360px and up daily-work.css already does this; this makes it true for a 1280px window, a tablet and a phone too. */
+.dw-panel.dwb-board { overflow: visible; border-width: 0; border-radius: 0; background: transparent; }
+.dw-panel.dwb-board > .dw-panel-head { padding: 0 0 14px; }
+.dw-panel.dwb-board :is(.dwb-cards, .dwb-none) { padding-inline: 0; }
+.dw-panel.dwb-board .dwb-cards { padding-bottom: 4px; }
+/* a recruiter's or client's name is never cut with an ellipsis: it wraps at spaces onto a second line */
+.dwb-card-name b { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }

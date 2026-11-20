@@ -2,9 +2,10 @@
  * Table theme for the shared DataTable (opt in with class "tb-blue" on a wrapper around the table): the same look as the Tasks table.
  * Header band var(--primary) with var(--on-primary) text (dark mode follows the tokens), 700 weight, uppercase 11.5px, .05em letter-spacing,
  * 44px high, one line (ellipsis, the full label is the button's title); rows 56px with every cell vertically centred, 14px side padding so a
- * header and its cells share one left edge, a visible var(--table-line) line under every row (the last too) and between every pair of columns,
+ * header and its cells share one left edge, a faint var(--table-line) line under every row (the last too),
  * a var(--table-line-strong) edge under the header, the lighter var(--table-header-line) divider between header cells, hover tint, sticky header when
- * the table is. The 2px outer frame is the DataTable box's own (data-table.css); the stacked cards have no frame and no column lines.
+ * the table is. The thin outer frame (1px, 6px corner curve) is the DataTable box's own (data-table.css); between body columns there is a light
+ * var(--table-column-line) (fainter than the row line, not after the last column); the stacked cards have no frame and no column lines.
  * Text is left, a column declared align:'right' (numbers) is right with tabular figures. Below the table's stackBelow width the shared
  * stacked-card rules (data-table.css) apply, so only the header (hidden there) is themed unconditionally and the row metrics are gated.
  */
@@ -23,29 +24,41 @@
 .tb-blue .ui-data-table .ui-th-inner { max-width: 100%; }
 .tb-blue .ui-data-table .ui-th-inner > button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* row metrics: only while the table is a table (not the stacked cards) */
-:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
+/* row metrics: only while the table is a table (not the stacked cards); the narrow S NO column keeps 8px each side */
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); overflow-wrap: break-word; }
 :root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
 :root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
 :root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td.ui-c-center > :where(div, p, ul, .record-identity) { margin-inline: 0; }
 :root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) td:is([data-label='S NO' i], [data-label='S.NO' i], [data-label='S. NO' i], [data-label='SNO' i], [data-label='#'], .is-index) { padding-left: 8px; padding-right: 8px; }
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) th:is(.is-index, :has(.ui-th-inner > button[title='S NO' i], .ui-th-inner > button[title='S.NO' i], .ui-th-inner > button[title='S. NO' i], .ui-th-inner > button[title='SNO' i], .ui-th-inner > button[title='#'])) { padding-left: 8px; padding-right: 8px; }
 :root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) :is(th, td).ui-actions-cell { text-align: left; }
 @media (min-width: 768px) {
-  :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); overflow-wrap: break-word; }
   :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-768 :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-768 td:is([data-label='S NO' i], [data-label='S.NO' i], [data-label='S. NO' i], [data-label='SNO' i], [data-label='#'], .is-index) { padding-left: 8px; padding-right: 8px; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-768 th:is(.is-index, :has(.ui-th-inner > button[title='S NO' i], .ui-th-inner > button[title='S.NO' i], .ui-th-inner > button[title='S. NO' i], .ui-th-inner > button[title='SNO' i], .ui-th-inner > button[title='#'])) { padding-left: 8px; padding-right: 8px; }
 }
 @media (min-width: 1024px) {
-  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); overflow-wrap: break-word; }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1024 :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 td:is([data-label='S NO' i], [data-label='S.NO' i], [data-label='S. NO' i], [data-label='SNO' i], [data-label='#'], .is-index) { padding-left: 8px; padding-right: 8px; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 th:is(.is-index, :has(.ui-th-inner > button[title='S NO' i], .ui-th-inner > button[title='S.NO' i], .ui-th-inner > button[title='S. NO' i], .ui-th-inner > button[title='SNO' i], .ui-th-inner > button[title='#'])) { padding-left: 8px; padding-right: 8px; }
 }
 @media (min-width: 1280px) {
-  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); overflow-wrap: break-word; }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1280 :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 td:is([data-label='S NO' i], [data-label='S.NO' i], [data-label='S. NO' i], [data-label='SNO' i], [data-label='#'], .is-index) { padding-left: 8px; padding-right: 8px; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 th:is(.is-index, :has(.ui-th-inner > button[title='S NO' i], .ui-th-inner > button[title='S.NO' i], .ui-th-inner > button[title='S. NO' i], .ui-th-inner > button[title='SNO' i], .ui-th-inner > button[title='#'])) { padding-left: 8px; padding-right: 8px; }
 }
 :root:root .tb-blue .ui-data-table.ui-data-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }

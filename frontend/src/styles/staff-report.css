@@ -250,3 +250,26 @@
 /* the outer frame: the scroll box around the table (whole when the table scrolls sideways), radius kept */
 :root:root .sw-scroll { box-sizing: border-box; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
 :root:root .sw-scroll thead th { border-top-width: 0; }
+
+/*
+ * The weekly staff report's tables in the approved Tasks table look (tokens in theme.css): the primary-blue 44px header (one line, uppercase 11.5px / 700,
+ * faint dividers), a thin frame with the 6px curve on the scroll box, rows of at least 56px with every cell centred, a faint line under every row and a light
+ * line between columns, 10px side padding. These tabs are the legacy reports (hidden unless SHOW_LEGACY_REPORTS / the Accounts links are used); the
+ * stage matrix has up to 15 columns and may still scroll inside its frame on a narrow window.
+ */
+:root:root .sw-scroll { border-radius: var(--table-frame-radius, 6px); }
+:root:root:root .sw-table { border-collapse: separate; border-spacing: 0; }
+:root:root:root .sw-table thead th { box-sizing: border-box; height: 44px; padding: 0 8px 0 10px; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-transform: uppercase; vertical-align: middle; white-space: nowrap; }
+:root:root:root .sw-table thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
+:root:root:root .sw-table thead th :is(button, span) { color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+:root:root:root .sw-table thead th.num { padding: 0 14px 0 8px; text-align: right; }
+:root:root:root .sw-table :is(tbody, tfoot) :is(td, th) { box-sizing: border-box; height: 56px; padding: 8px 8px 8px 10px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: middle; overflow-wrap: break-word; }
+:root:root:root .sw-table :is(tbody, tfoot) :is(td, th):not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
+:root:root:root .sw-table :is(tbody, tfoot) td.num { padding: 8px 14px 8px 8px; }
+:root:root:root .sw-table :is(th, td):first-child { padding-left: 10px; }
+:root:root:root .sw-table :is(th, td):last-child { padding-right: 10px; }
+:root:root:root .sw-table tfoot :is(td, th) { background: var(--tint-2); font-weight: 700; }
+:root:root:root .sw-table tbody tr:hover > :is(td, th) { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
+:root:root:root .sw-matrix thead th { text-align: right; min-width: 0; max-width: none; }
+:root:root:root .sw-matrix thead th:first-child { text-align: left; }
+.sw-matrix thead th small { display: none; }

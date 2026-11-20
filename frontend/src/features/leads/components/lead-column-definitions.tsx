@@ -16,26 +16,26 @@ import {
  * fields (see lead-fields.ts) and its custom questions (`extras`) are columns that start switched off.
  */
 /** The three experience headings are shortened so every heading stays on one line; the full name is the header's tooltip. */
-export const LEAD_SHORT_HEADINGS = { experienceIndia: 'India exp.', experienceAbroad: 'Abroad exp.', experience: 'Total exp.' } as const
+export const LEAD_SHORT_HEADINGS = { name: 'Name', experienceIndia: 'India exp.', experienceAbroad: 'Abroad exp.', experience: 'Total exp.' } as const
 
 export function leadColumns(context: LeadColumnContext, extras: ExtraColumn[] = []): DbColumn<Lead>[] {
   const h = LEAD_HEADINGS
   /** Only an admin or MD ticks rows (bulk actions), so only their first column has room for the tick box. */
   const ticks = context.me ? context.me.role !== 'staff' : true
   const core: DbColumn<Lead>[] = [
-    { key: 'actions', header: h.actions, width: ticks ? 109 : 73, align: 'left', sticky: 'start', render: (l) => <LeadActions lead={l} context={context} /> },
-    { key: 'created', header: h.created, sortKey: 'created', width: 84, sticky: 'start', group: 'Workflow', render: (l) => <CreatedCell lead={l} /> },
-    { key: 'uploaded', header: h.uploaded, sortKey: 'uploaded', width: 96, sticky: 'start', optional: 8, group: 'Workflow', render: (l) => <UploadedCell lead={l} /> },
-    { key: 'name', header: h.name, sortKey: 'name', width: 180, align: 'left', className: 'ld-col-name', group: 'Person', sticky: 'start', render: (l) => <NameCell lead={l} /> },
-    { key: 'position', header: h.position, sortKey: 'position', width: 112, align: 'left', group: 'Job answers', render: (l) => <PositionCountryCell lead={l} /> },
-    { key: 'education', header: h.education, width: 94, align: 'left', group: 'Person', render: (l) => <EducationCell lead={l} /> },
-    { key: 'experienceIndia', header: LEAD_SHORT_HEADINGS.experienceIndia, headerTitle: h.experienceIndia, width: 86, group: 'Job answers', render: (l) => <ExperienceCell lead={l} kind="india" /> },
-    { key: 'experienceAbroad', header: LEAD_SHORT_HEADINGS.experienceAbroad, headerTitle: h.experienceAbroad, width: 86, group: 'Job answers', render: (l) => <ExperienceCell lead={l} kind="abroad" /> },
-    { key: 'experience', header: LEAD_SHORT_HEADINGS.experience, headerTitle: h.experience, width: 86, group: 'Job answers', render: (l) => <ExperienceCell lead={l} kind="total" /> },
-    { key: 'location', header: h.location, width: 84, align: 'left', group: 'Contact', render: (l) => <LocationCell lead={l} /> },
-    { key: 'campaign', header: h.campaign, sortKey: 'campaign', width: 164, align: 'left', optional: 6, group: 'Campaign & ad', render: (l) => <CampaignCell lead={l} /> },
-    { key: 'status', header: h.status, sortKey: 'status', width: 117, align: 'left', group: 'Workflow', render: (l) => <StatusOwnerCell lead={l} userById={context.userById} onViewRemarks={context.onViewRemarks} /> },
-    { key: 'resume', header: h.resume, width: 110, align: 'left', group: 'Workflow', render: (l) => <ResumeCell lead={l} block={workBlock(context, l)} onUpload={context.onUploadResume} onConvert={context.onConvert} /> },
+    { key: 'actions', header: h.actions, width: ticks ? 108 : 72, align: 'left', sticky: 'start', render: (l) => <LeadActions lead={l} context={context} /> },
+    { key: 'created', header: h.created, sortKey: 'created', width: 82, sticky: 'start', group: 'Workflow', render: (l) => <CreatedCell lead={l} /> },
+    { key: 'uploaded', header: h.uploaded, sortKey: 'uploaded', width: 92, sticky: 'start', optional: 12, group: 'Workflow', render: (l) => <UploadedCell lead={l} /> },
+    { key: 'name', header: LEAD_SHORT_HEADINGS.name, headerTitle: h.name, sortKey: 'name', width: 162, align: 'left', className: 'ld-col-name', group: 'Person', sticky: 'start', render: (l) => <NameCell lead={l} /> },
+    { key: 'position', header: h.position, sortKey: 'position', width: 104, align: 'left', group: 'Job answers', render: (l) => <PositionCountryCell lead={l} /> },
+    { key: 'education', header: h.education, width: 88, optional: 10, align: 'left', group: 'Person', render: (l) => <EducationCell lead={l} /> },
+    { key: 'experienceIndia', header: LEAD_SHORT_HEADINGS.experienceIndia, headerTitle: h.experienceIndia, width: 80, group: 'Job answers', render: (l) => <ExperienceCell lead={l} kind="india" /> },
+    { key: 'experienceAbroad', header: LEAD_SHORT_HEADINGS.experienceAbroad, headerTitle: h.experienceAbroad, width: 96, group: 'Job answers', render: (l) => <ExperienceCell lead={l} kind="abroad" /> },
+    { key: 'experience', header: LEAD_SHORT_HEADINGS.experience, headerTitle: h.experience, width: 86, optional: 8, group: 'Job answers', render: (l) => <ExperienceCell lead={l} kind="total" /> },
+    { key: 'location', header: h.location, width: 116, align: 'left', optional: 9, group: 'Contact', render: (l) => <LocationCell lead={l} /> },
+    { key: 'campaign', header: h.campaign, sortKey: 'campaign', width: 164, align: 'left', optional: 11, group: 'Campaign & ad', render: (l) => <CampaignCell lead={l} /> },
+    { key: 'status', header: h.status, sortKey: 'status', width: 106, align: 'left', group: 'Workflow', render: (l) => <StatusOwnerCell lead={l} userById={context.userById} onViewRemarks={context.onViewRemarks} /> },
+    { key: 'resume', header: h.resume, width: 100, align: 'left', group: 'Workflow', render: (l) => <ResumeCell lead={l} block={workBlock(context, l)} onUpload={context.onUploadResume} onConvert={context.onConvert} /> },
     { key: 'contact', header: h.contact, width: 214, align: 'left', optional: 4, off: true, group: 'Contact', render: (l) => <ContactCell lead={l} /> },
     { key: 'state', header: h.state, width: 95, align: 'left', optional: 5, off: true, group: 'Contact', render: (l) => <StateCell lead={l} /> },
     { key: 'profile', header: 'Education / Marital status', width: 130, align: 'left', optional: 7, off: true, group: 'Person', render: (l) => <ProfileCell lead={l} /> },

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.api.schemas import UserOut, Wire
 from app.core.deps import require_role, require_admin_level
 from app.core.roles import parse_role
-from app.db.models import DELETED_EMAIL_DOMAIN, AuditEntry, Role, User, not_deleted_user
+from app.db.models import HIDDEN_EMAIL_SUFFIXES, AuditEntry, Role, User, not_deleted_user
 from app.db.session import get_db
 from app.services.parallel_reads import parallel_reads
 from app.services import user_admin
@@ -57,7 +57,7 @@ class UserFields(Wire):
         if not isinstance(value, str):
             raise ValueError('Enter a valid email address.')
         value = value.strip().lower()
-        if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', value) or value.endswith('@' + DELETED_EMAIL_DOMAIN):
+        if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', value) or value.endswith(HIDDEN_EMAIL_SUFFIXES):
             raise ValueError('Enter a valid email address.')
         return value
 

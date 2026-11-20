@@ -19,7 +19,7 @@
 .att-mx-day.is-today > b, .att-mx-day.is-today > small { color: var(--primary); }
 .att-mx-person { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font-family: inherit; text-align: left; cursor: pointer; }
 .att-mx-person .record-avatar { width: 28px; height: 28px; font-size: 10.5px; }
-.att-mx-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; color: var(--text-main); }
+.att-mx-name { min-width: 0; font-size: 13.5px; line-height: 1.3; overflow-wrap: break-word; font-weight: 600; color: var(--text-main); }
 .att-mx-person:hover .att-mx-name { color: var(--primary); }
 .att-mx-person:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 6px; }
 .att-cell { position: relative; display: grid; place-items: center; height: 28px; border-radius: 5px; background: color-mix(in srgb, var(--c) 15%, var(--bg-card)); color: color-mix(in srgb, var(--c) 85%, var(--text-main)); font-size: 9px; font-weight: 600; letter-spacing: -.02em; cursor: default; }

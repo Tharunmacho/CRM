@@ -2,10 +2,12 @@
  * The default table theme (the owner's look, the same as the Tasks table) for every table that has no theme of its own.
  *   header   a band in the primary blue: var(--primary) with var(--on-primary) text (white in the light themes, near-black on the lighter
  *            dark-theme blue), 700 weight, uppercase 11.5px, .05em tracking, one line, 44px high;
- *   rows     at least 56px, vertically centred, 14px side padding (a header and its cells share one left edge), a visible line under
- *            EVERY row, the last one too (var(--table-line)), a column line between every pair of columns, a soft hover tint;
- *   frame    the table is framed: var(--table-frame-width) solid var(--table-line-strong) all round, the radius kept; the header's bottom edge is
- *            the same strong line and the divider between header cells is the lighter var(--table-header-line). One source of truth: theme.css.
+ *   rows     at least 56px, vertically centred, 14px side padding (a header and its cells share one left edge; the narrow S NO column 8px), a
+ *            faint line under EVERY row, the last one too (var(--table-line)), a LIGHT line between body columns (var(--table-column-line),
+ *            fainter than the row line, not after the last column), text wrapping at spaces only, a soft hover tint;
+ *   frame    the table is framed: var(--table-frame-width) (1px) solid var(--table-line-strong) all round with a small var(--table-frame-radius) (6px)
+ *            curve; the header's bottom edge is the same line and the divider between header cells is the lighter var(--table-header-line).
+ *            One source of truth: theme.css.
  *   controls in the header (sort buttons, arrows, the select-all box) inherit the colour; keyboard focus is an on-primary outline.
  * The shared DataTable sets this itself in data-table.css (grid variants). THIS sheet is the safety net for every other table in the main
  * area, dialogs and side sheets (.workspace, .workspace-dialog, .workspace-sheet): hand-written report, tracker and list tables, and the
@@ -20,11 +22,11 @@
  * A table with card labels (td[data-label]) is only a table from 1280px; below that it is stacked cards and gets no frame (its screen sheet
  * frames it where it is a table, e.g. tasks-table.css). */
 :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table table, .db-scroll table, .tk-table-wrap table, .ct-scroll table, .tv-table-wrap table, .fee-collection-scroll table, .sw-scroll table, :has(td[data-label]))) {
-  box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); overflow: hidden;
+  box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); overflow: hidden;
 }
 @media (min-width: 1280px) {
   :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table table, .db-scroll table, .tk-table-wrap table, .ct-scroll table, .tv-table-wrap table, .fee-collection-scroll table, .sw-scroll table)):has(td[data-label]) {
-    box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); overflow: hidden;
+    box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); overflow: hidden;
   }
 }
 
@@ -47,17 +49,27 @@
 :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) thead .custom-checkbox:is(:checked, :indeterminate) { border-color: var(--on-primary); background-color: var(--on-primary); }
 :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) thead .custom-checkbox:is(:checked, :indeterminate)::after { background-color: var(--primary); }
 
-/* ---------- rows: a line under every row (the last too) and between every pair of columns, 56px, centred, hover tint ---------- */
+/* ---------- rows: a faint line under every row (the last too), a light line between columns, 56px, centred, hover tint ---------- */
 :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody td:where(:not([data-label])),
 :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody th:where(:not([data-label])) {
-  box-sizing: border-box; height: 56px; padding-top: 8px; padding-bottom: 8px; padding-inline: 14px; vertical-align: middle; border-bottom: var(--table-line-width) solid var(--table-line);
+  box-sizing: border-box; height: 56px; padding-top: 8px; padding-bottom: 8px; padding-inline: 14px; vertical-align: middle; border-bottom: var(--table-line-width) solid var(--table-line); overflow-wrap: break-word;
 }
 @media (min-width: 1280px) {
   :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody td[data-label],
   :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody th[data-label] {
-    box-sizing: border-box; height: 56px; padding-top: 8px; padding-bottom: 8px; padding-inline: 14px; vertical-align: middle; border-bottom: var(--table-line-width) solid var(--table-line);
+    box-sizing: border-box; height: 56px; padding-top: 8px; padding-bottom: 8px; padding-inline: 14px; vertical-align: middle; border-bottom: var(--table-line-width) solid var(--table-line); overflow-wrap: break-word;
   }
 }
+:root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody :is(td, th):where(:not([data-label])):not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
+@media (min-width: 1280px) {
+  :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody :is(td, th)[data-label]:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
+}
+/* the narrow number column (S NO): 8px each side, so its header text never touches the frame */
+:root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody td.is-index { padding-inline: 8px; }
+@media (min-width: 1280px) {
+  :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody td:is([data-label='S NO' i], [data-label='S.NO' i], [data-label='S. NO' i], [data-label='SNO' i], [data-label='#']) { padding-inline: 8px; }
+}
+:root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) th:is(.is-index, :has(button[title='S NO' i], button[title='S.NO' i], button[title='S. NO' i], button[title='SNO' i], button[title='#'])) { padding-inline: 8px; }
 :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody tr:hover > :is(td, th):where(:not([data-label])) { background-color: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
 @media (min-width: 1280px) {
   :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody tr:hover > :is(td, th) { background-color: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }

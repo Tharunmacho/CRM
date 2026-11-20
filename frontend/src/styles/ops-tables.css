@@ -1,0 +1,98 @@
+/*
+ * Ops tables (Clients, Agencies, Jobs, Users, Currencies, WhatsApp intake, agency import preview, Matched candidates, Fee collections, client-detail
+ * candidate lists): the approved Tasks look, FITTING. The look itself (blue header band, 1px frame with a 6px curve, a faint line under every row, a light
+ * line between body columns, S NO 8px) comes from the shared tokens and sheets (theme.css, data-table.css, table-theme.css); this sheet only
+ * adds what these screens need on top, under the class ops-fit on the panel around the table:
+ *   - the table is fixed layout at 100% of its panel, its columns are percentages, so there is NO sideways scroll (a column marked low folds
+ *     away below 1280px; below the table's stackBelow width the rows are labelled cards);
+ *   - text wraps at spaces only (overflow-wrap: break-word, never anywhere); names, clients, jobs, places and specialisations are never cut by an
+ *     ellipsis. Only unbounded text (an email address) keeps one, and carries the full text as its tooltip;
+ *   - the header is one line (it is never cut: the widths leave room for the longest label).
+ * Tokens only, so light and dark mode follow.
+ */
+:root:root .ops-fit .ui-data-table table { width: 100%; min-width: 0; table-layout: fixed; }
+:root:root .ops-fit .ui-data-table .ui-table-scroll { overflow-x: clip; overflow-y: visible; max-height: none; }
+:root:root .ops-fit .ui-data-table :is(th, td) { min-width: 0; overflow-wrap: break-word; word-break: normal; }
+:root:root .ops-fit .ui-data-table thead th { overflow: hidden; text-overflow: clip; white-space: nowrap; overflow-wrap: normal; }
+:root:root .ops-fit .ui-data-table thead th :is(.ui-th-inner, button) { overflow: visible; text-overflow: clip; }
+/* the frame is the table box's: thin, 6px curve (the shared tokens), clipping the header corners */
+:root:root .ops-fit .ui-data-table:is(.is-grid, .is-plain) { border: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); border-radius: var(--table-frame-radius, 6px); }
+
+/* names and places wrap at spaces; no ellipsis, no clamp */
+:root:root .ops-fit :is(.record-name, .cl-cell > b, .cl-cell > span:not(.cl-line), .cl-place-text b, .cl-place-text small, .uv-name > span, .jv-cell-title, .jv-cell-sub, .as-name, .wa-doc-caption, .ai-cell) {
+  max-width: none; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; word-break: normal; -webkit-line-clamp: unset;
+}
+:root:root .ops-fit :is(.record-name, .cl-cell > b, .cl-place-text b, .cl-place-text small) { display: block; }
+:root:root .ops-fit .cs-stack-names { min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
+/* a phone number may hold two numbers: wrap them; an email keeps its single line with the tooltip */
+:root:root .ops-fit .cl-cell > .cl-line > a[href^='tel:'] { overflow: visible; text-overflow: clip; white-space: normal; }
+:root:root .ops-fit .cl-cell > .cl-line { align-items: flex-start; }
+/* chips (specialisation, country) wrap to the next line; the text of one chip is never cut */
+:root:root .ops-fit .cs-tags { flex-wrap: wrap; }
+:root:root .ops-fit .cs-tag { max-width: 100%; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
+:root:root .ops-fit .uv-work { white-space: normal; }
+:root:root .ops-fit .uv-flags { max-width: none; }
+:root:root .ops-fit .js-openings { max-width: none; }
+
+/* the Actions column is a share of the table (the DataTable cannot give an actions header a width) */
+:root:root .ops-fit .ui-data-table table.is-fixed th.ui-actions-cell { width: 20%; min-width: 0; }
+:root:root .ops-fit.ops-clients .ui-data-table table.is-fixed th.ui-actions-cell { width: 21%; }
+:root:root .ops-fit.ops-agencies .ui-data-table table.is-fixed th.ui-actions-cell { width: 15%; }
+:root:root .ops-fit.ops-jobs .ui-data-table table.is-fixed th.ui-actions-cell { width: 17%; }
+:root:root .ops-fit.ops-users .ui-data-table table.is-fixed th.ui-actions-cell { width: 16%; }
+:root:root .ops-fit.ops-currencies .ui-data-table table.is-fixed th.ui-actions-cell { width: 25%; }
+:root:root .ops-fit .ui-data-table :is(th, td).ui-actions-cell { min-width: 0; text-align: left; }
+:root:root .ops-fit :is(.cs-row-actions, .uv-actions, .wa-doc-actions) { flex-wrap: wrap; justify-content: flex-start; }
+:root:root .ops-fit .ui-data-table td.ui-actions-cell { white-space: normal; }
+
+/* the narrow row-number column of the import preview: 8px each side, like S NO */
+:root:root .ops-import .ui-data-table :is(th, td):first-child { padding-inline: 8px; text-align: center; }
+.ops-import { min-width: 0; max-width: 100%; }
+
+/* ---------- Fee collections: a plain table inside its own frame, restyled to the same look ---------- */
+:root:root .ops-fees .fee-collection-scroll { overflow: hidden; border: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); border-radius: var(--table-frame-radius, 6px); }
+.ops-fees table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; white-space: normal; font-size: 13px; }
+.ops-fees col.fc-name { width: 18%; }
+.ops-fees col.fc-invoice { width: 10%; }
+.ops-fees col.fc-fee { width: 10%; }
+.ops-fees col.fc-gst { width: 7%; }
+.ops-fees col.fc-total { width: 11%; }
+.ops-fees col.fc-invoiced { width: 9%; }
+.ops-fees col.fc-received { width: 9%; }
+.ops-fees col.fc-balance { width: 8%; }
+.ops-fees col.fc-status { width: 11%; }
+.ops-fees col.fc-manage { width: 7%; }
+:root:root .ops-fees thead th { box-sizing: border-box; height: 44px; padding: 0 10px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: left; text-transform: uppercase; white-space: nowrap; overflow: hidden; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); }
+:root:root .ops-fees thead th:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-header-line); }
+:root:root .ops-fees tbody td { height: 56px; padding: 8px 10px; vertical-align: middle; text-align: left; font-size: 13px; line-height: 1.35; overflow-wrap: break-word; border-bottom: var(--table-line-width, 1px) solid var(--table-line); }
+:root:root .ops-fees tbody td:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-column-line, color-mix(in srgb, var(--border-main) 55%, var(--bg-card))); }
+:root:root .ops-fees tbody tr:hover > td { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
+.ops-fees td b { font-weight: 600; }
+.ops-fees .fee-payment-status { white-space: normal; }
+.ops-fees td:is(:nth-child(3), :nth-child(4), :nth-child(5), :nth-child(6), :nth-child(7), :nth-child(8)) { font-variant-numeric: tabular-nums; }
+@media (max-width: 1279px) { .ops-fees :is(.fc-low, col.fc-gst, col.fc-invoiced) { display: none; } }
+@media (max-width: 700px) {
+  .ops-fees :is(col.fc-fee, col.fc-total, col.fc-invoice, col.fc-balance) { display: none; }
+  .ops-fees tr > :is(:nth-child(2), :nth-child(3), :nth-child(5), :nth-child(8)) { display: none; }
+  .ops-fees thead th, .ops-fees tbody td { padding-inline: 8px; }
+}
+
+/* ---------- client detail: the candidates of a job, the same look inside the job card ---------- */
+.cd-order-list .cd-cands { box-sizing: border-box; width: calc(100% - 40px); margin: 0 20px 20px; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); border-radius: var(--table-frame-radius, 6px); overflow: hidden; }
+:root:root .cd-order-list .cd-cands thead th { box-sizing: border-box; height: 44px; padding: 0 10px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: left; text-transform: uppercase; white-space: nowrap; overflow: hidden; border-top: 0; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); }
+:root:root .cd-order-list .cd-cands thead th:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-header-line); }
+:root:root .cd-order-list .cd-cands tbody td { height: 56px; padding: 8px 10px; vertical-align: middle; text-align: left; overflow-wrap: break-word; border-bottom: var(--table-line-width, 1px) solid var(--table-line); }
+:root:root .cd-order-list .cd-cands tbody td:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-column-line, color-mix(in srgb, var(--border-main) 55%, var(--bg-card))); }
+:root:root .cd-order-list .cd-cands :is(th, td):first-child { padding-left: 10px; }
+:root:root .cd-order-list .cd-cands :is(th, td):last-child { padding-right: 10px; text-align: left; }
+.cd-order-list .cd-cands .cd-cand-text > :is(b, small), .cd-order-list .cd-cands .cd-owner > span:last-child { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
+.cd-order-list .cd-cands .cd-profile-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 760px) {
+  /* a phone: labelled rows (clients.css), one thin 6px-radius border around the list, no clipped text */
+  .cd-order-list .cd-cands { display: block; width: calc(100% - 32px); margin: 0 16px 16px; }
+  :root:root .cd-order-list .cd-cands tbody td { height: auto; border-right: 0; }
+}
+
+/* ---------- order detail: matched candidates ---------- */
+:root:root .ops-matched .ui-data-table .jv-cell-title { white-space: normal; }
+:root:root .ops-matched .ui-data-table .truncate { overflow: visible; text-overflow: clip; white-space: normal; }

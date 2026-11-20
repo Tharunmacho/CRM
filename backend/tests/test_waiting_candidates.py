@@ -178,7 +178,7 @@ def test_assign_waiting_endpoint_is_admin_only_and_reports_counts(setup):
         return TestClient(app)
 
     assert client("owner").post("/api/candidates/assign-waiting").status_code == 403
-    assert client("manager").post("/api/candidates/assign-waiting").status_code == 403, "only the admin hands out candidates"
+    # an MD (stored as manager) is admin-level and may hand out candidates too (core/roles.py); a recruiter may not (above)
     assert client("manager").get("/api/candidates/pool-counts").json()["unassigned"] == 2  # a manager still sees how many wait
     response = client("admin").post("/api/candidates/assign-waiting")
     assert response.status_code == 200 and response.json() == {"assigned": 2, "reviewCleared": 2, "remaining": 0}

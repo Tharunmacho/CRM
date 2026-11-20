@@ -21,10 +21,10 @@
  * The long selector prefix is deliberate: it out-ranks the shared .dw-table rules, which the Follow-up and Reports tables still use.
  */
 /* The approved Tasks look: a THIN (1px) outer border with SQUARE corners, a faint line under each row, no column lines. */
-.dw { --table-frame-width: 1px; --table-line: var(--border-main); --table-line-strong: var(--border-control); }
+.dw { --table-frame-width: 1px; --table-frame-radius: 6px; --table-line: var(--border-main); --table-line-strong: var(--border-control); --table-column-line: color-mix(in srgb, var(--border-main) 55%, var(--bg-card)); }
 
 @container dw (min-width: 1080px) {
-  :root .dw .tw-table.dw-table.dw-main { --tw-pad-l: 10px; --tw-pad-r: 10px; width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
+  :root .dw .tw-table.dw-table.dw-main { --tw-pad-l: 8px; --tw-pad-r: 8px; width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
 
   /* ---- header: 44px, one line, one left edge with the cells ---- */
   :root .dw .tw-table.dw-table.dw-main thead th { height: 44px; padding: 0 8px 0 var(--tw-pad-l); overflow: hidden; border-left: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1; text-align: left; text-transform: uppercase; text-wrap: nowrap; white-space: nowrap; overflow-wrap: normal; }
@@ -32,11 +32,13 @@
 
   /* ---- body: rows of at least 60px that grow with a second line, vertically centred, one padding, a visible var(--table-line) line under EVERY row (the last one too), no column lines ---- */
   :root .dw .tw-table.dw-table.dw-main tbody td { height: 60px; padding: 8px var(--tw-pad-r) 8px var(--tw-pad-l); border: 0; border-bottom: var(--table-line-width) solid var(--table-line); text-align: left; vertical-align: middle; overflow-wrap: break-word; }
+  /* A LIGHT line between the columns (the owner asked for it back): fainter than the row line. */
+  :root .dw .tw-table.dw-table.dw-main tbody td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
   :root .dw .tw-table.dw-table.dw-main .dw-row:hover { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
   :root .dw .tw-table.dw-table.dw-main .dw-row:hover > td.is-actions { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
 
   /* S NO: narrow, centred, tabular numerals (header and cells share the centre) */
-  :root .dw .tw-table.dw-table.dw-main :is(th, td):first-child { padding-inline: 0; text-align: center; }
+  :root .dw .tw-table.dw-table.dw-main :is(th, td):first-child { padding-inline: 8px; text-align: center; }
   :root .dw .tw-table.dw-table.dw-main td.is-num { font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-muted); }
 
   /* text columns: wrap onto a second line, and only after two lines an ellipsis (the full text is always the tooltip) */
@@ -49,6 +51,12 @@
   /* DOC: the date as calm tabular text (it may wrap to "19 Nov / 2026"); the empty state is a quiet primary text-button with a calendar icon, 32px tall, no underline */
   .dw .tw-table .dw-doc { font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.35; white-space: normal; color: var(--text-main); }
   .dw .tw-table .dw-doc-add { gap: 4px; height: 32px; min-height: 32px; margin-left: -6px; padding: 0 6px; border-radius: 8px; font-size: 12px; font-weight: 600; line-height: 1; color: var(--primary); text-decoration: none; transition: background-color .12s; }
+  /* DOC typed in the cell: dd/mm/yyyy, 32px tall, fills its cell, a quiet box that turns blue on focus and red when the date is not real. */
+  .dw .tw-table .dw-doc-input { box-sizing: border-box; width: 100%; min-width: 0; height: 32px; padding: 0 2px; border: 1px solid var(--border-control); border-radius: 6px; background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 11px; letter-spacing: 0; text-align: center; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .dw .tw-table .dw-doc-input::placeholder { color: var(--text-muted); font-weight: 400; }
+  .dw .tw-table .dw-doc-input:focus { outline: 2px solid var(--primary); outline-offset: 0; border-color: var(--primary); }
+  .dw .tw-table .dw-doc-input.is-error { border-color: var(--error-ink); background: var(--error-fill, var(--bg-card)); }
+  .dw .tw-table .dw-doc-input:disabled { opacity: .6; cursor: progress; }
   .dw .tw-table .dw-doc-add > svg { flex: none; width: 13px; height: 13px; }
   .dw .tw-table .dw-doc-add:hover { background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); text-decoration: none; }
   .dw .tw-table .dw-doc-add:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }

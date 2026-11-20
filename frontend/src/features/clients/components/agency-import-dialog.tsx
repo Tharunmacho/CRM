@@ -10,10 +10,11 @@ import {
   type AgencyImportOptions, type AgencyImportPreview, type AgencyImportResult, type AgencyImportRow,
 } from '../agency-import-model'
 import '@/styles/agency-import.css'
+import '@/styles/ops-tables.css'
 
 function ImportRows({ preview }: { preview: AgencyImportPreview }) {
   const columns: Column<AgencyImportRow>[] = [
-    { key: 'row', header: 'Row', width: '6%', render: row => row.rowNumber },
+    { key: 'row', header: 'Row', width: '8%', render: row => row.rowNumber },
     { key: 'agency', header: 'Agency / contact', width: '25%', align: 'left', render: row => <div className="ai-cell">
       <strong>{row.values.agencyName || '—'}{row.values.activeAgency === true && <span className="ai-active">Active</span>}</strong>
       {row.values.name && row.values.name !== row.values.agencyName && <span>{row.values.name}</span>}
@@ -28,7 +29,7 @@ function ImportRows({ preview }: { preview: AgencyImportPreview }) {
       <span className={`ai-status is-${row.status}`}>{AGENCY_IMPORT_STATUS[row.status]}</span><span>{row.message}</span>
     </div> },
   ]
-  return <DataTable compact pageSize={10} rows={preview.rows} rowKey={row => String(row.rowNumber)} columns={columns} resetPageKey={preview.previewHash} />
+  return <div className="tb-blue ops-fit ops-import"><DataTable compact pageSize={10} rows={preview.rows} rowKey={row => String(row.rowNumber)} columns={columns} resetPageKey={preview.previewHash} /></div>
 }
 
 /** A read-only preview followed by an explicit, hash-bound import. Failed confirmations must be re-previewed. */

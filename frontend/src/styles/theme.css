@@ -717,20 +717,28 @@
   --nav-shadow: none;
 }
 
-/* ---- Table lines (the ONE source of truth for every table border on the site) ----
-   --table-line         the line under every row (no lines between columns in the body), pager rule              (1px)
-   --table-line-strong  the outer frame around a table and the header's bottom edge                          (frame 2px)
-   --table-header-line  the very faint column divider inside the primary-blue header band (the body has none)
-   They are mixed from the text colour into the card background, so every palette follows and both themes stay visible. */
+/* ---- Table lines (the ONE source of truth for every table border on the site; the approved Tasks table look) ----
+   --table-line          the faint line under EVERY row, pager rule                                          (1px, var(--border-main))
+   --table-column-line   the LIGHT line between body columns, fainter than the row line, never on the last column   (1px)
+   --table-line-strong   the thin outer frame around a table and the header's bottom edge                      (var(--border-control))
+   --table-frame-width   the frame's width (1px); --table-frame-radius its small corner curve (6px; overflow clips the header corners)
+   --table-header-line   the very faint column divider inside the primary-blue header band
+   They are built from the palette's own border tokens, so every palette follows and both themes stay visible. */
 :root {
   --table-line-width: 1px;
-  --table-frame-width: 2px;
-  --table-line: color-mix(in srgb, var(--text-main) 32%, var(--bg-card));
-  --table-line-strong: color-mix(in srgb, var(--text-main) 45%, var(--bg-card));
+  --table-frame-width: 1px;
+  --table-frame-radius: 6px;
+  --table-line: var(--border-main);
+  --table-column-line: color-mix(in srgb, var(--border-main) 55%, var(--bg-card));
+  --table-line-strong: var(--border-control);
   --table-header-line: color-mix(in srgb, var(--on-primary) 16%, var(--primary));
 }
 [data-theme="dark"] {
-  --table-line: color-mix(in srgb, var(--text-main) 26%, var(--bg-card));
-  --table-line-strong: color-mix(in srgb, var(--text-main) 40%, var(--bg-card));
+  --table-line-width: 1px;
+  --table-frame-width: 1px;
+  --table-frame-radius: 6px;
+  --table-line: var(--border-main);
+  --table-column-line: color-mix(in srgb, var(--border-main) 55%, var(--bg-card));
+  --table-line-strong: var(--border-control);
   --table-header-line: color-mix(in srgb, var(--on-primary) 16%, var(--primary));
 }

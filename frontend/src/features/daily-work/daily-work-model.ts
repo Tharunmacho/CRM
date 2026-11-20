@@ -367,16 +367,16 @@ export interface TaskColumn { key: string; title: string; width: number; left?: 
  * and the right padding).
  */
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
-  { key: 'no', title: 'S NO', width: 32 },
-  { key: 'doc', title: 'DOC', width: 84, left: true },
-  { key: 'client', title: 'CLIENT', width: 108, left: true },
-  { key: 'position', title: 'JOB', width: 92, left: true },
-  { key: 'candidate', title: 'CANDIDATE', width: 130, left: true },
-  { key: 'staff', title: 'Recruiter', width: 96, supervisor: true, left: true },
-  { key: 'agency', title: 'AGENCY', width: 94, left: true },
-  { key: 'stage', title: 'STAGE', width: 124, left: true },
-  { key: 'today', title: 'TODAY', width: 106, left: true },
-  { key: 'remarks', title: 'REMARKS', width: 126, left: true },
+  { key: 'no', title: 'S NO', width: 40 },
+  { key: 'doc', title: 'DOC', width: 94, left: true },
+  { key: 'client', title: 'CLIENT', width: 102, left: true },
+  { key: 'position', title: 'JOB', width: 100, left: true },
+  { key: 'candidate', title: 'CANDIDATE', width: 140, left: true },
+  { key: 'staff', title: 'Recruiter', width: 82, supervisor: true, left: true },
+  { key: 'agency', title: 'AGENCY', width: 80, left: true },
+  { key: 'stage', title: 'STAGE', width: 120, left: true },
+  { key: 'today', title: 'TODAY', width: 100, left: true },
+  { key: 'remarks', title: 'REMARKS', width: 134, left: true },
   { key: 'actions', title: 'Actions', width: 116, quiet: true },
 ]
 

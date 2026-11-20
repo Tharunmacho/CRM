@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Loader2, Trash2 } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
 import type { User } from '@/shared/model/types'
@@ -7,12 +7,12 @@ import { Button, Field, Select } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { useStaffAvailability } from '@/features/staff/use-staff-availability'
 import { canReceiveManualAssignment, manualAssignmentLabel } from '@/features/staff/availability-model'
-import { LEAVE_UNASSIGNED, deleteQuery, deleteReady, hasWorkToMove, successText, workSummaryText, type DeleteSummary } from '@/features/staff/delete-user-model'
+import { DELETE_DESCRIPTION, DELETE_NOTE, DELETING_TEXT, LEAVE_UNASSIGNED, deleteQuery, deleteReady, hasWorkToMove, successText, workSummaryText, type DeleteSummary } from '@/features/staff/delete-user-model'
 import { RolePill, UserAvatar, failureText } from './user-ui'
 
-/** Delete a Recruiter's account: the login goes, history stays, and the person's candidates, open tasks and leads go where the admin says. */
+/** Delete a Recruiter's account permanently: the account is removed, history stays under "Former user", and the person's candidates, open tasks and leads go where the admin says. */
 export function DeleteUserDialog({ user, onClose, onDeleted, onDeactivateInstead }: {
-  user: User; onClose: () => void; onDeleted: (message: string) => Promise<void>; onDeactivateInstead: () => void
+  user: User; onClose: () => void; onDeleted: (message: string, userId: string) => Promise<void>; onDeactivateInstead: () => void
 }) {
   const store = useStore()
   const availability = useStaffAvailability({ enabled: true })
@@ -42,22 +42,22 @@ export function DeleteUserDialog({ user, onClose, onDeleted, onDeactivateInstead
     setBusy(true); setError('')
     try {
       await api.del('/users/' + user.id + deleteQuery(validChoice))
-      await onDeleted(successText(user.name, summary, chosen ? chosen.name : null))
+      // The row is gone on the server now: the screen drops the person at once, then refreshes in the background.
+      await onDeleted(successText(user.name, summary, chosen ? chosen.name : null), user.id)
     } catch (err) { setError(failureText(err)); availability.refresh() }
     finally { setBusy(false) }
   }
 
   return <Dialog open onClose={close} width="md" title={`Delete ${user.name}?`}
-    description="The sign-in is removed for good. Everything they did stays in the history."
+    description={DELETE_DESCRIPTION}
     footer={<>
       <Button disabled={busy} variant="ghost" onClick={close}>Cancel</Button>
       {error && <Button disabled={busy} variant="secondary" onClick={onDeactivateInstead}>Deactivate instead</Button>}
-      <Button variant="danger" disabled={!ready} onClick={() => void submit()}>{busy ? 'Deleting…' : 'Delete user'}</Button>
+      <Button variant="danger" disabled={!ready} aria-busy={busy} icon={busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />} onClick={() => void submit()}>{busy ? 'Deleting…' : 'Delete user'}</Button>
     </>}>
     <div className="form-stack uv-delete">
       <div className="uv-target"><UserAvatar name={user.name} /><div><p>{user.name}</p><span>{user.email}</span></div><RolePill role={user.role} /></div>
-      <p className="uv-note">They will no longer be able to sign in, and they disappear from the team list and every picker. Their notes, calls, remarks, uploads and
-        audit entries are kept and keep their name, marked as a former user. This cannot be undone.</p>
+      <p className="uv-note">{DELETE_NOTE}</p>
       {summaryError && <p role="alert" className="uv-error">{summaryError}</p>}
       {!summary && !summaryError && <p role="status" className="uv-note">Checking what this person still holds…</p>}
       {summary && <div className="uv-delete-summary" role="status"><AlertTriangle size={16} aria-hidden="true" /><span>{moves ? <>This person holds <strong>{workSummaryText(summary)}</strong>.</> : <strong>Nothing to move.</strong>}</span></div>}
@@ -72,6 +72,7 @@ export function DeleteUserDialog({ user, onClose, onDeleted, onDeactivateInstead
           </Select>
         </Field>
       </>}
+      {busy && <p role="status" className="uv-note">{DELETING_TEXT}</p>}
       {error && <p role="alert" className="uv-error">{error}</p>}
       {store.me.id === user.id && <p className="uv-warn">You cannot delete your own account.</p>}
     </div>

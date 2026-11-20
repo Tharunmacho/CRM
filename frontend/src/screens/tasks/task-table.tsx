@@ -24,12 +24,12 @@ export interface TaskTableProps {
   canWork: (row: TaskRow) => boolean
   onOpen: (row: TaskRow) => void
   onProfile: (row: TaskRow) => void
-  /** The candidate's application form on its Overview tab, where the date of commencement is filled in. */
-  onAddDoc: (row: TaskRow) => void
+  /** Save the date of commencement typed in the DOC cell (null clears it). */
+  onSaveDoc: (row: TaskRow, iso: string | null) => Promise<void>
   onRemark: (row: TaskRow, text: string) => Promise<void>
 }
 
-export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, onProfile, onAddDoc, onRemark }: TaskTableProps) {
+export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, onProfile, onSaveDoc, onRemark }: TaskTableProps) {
   const columns = taskColumnsFor(supervisor)
   const layout = columnLayout(columns)
   return (
@@ -48,7 +48,7 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
             return (
               <tr key={row.candidateId} className="dw-row">
                 <td className="is-num tnum" data-label="S NO">{index + 1}</td>
-                <td data-label="DOC" className={cn(!row.commencementDate && !(work && row.applicationId) && 'is-empty')}><DocCell item={row} canAdd={work} onAdd={() => onAddDoc(row)} /></td>
+                <td data-label="DOC" className={cn(!row.commencementDate && !(work && row.applicationId) && 'is-empty')}><DocCell item={row} canAdd={work} onSave={(iso) => onSaveDoc(row, iso)} /></td>
                 <td data-label="CLIENT" className={cn('is-left', !row.client && 'is-empty')}><ClientCell item={row} /></td>
                 <td data-label="JOB" className={cn('is-left', !row.position && 'is-empty')}><PositionCellView item={row} /></td>
                 <td data-label="CANDIDATE NAME" className="is-left"><RecordIdentity name={row.candidate} /></td>

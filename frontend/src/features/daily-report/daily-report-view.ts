@@ -289,7 +289,7 @@ export function leadCols(report?: Pick<DailyReport, 'leadSheet'>): TableCol[] {
     col('callback', 'Call back', { info: 'Of the leads contacted, those that still have a follow-up date.' }),
     col('notInterested', 'Not interested', { info: LEAD_INFO.notInterested }),
     col('wrongNumber', 'Wrong number', { info: 'Of the leads contacted, those with a wrong number.' }),
-    col('noResponse', 'No answer / not reachable', { info: 'Of the leads contacted, those who did not answer or could not be reached.' }),
+    col('noResponse', 'No answer / not reachable', { head: 'No response', info: 'Of the leads contacted, those who did not answer or could not be reached.' }),
     col('notContacted', 'Not contacted', { info: period ? 'Leads the person owns that have never been contacted (the same count as the Lead sheet screen).' : 'Leads the person holds that were not contacted in the period.' }),
   ]
 }

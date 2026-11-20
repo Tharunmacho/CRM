@@ -39,18 +39,21 @@ test('fit: everything that fits is shown, comfortably, with nothing hidden', () 
   assert.ok(!result.keys.includes('extra'), 'columns that start off stay off')
 })
 
-test('fit: tighter spacing comes before any column is hidden', () => {
-  const all = sum(COLUMNS.filter((c) => !c.off).map((c) => c.key)) // 1260
-  const result = fit.fitColumns(COLUMNS, Math.ceil(all * fit.COMPACT_RATIO) + fit.FIT_GUTTER + 1)
-  assert.equal(result.compact, true)
-  assert.equal(result.hidden, 0)
+test('fit: a column is hidden before any is squeezed (columns are never narrower than their stated width)', () => {
+  assert.equal(fit.COMPACT_RATIO, 1)
+  const all = sum(COLUMNS.filter((c) => !c.off).map((c) => c.key))
+  const exact = fit.fitColumns(COLUMNS, all + fit.FIT_GUTTER)
+  assert.equal(exact.hidden, 0, 'everything shows when the minimums add up to the box')
+  const tight = fit.fitColumns(COLUMNS, all + fit.FIT_GUTTER - 1)
+  assert.ok(tight.hidden > 0, 'one pixel short: a column goes instead of every column losing a little')
+  assert.ok(sum(tight.keys) <= all + fit.FIT_GUTTER - 1 - fit.FIT_GUTTER)
 })
 
 test('fit: when it still does not fit, the highest optional number goes first and the shown columns always fit', () => {
   const result = fit.fitColumns(COLUMNS, 1000)
   assert.ok(!result.keys.includes('campaign'), 'campaign (4) is hidden before created (3), experience (2) and location (1)')
   for (const key of ['actions', 'name', 'contact', 'position', 'status', 'resume']) assert.ok(result.keys.includes(key), `${key} is never hidden`)
-  assert.ok(sum(result.keys) * (result.compact ? fit.COMPACT_RATIO : 1) <= 1000 - fit.FIT_GUTTER)
+  assert.ok(sum(result.keys) <= 1000 - fit.FIT_GUTTER)
   assert.equal(result.hidden, COLUMNS.filter((c) => !c.off).length - result.keys.length)
   // table order is kept
   assert.deepEqual(result.keys, COLUMNS.filter((c) => result.keys.includes(c.key)).map((c) => c.key))

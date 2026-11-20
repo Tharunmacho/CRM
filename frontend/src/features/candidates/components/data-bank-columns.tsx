@@ -238,7 +238,7 @@ export function ContactLines({ candidate, mark = plain }: CellProps) {
         {candidate.phone ? <span className="dbt-main ident">{mark(candidate.phone)}</span> : <Dash />}
         {whatsappHref(candidate.whatsapp) && <WhatsAppLink candidate={candidate} />}
       </span>
-      {candidate.email && <small className="dbt-sub" title={candidate.email}>{mark(candidate.email)}</small>}
+      {candidate.email && <small className="dbt-sub is-email" title={candidate.email}>{mark(candidate.email)}</small>}
     </span>
   )
 }
@@ -291,6 +291,10 @@ export function WhatsAppLink({ candidate }: { candidate: Candidate }) {
 
 /** The whole fixed front cell: expand arrow, checkbox, and three 32px buttons with 4px gaps (Application form, Request (staff) or Delete (admin), and the menu). Fixed, so no row ever wraps or clips them. */
 export const ROW_BUTTONS_WIDTH = 190
+/** A recruiter has no checkbox and no Delete: arrow, Application form, Request and the menu. */
+export const STAFF_BUTTONS_WIDTH = 150
+/** Least width (px) of the text columns: the longest usual word (a recruiter's first name, an agency word) and the heading with its sort caret. */
+const BANK_COLUMN_LEAST: Record<string, number> = { candidate: 176, contact: 168, source: 96, agent: 112, owner: 130, status: 104 }
 
 /**
  * The Data Bank table: Actions (the row buttons, first, right after the expand arrow and checkbox), Candidate, Contact, Source,
@@ -301,9 +305,10 @@ export const ROW_BUTTONS_WIDTH = 190
 export function dataBankColumns({ store, onOpen, onReassign, onEdit, options, directoryPending = false }: ColumnContext): DbColumn<Candidate>[] {
   const context = bankContext(store, options)
   const spec = Object.fromEntries(BANK_TABLE_COLUMNS.map((column) => [column.key, column]))
-  const base = (key: (typeof BANK_TABLE_COLUMNS)[number]['key']) => ({ key, header: spec[key].header, sortKey: spec[key].sortKey, width: bankColumnWidth(spec[key]), align: spec[key].align })
+  /** The least each column needs for its words and its heading in full (the table hides optional columns before it narrows one). */
+  const base = (key: (typeof BANK_TABLE_COLUMNS)[number]['key']) => ({ key, header: spec[key].header, sortKey: spec[key].sortKey, width: Math.max(bankColumnWidth(spec[key]), BANK_COLUMN_LEAST[key] ?? 0), align: spec[key].align })
   const rowButtons: DbColumn<Candidate> = {
-    ...base('actions'), width: ROW_BUTTONS_WIDTH, align: 'left', group: undefined,
+    ...base('actions'), width: store.me.role === 'staff' ? STAFF_BUTTONS_WIDTH : ROW_BUTTONS_WIDTH, align: 'left', group: undefined,
     render: (c) => <RowActions candidate={c} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} />,
   }
   const core: DbColumn<Candidate>[] = [

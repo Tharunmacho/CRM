@@ -5,15 +5,18 @@
  * zebra stripes and a hover tint; a horizontal scroll area whose pinned first and actions columns show a soft shadow when content has
  * scrolled under them; stacked cards below the table's stackBelow width (no band, no row lines, label/value pairs). Tokens only
  * (theme.css), so every palette and dark mode follow. `plain` opts a table out (styles/table-default.css gives it the same look).
- * Lines (tokens in theme.css, one source of truth): an OUTER FRAME of var(--table-frame-width) var(--table-line-strong) around the whole table
- * (the .ui-data-table box: header, rows and pager; radius kept, overflow clips the corners), var(--table-line-width) var(--table-line) under every row
- * (the last one too) and between every pair of columns, a lighter divider between header cells, and a var(--table-frame-width) strong edge under the
- * header. Stacked cards (below stackBelow) have no frame and no column lines: each card keeps one var(--table-line) border.
+ * Lines (tokens in theme.css, one source of truth; the approved Tasks table look): a THIN OUTER FRAME of var(--table-frame-width) (1px)
+ * var(--table-line-strong) around the whole table (the .ui-data-table box: header, rows and pager) with a SMALL var(--table-frame-radius) (6px) curve
+ * (overflow clips the header corners), a faint var(--table-line) under every row (the last one too), a LIGHT var(--table-column-line) between body
+ * columns (fainter than the row line, never after the last column), a very faint divider between header cells and the strong line under the header.
+ * Cell padding is 14px with the header on the same left edge as the cells; the narrow S NO column takes 8px so its header never touches the frame.
+ * Text wraps at spaces only (overflow-wrap: break-word, never `anywhere`, no ellipsis for normal text).
+ * Stacked cards (below stackBelow) have no frame and no column lines: each card keeps one var(--table-line) border.
  * Rules carry :root:root so they beat the older table skin in depth.css and skin.css; a screen can still re-theme with a longer selector.
  */
 .ui-data-table.is-grid { background: var(--bg-card); }
 /* the outer frame: one strong border around header, rows and pager; the radius is kept, overflow clips the corners */
-:root:root .ui-data-table:is(.is-grid, .is-plain) { box-sizing: border-box; overflow: hidden; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
+:root:root .ui-data-table:is(.is-grid, .is-plain) { box-sizing: border-box; overflow: hidden; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); }
 .ui-data-table.is-grid .ui-table-scroll { position: relative; overscroll-behavior-x: contain; }
 :root:root .ui-data-table.is-grid table { width: 100%; min-width: var(--tbl-min, 0); border-collapse: separate; border-spacing: 0; color: var(--text-main); }
 @media (max-width: 1279px) { :root:root .ui-data-table.is-grid table { min-width: var(--tbl-min-md, var(--tbl-min, 0)); } }
@@ -56,11 +59,18 @@
 :root:root .ui-data-table.is-grid.is-zebra tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 3%, var(--bg-card)); }
 :root:root .ui-data-table.is-grid tbody td {
   box-sizing: border-box; height: 56px; padding: 8px 14px; vertical-align: middle; font-size: 13.5px; line-height: 1.4; color: var(--text-main);
-  border-bottom: var(--table-line-width) solid var(--table-line);
+  border-bottom: var(--table-line-width) solid var(--table-line); overflow-wrap: break-word; word-break: normal;
 }
+/* the light line between body columns (not after the last one); a stacked card drops it with its `border: 0` below */
+:root:root .ui-data-table.is-grid tbody td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
+/* the default cell text wraps at spaces over as many lines as it needs (no clamp, no ellipsis); the row grows */
+:root:root .ui-data-table.is-grid tbody td > span.block.line-clamp-2 { display: block; overflow: visible; -webkit-line-clamp: unset; line-clamp: unset; }
 :root:root .ui-data-table.is-grid.is-compact tbody td, :root:root .ui-data-table.is-grid.is-dense tbody td { height: 56px; padding: 8px 14px; font-size: 13px; }
 :root:root .ui-data-table.is-grid :is(th, td):first-child { padding-left: 14px; }
 :root:root .ui-data-table.is-grid :is(th, td):last-child { padding-right: 14px; }
+/* the narrow number column (S NO): 8px each side, so its header text never touches the frame */
+:root:root .ui-data-table.is-grid td:is([data-label='S NO' i], [data-label='S.NO' i], [data-label='S. NO' i], [data-label='SNO' i], [data-label='#'], .is-index) { padding-inline: 8px; }
+:root:root .ui-data-table.is-grid th:is(.is-index, :has(.ui-th-inner > button[title='S NO' i], .ui-th-inner > button[title='S.NO' i], .ui-th-inner > button[title='S. NO' i], .ui-th-inner > button[title='SNO' i], .ui-th-inner > button[title='#'])) { padding-inline: 8px; }
 :root:root .ui-data-table.is-grid:is(.is-zebra, :not(.is-zebra)) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
 :root:root .ui-data-table.is-grid tbody tr:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .ui-data-table.is-grid td .text-micro { color: var(--text-muted); }

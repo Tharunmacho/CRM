@@ -371,9 +371,9 @@
    content scrolled under it). Rules carry :root:root so they beat the shared table skin in skin.css.
    ====================================================================================================== */
 .db-scroll { position: relative; max-height: max(480px, calc(100vh - 150px)); overflow: auto; overscroll-behavior-x: contain; background: var(--bg-card); }
-/* the outer frame of every grid table (Data Bank, Matched, Lead sheet, uploads): var(--table-frame-width) var(--table-line-strong), radius kept.
+/* the outer frame of every grid table (Data Bank, Matched, Lead sheet, uploads): var(--table-frame-width) var(--table-line-strong), the small --table-frame-radius corner.
    The panel around it gives up its own border (one frame, never two). */
-:root:root .db-scroll:has(> .db-tbl.is-grid) { box-sizing: border-box; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
+:root:root .db-scroll:has(> .db-tbl.is-grid) { box-sizing: border-box; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); }
 :root:root .db .db-panel:has(> .db-box .db-scroll > .db-tbl.is-grid), :root:root .db-panel:has(> .db-box .db-scroll > .db-tbl.is-grid) { border-color: transparent; }
 :root:root .db-tbl.is-grid { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; color: var(--text-main); }
 :root:root .db-tbl.is-grid thead th {

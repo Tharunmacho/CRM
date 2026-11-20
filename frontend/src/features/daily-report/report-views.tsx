@@ -125,7 +125,7 @@ export function DailyView({ report, allTime = false, roster, today, timeZone, sc
     </section>
     {byClient.length > 0 && showByClient(byClient, clientFilter) && onDrillClient && <section className="dw-panel" aria-label="By client">
       <div className="dw-panel-head"><div><h2><Building2 size={16} aria-hidden="true" /> By client</h2></div></div>
-      <FigureTable caption="By client: the figures of the period for each client" cols={cols} tailHead="Total" tailWidth={112} tailNumeric nameHeader="Client" scope={`${scope}|clients`} onDrill={(metric, id) => id && onDrillClient(metric, id)}
+      <FigureTable caption="By client: the figures of the period for each client" cols={cols} tailHead="Total" tailNumeric nameHeader="Client" scope={`${scope}|clients`} onDrill={(metric, id) => id && onDrillClient(metric, id)}
         groups={[{ key: 'clients', title: '', icon: null, rows: byClient.map((row): FigureRow => ({ id: row.id, name: row.name, cells: row.cells, tail: <strong className="tnum">{numberText(row.cells.total)}</strong> })) }]} />
     </section>}
   </>
@@ -199,14 +199,14 @@ export function LeadSheetView({ report, roster, today, scope, staff, onPickStaff
       <PanelHead title="Everyone's leads" staff={staff} roster={roster} onPickStaff={onPickStaff} team={team} />
       {groups.length === 0
         ? <p className="dwb-none">Nobody in this selection.</p>
-        : <FigureTable caption="Lead sheet monitoring: each person's leads and what the leads said" cols={cols} tailHead={LEAD_PCT_COL.label} tailWidth={150} groups={groups} total={totalRow} selectedId={staff} scope={scope}
-          onDrill={onDrill} onPickName={team ? onPickStaff : undefined} dense colWidth={92} nameWidth={200} />}
+        : <FigureTable caption="Lead sheet monitoring: each person's leads and what the leads said" cols={cols} tailHead={LEAD_PCT_COL.label} tailWidth={120} groups={groups} total={totalRow} selectedId={staff} scope={scope}
+          onDrill={onDrill} onPickName={team ? onPickStaff : undefined} dense nameWidth={200} />}
     </section>
     {sheet
       ? <section className="dw-panel dwr-status" aria-label="Lead status now">
         <div className="dw-panel-head"><div><h2>Lead status now</h2></div></div>
         {status.length === 0 ? <p className="dwb-none">No leads on the sheet.</p>
-          : <table className="dw-table"><thead><tr><th scope="col" className="is-left">Status</th><th scope="col" className="is-num">Leads</th><th scope="col" className="is-num">Share</th></tr></thead>
+          : <table className="dw-table"><colgroup><col /><col style={{ width: '16%' }} /><col style={{ width: '16%' }} /></colgroup><thead><tr><th scope="col" className="is-left">Status</th><th scope="col" className="is-num">Leads</th><th scope="col" className="is-num">Share</th></tr></thead>
             <tbody>{status.map(item => <tr key={item.key}><th scope="row" className="is-left dwr-status-name">{item.label}</th><td className="is-num tnum">{numberText(item.count)}</td><td className="is-num tnum">{item.pct}%</td></tr>)}</tbody></table>}
       </section>
       : <p className="dwr-quiet">{NEEDS_SERVER}</p>}

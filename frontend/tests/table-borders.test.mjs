@@ -6,9 +6,12 @@ import test from 'node:test'
 
 /*
  * Table borders: ONE source of truth (theme.css) and every table on the site draws its lines from it.
- *   --table-line          the line under every row (the last one too), 1px; there are NO lines between columns in the body
- *   --table-line-strong   the outer frame (2px) and the header's bottom edge
- *   --table-header-line   the very faint column divider inside the primary-blue header band (the body has none)
+ *   --table-line          the faint line under every row (the last one too), 1px (var(--border-main))
+ *   --table-column-line   the LIGHT line between body columns, 1px, fainter than the row line, never after the last column
+ *   --table-line-strong   the thin outer frame (1px, var(--border-control)) and the header's bottom edge
+ *   --table-frame-radius  the frame's small corner curve (6px); overflow clips the header corners
+ *   --table-header-line   the very faint column divider inside the primary-blue header band
+ * (the approved Tasks table look, now the default for every table)
  * The stylesheets are read as text; the real colours and widths were measured in the browser (see the task report).
  */
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -36,32 +39,34 @@ test('theme.css defines the table line variables, in the light and the dark them
   const block = css.slice(at)
   const light = block.slice(block.indexOf(':root {'), block.indexOf('[data-theme="dark"] {'))
   const dark = block.slice(block.indexOf('[data-theme="dark"] {'))
-  assert.match(light, /--table-line-width: 1px;/)
-  assert.match(light, /--table-frame-width: 2px;/)
-  assert.match(light, /--table-line: color-mix\(in srgb, var\(--text-main\) (?:30|31|32|33|34|35)%, var\(--bg-card\)\);/, 'a clearly visible neutral, about a third of the text colour')
-  assert.match(light, /--table-line-strong: color-mix\(in srgb, var\(--text-main\) (?:4\d|50)%, var\(--bg-card\)\);/, 'the frame is stronger than the inside lines')
-  assert.match(light, /--table-header-line: color-mix\(in srgb, var\(--on-primary\) (?:1\d|2\d)%, var\(--primary\)\);/, 'a very faint divider in the blue header')
-  assert.match(dark, /--table-line: color-mix\(in srgb, var\(--text-main\) \d+%, var\(--bg-card\)\);/)
-  assert.match(dark, /--table-line-strong: color-mix\(in srgb, var\(--text-main\) \d+%, var\(--bg-card\)\);/)
-  assert.match(dark, /--table-header-line: color-mix\(in srgb, var\(--on-primary\) (?:1\d|2\d)%, var\(--primary\)\);/)
-  const pct = (text, name) => Number(text.match(new RegExp(`${name}: color-mix\\(in srgb, var\\(--text-main\\) (\\d+)%`))[1])
-  assert.ok(pct(light, '--table-line-strong') > pct(light, '--table-line'), 'light: strong is stronger')
-  assert.ok(pct(dark, '--table-line-strong') > pct(dark, '--table-line'), 'dark: strong is stronger')
+  for (const [mode, text] of [['light', light], ['dark', dark]]) {
+    assert.match(text, /--table-line-width: 1px;/, `${mode}: 1px lines`)
+    assert.match(text, /--table-frame-width: 1px;/, `${mode}: a thin 1px frame`)
+    assert.match(text, /--table-frame-radius: 6px;/, `${mode}: a small 6px corner curve`)
+    assert.match(text, /--table-line: var\(--border-main\);/, `${mode}: the faint row line`)
+    assert.match(text, /--table-line-strong: var\(--border-control\);/, `${mode}: the frame is the control border, stronger than the row line`)
+    assert.match(text, /--table-column-line: color-mix\(in srgb, var\(--border-main\) (\d+)%, var\(--bg-card\)\);/, `${mode}: a light body column line`)
+    assert.ok(Number(text.match(/--table-column-line: color-mix\(in srgb, var\(--border-main\) (\d+)%/)[1]) < 100, `${mode}: the column line is fainter than the row line`)
+    assert.match(text, /--table-header-line: color-mix\(in srgb, var\(--on-primary\) (?:1\d|2\d)%, var\(--primary\)\);/, `${mode}: a very faint divider in the blue header`)
+  }
 })
 
-test('the shared DataTable: a 2px strong frame around the box, a 1px line under every row (the last too), no column lines in the body', async () => {
+test('the shared DataTable: a thin framed box with a 6px curve, a 1px line under every row (the last too), a light column line in the body (not after the last column)', async () => {
   const css = await read('styles/data-table.css')
   const frame = rule(css, ':root:root .ui-data-table:is(.is-grid, .is-plain) {')
   assert.match(frame, /border: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
   assert.match(frame, /overflow: hidden/)
-  assert.match(frame, /border-radius: var\(--radius-xl, 10px\)/, 'the radius is kept')
+  assert.match(frame, /border-radius: var\(--table-frame-radius, 6px\)/, 'a small 6px curve')
   const cell = rule(css, ':root:root .ui-data-table.is-grid tbody td {')
   assert.match(cell, /border-bottom: var\(--table-line-width\) solid var\(--table-line\)/)
-  assert.doesNotMatch(cell, /border-(right|left)/, 'no vertical line between body cells')
-  assert.doesNotMatch(css, /tbody td:last-child \{ border-right/, 'no column-line rule to switch off on the last cell')
+  assert.match(cell, /overflow-wrap: break-word/, 'text wraps at spaces')
+  assert.doesNotMatch(cell, /border-(right|left)|overflow-wrap: anywhere|text-overflow/, 'the base cell has no column line and never breaks mid-word or cuts with an ellipsis')
+  assert.match(css, /tbody td:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-column-line\); \}/, 'a light line between body columns, not after the last')
+  assert.doesNotMatch(css, /border-right: var\(--table-line-width\) solid var\(--table-line\)/, 'the column line is the lighter token, never the row line')
+  assert.match(css, /td:is\(\[data-label='S NO' i\][^{]*\) \{ padding-inline: 8px; \}/, 'the S NO column has 8px side padding')
   const head = rule(css, ':root:root .ui-data-table.is-grid thead th {')
   assert.match(head, /border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/, 'the header bottom edge')
-  assert.match(css, /thead th:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-header-line\); \}/, 'the lighter divider in the blue header')
+  assert.match(css, /thead th:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-header-line\); \}/, 'the very faint divider in the blue header')
   // the compact / dense variants keep the same lines (they only change padding and font size)
   assert.doesNotMatch(rule(css, ':root:root .ui-data-table.is-grid.is-compact tbody td, '), /border/)
 })
@@ -78,45 +83,52 @@ test('the shared DataTable stacked cards: no frame, no column lines, one var(--t
   assert.match(css, /\.ui-data-table:is\(\.is-grid, \.is-plain\):not\(\[class\*='ui-table-stack-'\]\)\)[^{]*\{ border-color: transparent; \}/)
 })
 
-test('table-default.css: the catch-all tables get the frame and the row line from the tokens, and no column lines', async () => {
+test('table-default.css: the catch-all tables get the thin 6px frame, the row line and the light column line from the tokens', async () => {
   const css = await read('styles/table-default.css')
-  assert.match(css, /table:where\(:not\([^\n]*\.db-scroll table[^\n]*\)\) \{\n\s+box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--radius-xl, 10px\); overflow: hidden;/)
+  assert.match(css, /table:where\(:not\([^\n]*\.db-scroll table[^\n]*\)\) \{\n\s+box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--table-frame-radius, 6px\); overflow: hidden;/)
   const head = rule(css, 'table:where(:not(.ui-data-table.is-grid table)) thead th {')
   assert.match(head, /border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
   assert.match(css, /thead th:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-header-line\); \}/)
   assert.match(css, /tbody td:where\(:not\(\[data-label\]\)\),[\s\S]*?border-bottom: var\(--table-line-width\) solid var\(--table-line\);/)
-  assert.doesNotMatch(css, /tbody[^{]*\{[^}]*border-right/, 'no vertical line between body cells, with or without a card label')
+  const columnRules = tableRules(css, /tbody/).filter((line) => /border-right/.test(line))
+  assert.ok(columnRules.length >= 2, 'a column line with and without a card label')
+  for (const line of columnRules) assert.match(line, /:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-column-line\); \}/, 'a light line, never after the last column')
+  assert.doesNotMatch(css, /overflow-wrap: anywhere|text-overflow: ellipsis/, 'text wraps at spaces, never mid-word or cut')
+  assert.match(css, /overflow-wrap: break-word/)
   // a table with card labels only has the frame and the column lines from 1280px (below that it is stacked cards)
   assert.match(css, /@media \(min-width: 1280px\) \{\n\s+:root:root :is\(\.workspace, \.workspace-dialog, \.workspace-sheet\) table:where\(:not\([^)]*\)\):has\(td\[data-label\]\) \{/)
   assert.doesNotMatch(css, FAINT)
 })
 
-test('table-theme.css (.tb-blue): the same lines as the shared DataTable', async () => {
+test('table-theme.css (.tb-blue): the same lines as the shared DataTable (row line, light column line, faint header divider)', async () => {
   const css = await read('styles/table-theme.css')
   assert.match(css, /thead th \{[^}]*border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
   assert.match(css, /thead th:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-header-line\); \}/)
-  assert.match(css, /tbody td \{ height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var\(--table-line-width\) solid var\(--table-line\); \}/, 'a line under every row only')
-  assert.doesNotMatch(css, /tbody td[^{]*\{[^}]*border-right/, 'no vertical line between body cells')
+  assert.match(css, /tbody td \{ height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var\(--table-line-width\) solid var\(--table-line\); overflow-wrap: break-word; \}/, 'a faint line under every row')
+  const body = tableRules(css, /tbody td/).filter((line) => /border-right/.test(line))
+  assert.ok(body.length >= 4, 'every width variant has the column line')
+  for (const line of body) assert.match(line, /tbody td:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-column-line\); \}/, 'a light line, never after the last column')
+  assert.match(css, /padding-left: 8px; padding-right: 8px;/, 'the S NO column keeps 8px')
   assert.doesNotMatch(css, FAINT)
 })
 
-test('Tasks: the table is framed (on its scroll box, a thin square frame), every row has the 1px line, no column lines, the header edge is strong', async () => {
+test('Tasks (the reference): the table is framed (on its scroll box, a thin 6px-curved frame), every row has the 1px line, the header edge is strong', async () => {
   const work = await read('styles/daily-work.css')
   const frame = rule(work, '  .dw .tk-table-wrap {')
   assert.match(frame, /border: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
-  assert.match(frame, /border-radius: 0/)
+  assert.match(frame, /border-radius: var\(--table-frame-radius, 6px\)/, 'a small 6px curve')
   assert.match(work, /@container dw \(min-width: 1080px\) \{\n\s+\.dw \.tk-table-wrap \{/, 'only where it is a table (a panel of 1080px or more), under that the rows are cards')
   assert.match(work, /\.dw-table thead th \{[^}]*border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
   const tasks = await read('styles/tasks-table.css')
   const P = ':root .dw .tw-table.dw-table.dw-main'
   const body = rule(tasks, `  ${P} tbody td {`)
-  assert.doesNotMatch(body, /border-(right|left)/, 'no vertical line between body cells')
+  assert.doesNotMatch(body, /border-left/, 'no left line')
   assert.match(body, /border-bottom: var\(--table-line-width\) solid var\(--table-line\)/)
   assert.match(rule(tasks, `  ${P} thead th {`), /border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
   assert.match(tasks, /thead th:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-header-line\); \}/)
   assert.doesNotMatch(tasks, /border-bottom: 1px solid var\(--border-control\)/)
   // the panel around the framed table keeps one border in the same colour as cards; from 1360px it has no chrome at all, so the heading, the cards and the frame share the page's edges
-  assert.match(work, /\.dw-panel:has\(> \.dw-scroll, > \.tk-table-wrap\) \{ border: var\(--table-line-width\) solid var\(--table-line\); border-radius: 0; \}/)
+  assert.match(work, /\.dw-panel:has\(> \.dw-scroll, > \.tk-table-wrap\) \{ border: var\(--table-line-width\) solid var\(--table-line\); border-radius: 6px; \}/)
   assert.match(work, /@media \(min-width: 1360px\) \{\n\s+\.dw-panel:is\(\.dwb-board, \.dwr-myday, :has\(> \.dw-scroll, > \.tk-table-wrap\)\) \{ overflow: visible; border-width: 0; border-radius: 0; background: transparent; \}/)
   // the Reports people tables (.dwr) share .dw-table: their row lines are the token, and they have no column lines in the body either
   assert.match(work, /\.dw-table td \{ border-bottom: var\(--table-line-width\) solid var\(--table-line\); \}/)
@@ -126,26 +138,22 @@ test('Tasks: the table is framed (on its scroll box, a thin square frame), every
 
 test('Lead sheet, Data Bank and Matched candidates: the scroll box is framed, rows have the line, columns have none', async () => {
   const base = await read('styles/data-bank-v2.css')
-  assert.match(base, /\.db-scroll:has\(> \.db-tbl\.is-grid\) \{ box-sizing: border-box; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--radius-xl, 10px\); \}/)
+  assert.match(base, /\.db-scroll:has\(> \.db-tbl\.is-grid\) \{ box-sizing: border-box; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--table-frame-radius, 6px\); \}/, 'the thin 1px frame with the small 6px curve')
   assert.match(base, /\.db-panel:has\(> \.db-box \.db-scroll > \.db-tbl\.is-grid\)[^{]*\{ border-color: transparent; \}/, 'one frame, never two')
+  const cands = await read('styles/candidate-tables.css')
+  // ONE shared rule set for every grid table (Lead sheet, Data Bank, Matched candidates, the upload preview)
+  assert.match(rule(cands, ':root:root:root .db-tbl.is-grid thead th {'), /border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
+  assert.match(cands, /thead th:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-header-line\); \}/)
+  const cbody = rule(cands, ':root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td {')
+  assert.match(cbody, /border: 0; border-bottom: var\(--table-line-width\) solid var\(--table-line\);/, 'a faint line under every row')
+  assert.match(cands, /td:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-column-line\); \}/, 'a LIGHT line between body columns, none after the last')
+  assert.doesNotMatch(cands, FAINT)
   const leads = await read('styles/leads-table.css')
   const head = rule(leads, ':root:root .ld .db-tbl.is-grid.is-fit thead th {')
-  assert.match(head, /border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
-  assert.match(head, /border-right: var\(--table-line-width\) solid var\(--table-header-line\)/)
-  const lbody = rule(leads, ':root:root .ld .db-tbl.is-grid.is-fit tbody td {')
-  assert.match(lbody, /border-right: 0; border-bottom: var\(--table-line-width\) solid var\(--table-line\)/, 'a line under every row, no column line')
+  assert.doesNotMatch(head, /border-bottom|border-right/, 'the Lead sheet takes its lines from the shared rules')
   assert.doesNotMatch(leads, FAINT)
-  const cands = await read('styles/candidate-tables.css')
-  assert.match(rule(cands, ':root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead th {'), /border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
-  assert.match(cands, /thead th:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-header-line\); \}/)
-  const cbody = rule(cands, ':root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow) > td {')
-  assert.match(cbody, /border: 0; border-bottom: var\(--table-line-width\) solid var\(--table-line\);/)
-  assert.doesNotMatch(cbody, /border-(right|left)/)
-  assert.doesNotMatch(cands, FAINT)
   const bank = await read('styles/data-bank-table.css')
-  assert.match(bank, /border-right: var\(--table-line-width\) solid var\(--table-header-line\); border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\);/)
-  assert.match(bank, /background: var\(--bg-card\); border-right: 0; border-bottom: var\(--table-line-width\) solid var\(--table-line\);/, 'Data Bank body: row line only')
-  assert.match(base, /background: var\(--bg-card\); border-bottom: var\(--table-line-width\) solid var\(--table-line\); border-right: 0;/, 'Matched candidates body: row line only')
+  assert.doesNotMatch(bank, /border-right: var\(--table-line-width\) solid var\(--table-header-line\)/, 'the Data Bank takes its lines from the shared rules')
 })
 
 test('Agencies, Currencies, Jobs, Clients: the DataTable box carries the frame, their row rules use the tokens', async () => {
@@ -162,11 +170,13 @@ test('Agencies, Currencies, Jobs, Clients: the DataTable box carries the frame, 
 
 test('Travelled, Client tracker, Fee collections, Weekly report: the scroll box is framed, the old faint lines are the tokens', async () => {
   const tv = await read('styles/travelled.css')
-  assert.match(tv, /@media \(min-width: 721px\) \{\n\s+:root:root \.tv-table-wrap \{ box-sizing: border-box; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--radius-xl, 10px\); \}/)
-  assert.match(tv, /@media \(max-width: 720px\) \{[\s\S]*:root:root:root \.tv-table \{ overflow: visible; border: 0; border-radius: 0; \}/, 'the phone cards have no frame')
+  assert.match(tv, /@media \(min-width: 900px\) \{\n\s+:root:root \.tv-table-wrap \{ box-sizing: border-box; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--table-frame-radius, 6px\); \}/)
+  assert.match(tv, /@media \(max-width: 899px\) \{[\s\S]*:root:root:root \.tv-table \{ overflow: visible; border: 0; border-radius: 0; \}/, 'the phone cards have no frame')
+  assert.match(tv, /\.tv-table td:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-column-line\); \}/, 'a light line between body columns')
   const ct = await read('styles/client-tracker.css')
-  assert.match(ct, /:root:root \.ct-table \.ct-scroll \{ box-sizing: border-box; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--radius-xl, 10px\); \}/)
-  assert.match(ct, /\.ct-table tr\.is-first-of-client td \{ border-top: var\(--table-frame-width\) solid var\(--table-line-strong\); \}/)
+  // the tracker's scroll box is the thin 1px frame with the small 6px curve (a table from 1080px of card width, framed cards below)
+  assert.match(ct, /\.ct-scroll \{ box-sizing: border-box; max-height: 72vh; overflow: auto; overflow-x: hidden; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--table-frame-radius, 6px\); \}/)
+  assert.match(ct, /\.ct-scroll tbody tr\.is-first-of-client > td \{ border-top: var\(--table-frame-width\) solid var\(--table-line-strong\); \}/)
   assert.match(await read('styles/fee-collections.css'), /\.fee-collection-scroll \{ box-sizing: border-box; border: var\(--table-frame-width\) solid var\(--table-line-strong\);/)
   assert.match(await read('styles/staff-report.css'), /\.sw-scroll \{ box-sizing: border-box; border: var\(--table-frame-width\) solid var\(--table-line-strong\);/)
   const catchAll = await read('styles/table-default.css')

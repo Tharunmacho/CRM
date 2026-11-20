@@ -33,7 +33,7 @@ from app.services.candidate_matching import match_candidates
 from app.services.invoice_access import can_see_invoices
 from app.services.parallel_reads import parallel_reads
 from app.services.response_cache import cached, scope_of
-from app.db.models import _uuid
+from app.db.models import _uuid, not_deleted_user
 from app.services.document_reading import pending_expression
 from app.services.document_identity import rejected_expression
 from app.db.models import (
@@ -559,7 +559,7 @@ def next_owner(db: Session, *, pointer: AssignmentPointer | None = None, force: 
     # still marks a position: we continue with the next eligible person after that position
     # instead of restarting at the top (which would hand the first person two in a row and
     # skip the one after the pointer). Deactivated staff stay in the ring for the same reason.
-    ring = list(db.scalars(select(User).where(User.role == Role.staff).order_by(User.created_at, User.id)))
+    ring = list(db.scalars(select(User).where(User.role == Role.staff, not_deleted_user()).order_by(User.created_at, User.id)))
     absent = set(absent)
 
     def is_eligible(u: User) -> bool:

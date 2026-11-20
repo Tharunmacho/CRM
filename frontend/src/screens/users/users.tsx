@@ -24,6 +24,7 @@ import { DeleteUserDialog } from './delete-user-dialog'
 import { canDeleteUser } from '@/features/staff/delete-user-model'
 import { PanelHead, RolePill, UserAvatar, downloadRows, failureText, roleLabels } from './user-ui'
 import '@/styles/users-v2.css'
+import '@/styles/ops-tables.css'
 import '@/styles/table-theme.css'
 import { ROLE_ORDER, roleLabel } from '@/shared/model/role-labels'
 
@@ -54,6 +55,9 @@ export default function UsersPage() {
 
 function TeamPage({ tabs }: { tabs: ReactNode }) {
   const store = useStore()
+  // A person deleted a moment ago leaves the list at once; the store catches up with its own refresh.
+  const [goneIds, setGoneIds] = useState<ReadonlySet<string>>(new Set())
+  const people = useMemo(() => store.users.filter((u) => !goneIds.has(u.id)), [store.users, goneIds])
   const [, setParams] = useSearchParams()
   const accountRead = useWorkspaceRead()
   const [editing, setEditing] = useState<{ user: User | null; deactivate?: boolean } | null>(null)
@@ -66,7 +70,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
   const [sort, setSort] = useState<SortKey>('name')
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState('')
-  const availability = useStaffAvailability({ revision: store.users.map(user => `${user.id}:${user.role}:${user.active}:${user.receivesAutoAssign}:${user.onLeave}`).join('|') })
+  const availability = useStaffAvailability({ revision: people.map(user => `${user.id}:${user.role}:${user.active}:${user.receivesAutoAssign}:${user.onLeave}`).join('|') })
   // New candidates are only given out automatically while the agency setting is on; until then the per-person flags are muted.
   const autoOn = autoAssignValue(store.settings) === true
   const flagText = receivesFlagText(autoOn)
@@ -83,7 +87,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    return store.users.filter((u) => {
+    return people.filter((u) => {
       if (needle && ![u.name, u.email, u.phone || ''].join(' ').toLowerCase().includes(needle)) return false
       if (roleFilter !== 'all' && u.role !== roleFilter) return false
       const current = availability.data?.staff.find(s => s.id === u.id)?.availability
@@ -97,9 +101,9 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
       if (sort === 'work') { const x = work(a.id), y = work(b.id); return (y.candidates + y.tasks) - (x.candidates + x.tasks) || a.name.localeCompare(b.name) }
       return a.name.localeCompare(b.name)
     })
-  }, [store.users, query, roleFilter, statusFilter, availability.data, sort, work])
+  }, [people, query, roleFilter, statusFilter, availability.data, sort, work])
   const filtered = query.trim() !== '' || roleFilter !== 'all' || statusFilter !== 'all'
-  const activeCount = store.users.filter((u) => u.active).length
+  const activeCount = people.filter((u) => u.active).length
   const clearFilters = () => { setQuery(''); setRoleFilter('all'); setStatusFilter('all') }
 
   const refreshSaved = async (message: string) => {
@@ -151,7 +155,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
 
   const columns: Column<User>[] = [
     {
-      key: 'name', header: 'Team member', width: '23%', sortable: true, value: (u) => u.name.toLowerCase(),
+      key: 'name', header: 'Team member', width: '22%', sortable: true, value: (u) => u.name.toLowerCase(),
       render: (u) => <div className="uv-person">
         <UserAvatar name={u.name} muted={!u.active} />
         <div>
@@ -162,22 +166,22 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
     },
     { key: 'role', header: 'Role', width: '10%', sortable: true, value: (u) => roleRank[u.role], render: (u) => <RolePill role={u.role} /> },
     {
-      key: 'phone', header: 'Phone', width: '13%',
-      render: (u) => u.phone ? <div><a className="uv-phone" href={'tel:' + u.phone.replace(/\s+/g, '')} title={'Call ' + u.name}>{u.phone}</a></div> : <span className="uv-none">Not set</span>,
+      key: 'phone', header: 'Phone', width: '12%',
+      render: (u) => u.phone ? <div><a className="uv-phone" href={'tel:' + u.phone.replace(/\s+/g, '')} title={'Call ' + u.name}>{u.phone}</a></div> : <span className="uv-none" aria-label="Phone not set">—</span>,
     },
     {
-      key: 'status', header: 'Status', width: '14%',
-      render: (u) => { const line = statusLine(u); return <div className="uv-status">
+      key: 'status', header: 'Status', width: '11%',
+      render: (u) => { const line = statusLine(u); return <div className="uv-status" title={u.role === 'staff' ? line.text : undefined}>
         <StatusPill status={u.active ? 'active' : 'inactive'} />
-        {u.role === 'staff' && <small className={line.tone}>{line.text}</small>}
+        
       </div> },
     },
     {
-      key: 'assignment', header: 'New candidates', width: '18%',
+      key: 'assignment', header: 'New candidates', width: '17%',
       render: (u) => u.role === 'staff' && u.active ? <div className="uv-flags">
         <label className={cn(flagText.muted && 'is-muted')} title={flagText.note || undefined}><span>Auto-assign</span><Switch checked={u.receivesAutoAssign} disabled={!!pending} label={flagText.label + ': ' + u.name} compact onChange={(on) => void changeFlag(u, { receivesAutoAssign: on })} /></label>
         <label><span>On leave</span><Switch checked={u.onLeave} disabled={!!pending} label={'On leave: ' + u.name} compact onChange={(on) => void changeFlag(u, { onLeave: on })} /></label>
-      </div> : <span className="uv-none">{u.role !== 'staff' ? 'Recruiters only' : 'Account inactive'}</span>,
+      </div> : <span className="uv-none" title={u.role !== 'staff' ? 'Recruiters only' : 'Account inactive'}>—</span>,
     },
     {
       key: 'work', header: 'Open work', width: '12%', sortable: true, value: (u) => work(u.id).candidates + work(u.id).tasks,
@@ -187,7 +191,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
       </div> },
     },
     {
-      key: 'actions', header: 'Actions', width: '10%', actions: true,
+      key: 'actions', header: 'Actions', actions: true,
       render: (u) => <div className="uv-actions">
         <button type="button" className="uv-edit" title={'Edit ' + u.name} aria-label={'Edit ' + u.name} onClick={() => setEditing({ user: u })}><Pencil size={14} aria-hidden="true" />Edit</button>
         <RowMenu label={'Actions for ' + u.name} items={[
@@ -207,7 +211,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
   return <div className="uv">
     {header(true)}
     <SummaryCards items={[
-      { label: 'Team members', value: store.users.length, detail: `${store.users.length - activeCount} inactive`, icon: Users },
+      { label: 'Team members', value: people.length, detail: `${people.length - activeCount} inactive`, icon: Users },
       { label: 'Active accounts', value: activeCount, detail: 'With access to the CRM', icon: UserCheck, tone: 'green', onSelect: () => toggleStatus('active'), active: statusFilter === 'active' },
       { label: 'Getting new candidates', value: autoOn && availability.data ? eligible.length : '—', detail: autoOn ? 'Can be given new candidates automatically' : 'Automatic assignment is off', icon: RotateCw, onSelect: () => toggleStatus('in_rotation'), active: statusFilter === 'in_rotation' },
       { label: 'On leave', value: availability.data ? onLeave.length : '—', detail: 'On leave today', icon: CalendarDays, tone: 'amber', onSelect: () => toggleStatus('on_leave'), active: statusFilter === 'on_leave' },
@@ -237,8 +241,8 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
 
     {error && <p role="alert" className="uv-error uv-banner">{error}</p>}
 
-    <Panel flush className="uv-panel uv-directory tb-blue">
-      <PanelHead id="uv-directory-title" title="Team directory" description={filtered ? `${rows.length} of ${store.users.length} accounts` : `${store.users.length} accounts`}
+    <Panel flush className="uv-panel uv-directory tb-blue ops-fit ops-users">
+      <PanelHead id="uv-directory-title" title="Team directory" description={filtered ? `${rows.length} of ${people.length} accounts` : `${people.length} accounts`}
         actions={rows.length > 0 ? <Button size="sm" icon={<Download className="h-3.5 w-3.5" />} onClick={exportCsv} title="Download the people shown here as a spreadsheet (CSV)">Export CSV</Button> : undefined} />
       <Tabs tabs={STATUS_TABS} active={statusFilter} onChange={(key) => setStatusFilter(key as StatusFilter)} />
       <div className={cn('uv-toolbar', filtered && 'has-clear')}>
@@ -258,7 +262,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
     {security && <SecurityDialog key={security.user.id + security.kind} {...security} onClose={() => setSecurity(null)} />}
     {auditFor && <AuditHistory key={auditFor.id} user={auditFor} onClose={() => setAuditFor(null)} />}
     {deleting && <DeleteUserDialog key={deleting.id} user={deleting} onClose={() => setDeleting(null)}
-      onDeleted={async (message) => { setDeleting(null); await refreshSaved(message) }}
+      onDeleted={async (message, userId) => { setGoneIds((current) => new Set(current).add(userId)); setDeleting(null); await refreshSaved(message) }}
       onDeactivateInstead={() => { const person = deleting; setDeleting(null); setEditing({ user: person, deactivate: true }) }} />}
   </div>
 }

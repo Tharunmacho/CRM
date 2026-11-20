@@ -13,8 +13,10 @@ import { StageModal } from '@/features/workflow/components/stage-modal'
 import { ownerLabel } from '@/features/candidates/data-bank-pools'
 import { arrivalTrend, weeklyArrivals } from '@/features/candidates/data-bank-trends'
 import { OwnerText, SOURCE_LABEL, SourceDot, SourceIcon, StageChip, shortDate } from '@/features/candidates/components/data-bank-columns'
-import { CountryFlag, KpiCards, Pager, StatusDot, ViewToggle, Who, readView, saveView, type DbView } from '@/features/candidates/components/db-parts'
-import { DbTable, GRID_TABLE_MIN_WIDTH, useElementWidth, type DbColumn } from '@/features/candidates/components/db-table'
+import { KpiCards, Pager, StatusDot, ViewToggle, Who, readView, saveView, type DbView } from '@/features/candidates/components/db-parts'
+import { DbTable, useElementWidth, type DbColumn } from '@/features/candidates/components/db-table'
+import { fitColumns } from '@/features/candidates/components/column-fit'
+import { ColumnMenu, useColumnChoices } from '@/features/candidates/components/column-menu'
 import '@/styles/data-bank-v2.css'
 import '@/styles/candidate-tables.css'
 
@@ -28,6 +30,9 @@ const STATUS_TEXT: Record<string, string> = {
 
 const TAB_TITLE: Record<TabKey, string> = { active: 'In progress', deployed: 'Deployed', closed: 'Closed' }
 const PAGE_SIZE = 20
+/** Below this box width the matches read as labelled cards; above it the one table always fits (it hides the least important columns first). */
+const MAPPED_TABLE_MIN_WIDTH = 900
+const COLUMN_GROUPS = ['Person', 'Order', 'Workflow'] as const
 const Dash = () => <span className="db-muted" aria-label="None">–</span>
 
 /**
@@ -49,6 +54,7 @@ export default function MappedCandidatesPage() {
   const [page, setPage] = useState(0)
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
   const [boxRef, boxWidth] = useElementWidth<HTMLDivElement>()
+  const [columnChoices, setColumnChoices] = useColumnChoices('mapped')
 
   const isSupervisor = store.can('all_reports')
 
@@ -139,7 +145,7 @@ export default function MappedCandidatesPage() {
   const onFile = store.applications.filter((a) => a.status === tab && store.candidate(a.candidateId)).length
   const hasFilters = Boolean(query.trim()) || stageFilter !== 'all' || ownerFilter !== 'all' || designationFilter !== 'all' || companyFilter !== 'all' || sourceFilter !== 'all' || overdueOnly
   const clearFilters = () => { setQuery(''); setStageFilter('all'); setOwnerFilter('all'); setDesignationFilter('all'); setCompanyFilter('all'); setSourceFilter('all'); setOverdueOnly(false) }
-  const forceCards = boxWidth > 0 && boxWidth < GRID_TABLE_MIN_WIDTH
+  const forceCards = boxWidth > 0 && boxWidth < MAPPED_TABLE_MIN_WIDTH
   const showCards = forceCards || view === 'cards'
 
   const statusLabel = (a: Application) => (a.status === 'closed' ? (a.closureReason ? closureLabels[a.closureReason] : STATUS_TEXT.closed) : isOverdue(a) ? 'Overdue' : STATUS_TEXT[a.status])
@@ -159,35 +165,39 @@ export default function MappedCandidatesPage() {
     </Button>
   )
 
-  const columns: DbColumn<Application>[] = [
+  /**
+   * The table fits its box (DbTable fit): widths are the least each column needs for its heading and its words in full. When they do not add up
+   * the columns with the highest `optional` number are hidden first (Source, Matched, Passport, ...); the Columns menu and the cards still show
+   * every field. Everything is left-aligned with the same 8px padding as the Tasks table.
+   */
+  const allColumns: DbColumn<Application>[] = [
     {
-      key: 'candidate', header: 'Candidate', sortKey: 'candidate', width: 200, align: 'left', sticky: 'start',
+      key: 'candidate', header: 'Candidate', sortKey: 'candidate', width: 176, align: 'left', group: 'Person',
       render: (a) => { const c = store.candidate(a.candidateId)!; return <Who compact name={c.name} sub={<span className="ident" title={c.phone}>{c.phone}</span>} /> },
     },
     {
-      key: 'passport', header: 'Passport', sortKey: 'passport', width: 120,
+      key: 'passport', header: 'Passport', sortKey: 'passport', width: 104, align: 'left', optional: 8, group: 'Person',
       render: (a) => { const c = store.candidate(a.candidateId)!; return c.passportNo ? <span className="ident db-nowrap" title={`Passport ${c.passportNo}`}>{c.passportNo}</span> : <Dash /> },
     },
-    { key: 'order', header: 'Order', sortKey: 'order', width: 110, render: (a) => <span className="db-order-chip ident" title={store.orderLabel(a.orderId)}>{store.order(a.orderId)?.ref ?? '–'}</span> },
-    { key: 'designation', header: 'Job title', sortKey: 'designation', width: 150, render: (a) => <span className="db-wrap" title={designationOf(a)}>{designationOf(a) || <Dash />}</span> },
+    { key: 'order', header: 'Order', sortKey: 'order', width: 136, align: 'left', optional: 5, group: 'Order', render: (a) => <span className="db-order-chip ident" title={store.orderLabel(a.orderId)}>{store.order(a.orderId)?.ref ?? '–'}</span> },
+    { key: 'designation', header: 'Job title', sortKey: 'designation', width: 120, align: 'left', group: 'Order', render: (a) => <span className="db-wrap" title={designationOf(a)}>{designationOf(a) || <Dash />}</span> },
     {
-      key: 'company', header: 'Company', sortKey: 'company', width: 210,
-      render: (a) => {
-        const o = store.order(a.orderId)
-        const name = companyOf(a)
-        return <span className="db-with-flag" title={name}><CountryFlag country={o?.country ?? (o ? store.company(o.companyId)?.country : undefined)} /><span className="db-wrap">{name || <Dash />}</span></span>
-      },
+      key: 'company', header: 'Company', sortKey: 'company', width: 160, align: 'left', group: 'Order',
+      render: (a) => { const name = companyOf(a); return <span className="db-wrap" title={name}>{name || <Dash />}</span> },
     },
-    { key: 'source', header: 'Source', width: 80, render: (a) => <SourceIcon source={sourceOf(a) || 'other'} /> },
-    { key: 'owner', header: 'Recruiter', sortKey: 'owner', width: 130, render: (a) => <OwnerText candidate={store.candidate(a.candidateId)!} store={store} /> },
+    { key: 'source', header: 'Source', width: 84, align: 'left', optional: 10, group: 'Person', render: (a) => <SourceIcon source={sourceOf(a) || 'other'} /> },
+    { key: 'owner', header: 'Recruiter', sortKey: 'owner', width: 124, align: 'left', optional: 4, group: 'Workflow', render: (a) => <OwnerText candidate={store.candidate(a.candidateId)!} store={store} /> },
     {
-      key: 'stage', header: 'Stage', sortKey: 'stage', width: 190,
+      key: 'stage', header: 'Stage', sortKey: 'stage', width: 150, align: 'left', group: 'Workflow',
       render: (a) => (a.status === 'closed' && a.closureReason ? <span className="db-wrap">{closureLabels[a.closureReason]}</span> : <StageChip stage={a.currentStage} />),
     },
-    { key: 'status', header: 'Status', width: 110, render: (a) => statusDot(a) },
-    { key: 'mapped', header: 'Matched', sortKey: 'mapped', width: 110, render: (a) => <span className="db-nowrap" title={dateLabel(a.createdAt)}>{shortDate(a.createdAt)}</span> },
-    { key: 'action', header: 'Actions', width: 110, align: 'center', sticky: 'end', render: (a) => openButton(a) },
+    { key: 'status', header: 'Status', width: 100, align: 'left', group: 'Workflow', render: (a) => statusDot(a) },
+    { key: 'mapped', header: 'Matched', sortKey: 'mapped', width: 102, align: 'left', optional: 9, group: 'Workflow', render: (a) => <span className="db-nowrap" title={dateLabel(a.createdAt)}>{shortDate(a.createdAt)}</span> },
+    { key: 'action', header: 'Actions', width: 92, align: 'left', group: 'Workflow', render: (a) => openButton(a) },
   ]
+  const fit = useMemo(() => fitColumns(allColumns, boxWidth, columnChoices), [allColumns, boxWidth, columnChoices]) // eslint-disable-line react-hooks/exhaustive-deps
+  const columns = useMemo(() => allColumns.filter((column) => fit.keys.includes(column.key)), [allColumns, fit.keys]) // eslint-disable-line react-hooks/exhaustive-deps
+  const menuColumns = useMemo(() => allColumns.filter((column) => column.key !== 'action').map((column) => ({ key: column.key, header: column.header, group: column.group })), [allColumns]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const emptyState = (
     <EmptyState
@@ -248,6 +258,8 @@ export default function MappedCandidatesPage() {
               <Search size={15} aria-hidden="true" />
               <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search candidates, passports or orders" aria-label="Search candidates, passports or orders" />
             </label>
+            {!forceCards && view === 'table' && fit.hidden > 0 && <span className="ld-hidden-pill" title={`${fit.hidden} ${fit.hidden === 1 ? 'column is' : 'columns are'} hidden to fit the screen. Choose Columns to show ${fit.hidden === 1 ? 'it' : 'them'}, or switch to cards to see every field.`}>+{fit.hidden} hidden</span>}
+            {!forceCards && view === 'table' && <ColumnMenu columns={menuColumns} groups={COLUMN_GROUPS} hidden={fit.hidden} shown={fit.keys} choices={columnChoices} onChange={setColumnChoices} />}
             {!forceCards && <ViewToggle view={view} onChange={changeView} />}
           </div>
         </div>
@@ -286,7 +298,7 @@ export default function MappedCandidatesPage() {
                       <div><dt>Order</dt><dd><span className="db-order-chip ident">{o?.ref ?? '—'}</span></dd></div>
                       <div><dt>Stage</dt><dd>{a.status === 'closed' && a.closureReason ? closureLabels[a.closureReason] : <StageChip stage={a.currentStage} />}</dd></div>
                       <div><dt>Job title</dt><dd>{designationOf(a) || '—'}</dd></div>
-                      <div><dt>Company</dt><dd className="db-with-flag"><CountryFlag country={o?.country ?? (o ? store.company(o.companyId)?.country : undefined)} /><span className="db-ellip" title={companyOf(a)}>{companyOf(a) || '—'}</span></dd></div>
+                      <div><dt>Company</dt><dd><span className="db-wrap" title={companyOf(a)}>{companyOf(a) || '—'}</span></dd></div>
                       <div><dt>Recruiter</dt><dd><OwnerText candidate={c} store={store} /></dd></div>
                       <div><dt>Source</dt><dd><SourceDot source={c.source} /></dd></div>
                     </dl>
@@ -302,6 +314,7 @@ export default function MappedCandidatesPage() {
             <DbTable
               label="Matched candidates"
               variant="grid"
+              fit
               rows={pageRows}
               columns={columns}
               rowKey={(a) => a.id}

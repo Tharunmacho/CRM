@@ -4,10 +4,10 @@ import { ArrowRight, RefreshCw, Search } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Input, Select } from '@/shared/ui/primitives'
 import { applicationFormHref } from '@/features/application-form/form-model'
-import { primaryId } from '@/features/candidates/candidate-ids'
 import { invoiceMoney } from '@/features/application-form/invoice-model'
 import { useReportData } from './report-api'
 import '@/styles/fee-collections.css'
+import '@/styles/ops-tables.css'
 
 interface FeeCollectionRow {
   invoiceId: string | null; candidateId: string; applicationId: string | null; name: string; ref: string; careId?: string | null; invoiceNo: string | null
@@ -43,8 +43,8 @@ export function FeeCollectionsReport() {
         ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{money(value)}</dd></div>)}
       </dl>
       <p className="fee-collection-note">{data.totals.count} candidate {data.totals.count === 1 ? 'record' : 'records'} match these filters. Money received includes confirmed payments before an invoice is issued. Fees not entered remain “Not set”.{Number(data.totals.credit) > 0 ? ` Recorded credit: ${money(data.totals.credit)}.` : ''}</p>
-      <section className="rv-card fee-collection-table" aria-label="Candidate fee collection records"><div className="fee-collection-scroll"><table><thead><tr><th>Candidate</th><th>Invoice</th><th>Service fee</th><th>GST</th><th>Agreed total</th><th>Invoiced</th><th>Received</th><th>Balance</th><th>Payment status</th><th><span className="sr-only">Manage</span></th></tr></thead><tbody>
-        {data.rows.map((row) => <tr key={row.invoiceId ?? `${row.candidateId}:${row.applicationId ?? ''}`}><td><b>{row.name}</b><small>{primaryId(row)}</small></td><td>{row.invoiceNo || <span className="fee-pending">Pending invoice</span>}</td><td>{money(row.fee)}</td><td>{money(row.gst)}</td><td>{money(row.total)}</td><td>{money(row.totalInvoiced)}</td><td>{money(row.received)}</td><td>{money(row.balance)}</td><td><span className={`fee-payment-status is-${row.paymentStatus}`}>{row.total === null ? 'Fee not set' : paymentLabel(row.paymentStatus)}</span></td><td><Link to={`${applicationFormHref(row.candidateId, null, row.applicationId)}#af-invoice`} className="fee-manage-link">Manage <ArrowRight aria-hidden="true" /></Link></td></tr>)}
+      <section className="rv-card fee-collection-table tb-blue ops-fit ops-fees" aria-label="Candidate fee collection records"><div className="fee-collection-scroll"><table><colgroup><col className="fc-name" /><col className="fc-invoice" /><col className="fc-fee" /><col className="fc-gst" /><col className="fc-total" /><col className="fc-invoiced" /><col className="fc-received" /><col className="fc-balance" /><col className="fc-status" /><col className="fc-manage" /></colgroup><thead><tr><th>Candidate</th><th>Invoice</th><th>Service fee</th><th className="fc-low">GST</th><th>Agreed total</th><th className="fc-low">Invoiced</th><th>Received</th><th>Balance</th><th>Payment status</th><th><span className="sr-only">Manage</span></th></tr></thead><tbody>
+        {data.rows.map((row) => <tr key={row.invoiceId ?? `${row.candidateId}:${row.applicationId ?? ''}`}><td><b>{row.name}</b></td><td>{row.invoiceNo || <span className="fee-pending">Pending invoice</span>}</td><td>{money(row.fee)}</td><td className="fc-low">{money(row.gst)}</td><td>{money(row.total)}</td><td className="fc-low">{money(row.totalInvoiced)}</td><td>{money(row.received)}</td><td>{money(row.balance)}</td><td><span className={`fee-payment-status is-${row.paymentStatus}`}>{row.total === null ? 'Fee not set' : paymentLabel(row.paymentStatus)}</span></td><td><Link to={`${applicationFormHref(row.candidateId, null, row.applicationId)}#af-invoice`} className="fee-manage-link">Manage <ArrowRight aria-hidden="true" /></Link></td></tr>)}
         {!data.rows.length && <tr><td colSpan={10} className="fee-collection-empty">No candidates match these filters.</td></tr>}
       </tbody></table></div>
       <footer><span>{data.total ? `${data.offset + 1}–${Math.min(data.offset + data.rows.length, data.total)} of ${data.total}` : '0 records'}</span><div><Button size="sm" disabled={offset === 0 || refreshing} onClick={() => setOffset(Math.max(0, offset - data.limit))}>Previous</Button><Button size="sm" disabled={offset + data.rows.length >= data.total || refreshing} onClick={() => setOffset(offset + data.limit)}>Next</Button></div></footer></section>

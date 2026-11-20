@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowRight, CalendarPlus, Check, CheckCircle2, ExternalLink, Globe, MoreHorizontal, PhoneCall, UserRound } from 'lucide-react'
+import { ArrowRight, Check, CheckCircle2, ExternalLink, Globe, MoreHorizontal, PhoneCall, UserRound } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { countryCode } from '@/shared/lib/country-flag'
 import { Button, Select } from '@/shared/ui/primitives'
 import { RecordIdentity } from '@/shared/ui/workspace'
+import { DocInput } from './doc-input'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 import { primaryId } from '@/features/candidates/candidate-ids'
 import {
@@ -328,12 +329,12 @@ export function RemarkCell({ item, canWork, onSave, lead }: { item: Pick<DailyIt
   )
 }
 
-/** DOC: the date of commencement as "19 Nov 2026". Empty: an "Add date" link that opens the candidate's application form on its Overview tab, where the date is filled in; a dash when there is no placement yet or the person cannot edit. */
-export function DocCell({ item, canAdd, onAdd }: { item: Pick<DailyItem, 'commencementDate' | 'candidate' | 'applicationId'>; canAdd: boolean; onAdd: () => void }) {
+/** DOC: the date of commencement, typed right in the cell as dd/mm/yyyy (saved on Enter or when the box is left). A dash when there is no placement yet or the person cannot edit; read-only people see the date as "19 Nov 2026". */
+export function DocCell({ item, canAdd, onSave }: { item: Pick<DailyItem, 'commencementDate' | 'candidate' | 'applicationId'>; canAdd: boolean; onSave: (iso: string | null) => Promise<void> }) {
   const label = docLabel(item.commencementDate)
+  if (canAdd && item.applicationId) return <DocInput value={item.commencementDate ?? null} candidate={item.candidate} onSave={onSave} />
   if (label) return <time className="dw-doc tnum" dateTime={item.commencementDate ?? undefined} title="Date of commencement">{label}</time>
-  if (!canAdd || !item.applicationId) return <span className="dw-none" title={item.applicationId ? 'No date of commencement yet' : 'Choose a job first, then add the date of commencement'}>—</span>
-  return <button type="button" className="dw-doc-add" onClick={onAdd} aria-label={`Add the date of commencement for ${item.candidate}`}><CalendarPlus size={14} aria-hidden="true" />Add date</button>
+  return <span className="dw-none" title={item.applicationId ? 'No date of commencement yet' : 'Choose a job first, then add the date of commencement'}>—</span>
 }
 
 export interface MenuEntry { label: string; icon: typeof ArrowRight | typeof ExternalLink; onSelect: () => void }

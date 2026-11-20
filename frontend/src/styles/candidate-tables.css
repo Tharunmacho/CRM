@@ -1,39 +1,50 @@
 /*
- * Candidate tables (Data Bank grid, Matched candidates list): the owner's table theme, the same as the Tasks table.
- *   header  blue band (var(--primary), text var(--on-primary)), 700 weight, uppercase 11.5px, .05em tracking, one line, 44px high
- *   rows    at least 60px, everything vertically centred, 14px side padding (a heading and its cells share one left edge),
- *           a visible var(--table-line) line under every row (the last too) and between every pair of columns, a soft hover tint
- *   frame   the scroll box around the table (.db-scroll) carries the 2px var(--table-line-strong) frame (data-bank-v2.css); the header's bottom edge is the same strong line
- *           and the divider between header cells is var(--table-header-line)
+ * Candidate tables (Data Bank grid, Matched candidates list, the lead upload preview): the SAME look as the approved Tasks table.
+ *   frame   the scroll box around the table (.db-scroll, data-bank-v2.css) is the ONE thin outer frame: var(--table-frame-width) var(--table-line-strong),
+ *           a small var(--table-frame-radius) corner curve that clips the header corners; the header's bottom edge is the same line
+ *   header  blue band (var(--primary), text var(--on-primary)), 600 weight, uppercase 11.5px, .04em tracking, ONE line, 44px high, a very faint
+ *           divider between header cells (var(--table-header-line)); a heading is never cut: the column widths are the least that holds it
+ *   rows    at least 60px, everything vertically centred, 8px side padding (a heading and its cells share one left edge), a faint
+ *           var(--table-line) line under EVERY row (the last too), a LIGHT var(--table-column-line) line between body columns (not after the last),
+ *           a soft hover tint; text wraps at spaces (never mid-word unless one word is wider than its column)
  *   header controls (sort buttons, carets, the select-all box) inherit the header colour so they read white on the blue.
- * Applies to EVERY grid DbTable (Data Bank, Matched candidates, the lead upload preview dialog, ...) except the ones inside the Lead sheet (.ld), which keep their own sheet (leads-table.css) - so no grid renders the old grey 48-52px header. Imported last by data-bank.tsx and mapped-candidates.tsx; :root:root:root beats the older grey grid rules (db-fit.css, data-bank-table.css).
- * Tokens only, so dark mode follows. Below 900px the Data Bank shows cards (no table), so none of this applies there.
+ * Applies to EVERY grid DbTable (Data Bank, Matched candidates, the Lead sheet and its upload preview). The Lead sheet adds its own cell rules
+ * in leads-table.css. Imported by db-table.tsx; :root:root:root beats the older grid rules (db-fit.css, data-bank-table.css, data-bank-v2.css).
+ * Tokens only, so dark mode follows. Below 900px the Data Bank, Lead sheet and Matched candidates show labelled cards (no table), so none of this applies there.
  */
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead th {
-  box-sizing: border-box; height: 44px; padding: 0 14px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; text-align: left; white-space: nowrap;
+:root:root:root .db-tbl.is-grid thead th {
+  box-sizing: border-box; height: 44px; padding: 0 8px; overflow: hidden; text-overflow: clip; vertical-align: middle; text-align: left; white-space: nowrap; overflow-wrap: normal;
   border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); border-radius: 0; background: var(--primary); color: var(--on-primary);
-  font-size: 11.5px; font-weight: 700; letter-spacing: .05em; line-height: 16px; text-transform: uppercase;
+  font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 16px; text-transform: uppercase;
 }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead th.is-right { text-align: right; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead th :is(button, a, svg, span, label) { color: inherit; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .db-th-sort { display: inline-flex; align-items: center; justify-content: flex-start; gap: 4px; max-width: 100%; min-width: 0; min-height: 0; padding: 0; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; color: inherit; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .db-th-sort:is(:hover, .is-on) { color: inherit; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .db-th-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .db-th-caret { position: static; flex: none; margin: 0; color: inherit; opacity: .7; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .db-th-sort.is-on .db-th-caret { color: inherit; opacity: 1; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead :is(button, a, input, [tabindex]):focus-visible { outline: 2px solid var(--on-primary); outline-offset: 1px; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .custom-checkbox { border-color: color-mix(in srgb, var(--on-primary) 70%, var(--primary)); background-color: color-mix(in srgb, var(--on-primary) 14%, var(--primary)); }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .custom-checkbox:is(:checked, :indeterminate) { border-color: var(--on-primary); background-color: var(--on-primary); }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .custom-checkbox:is(:checked, :indeterminate)::after { background-color: var(--primary); }
+:root:root:root .db-tbl.is-grid thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
+:root:root:root .db-tbl.is-grid thead th.is-right { text-align: right; }
+:root:root:root .db-tbl.is-grid thead th :is(button, a, svg, span, label) { color: inherit; }
+:root:root:root .db-tbl.is-grid thead .db-th-sort { display: inline-flex; align-items: center; justify-content: flex-start; gap: 4px; max-width: 100%; min-width: 0; min-height: 0; padding: 0; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; white-space: nowrap; color: inherit; }
+:root:root:root .db-tbl.is-grid thead .db-th-sort:is(:hover, .is-on) { color: inherit; }
+:root:root:root .db-tbl.is-grid thead .db-th-label { display: block; overflow: visible; text-overflow: clip; white-space: nowrap; }
+:root:root:root .db-tbl.is-grid thead .db-th-caret { position: static; flex: none; margin: 0; color: inherit; opacity: .7; }
+:root:root:root .db-tbl.is-grid thead .db-th-sort.is-on .db-th-caret { color: inherit; opacity: 1; }
+:root:root:root .db-tbl.is-grid thead :is(button, a, input, [tabindex]):focus-visible { outline: 2px solid var(--on-primary); outline-offset: 1px; }
+:root:root:root .db-tbl.is-grid thead .custom-checkbox { border-color: color-mix(in srgb, var(--on-primary) 70%, var(--primary)); background-color: color-mix(in srgb, var(--on-primary) 14%, var(--primary)); }
+:root:root:root .db-tbl.is-grid thead .custom-checkbox:is(:checked, :indeterminate) { border-color: var(--on-primary); background-color: var(--on-primary); }
+:root:root:root .db-tbl.is-grid thead .custom-checkbox:is(:checked, :indeterminate)::after { background-color: var(--primary); }
 
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow) > td {
-  box-sizing: border-box; height: 60px; min-height: 60px; padding: 8px 14px; vertical-align: middle; text-align: left;
+:root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td {
+  box-sizing: border-box; height: 60px; min-height: 60px; padding: 8px; vertical-align: middle; text-align: left; overflow-wrap: break-word;
   border: 0; border-bottom: var(--table-line-width) solid var(--table-line);
 }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow) > td.is-right { text-align: right; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow):last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) :is(th, td).is-right { padding-left: 14px; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) :is(th, td).is-select { padding-left: 14px; padding-right: 14px; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) :is(th.db-th-check, td.db-td-check) { padding: 0 !important; text-align: center; }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow):hover > td { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
+:root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
+:root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td.is-right { text-align: right; }
+:root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow):last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
+:root:root:root .db-tbl.is-grid :is(th, td).is-right { padding-left: 8px; }
+:root:root:root .db-tbl.is-grid :is(th, td).is-select { padding-left: 8px; padding-right: 8px; }
+:root:root:root .db-tbl.is-grid :is(th.db-th-check, td.db-td-check) { padding: 0 !important; text-align: center; }
+/* no zebra: every row is the card colour (the Tasks look); an open or ticked row is tinted */
+:root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow) > td { background: var(--bg-card); }
+:root:root:root .db-tbl.is-grid tbody tr.is-open:not(.db-xrow) > td { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
+:root:root:root .db-tbl.is-grid tbody tr.is-selected:not(.db-xrow) > td { background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); }
+:root:root:root .db-tbl.is-grid tbody tr:not(.db-xrow):hover > td { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
+
+/* ---------- Cards (Data Bank, Lead sheet, Matched candidates on a phone or in the card view): one thin border with the table's small corner curve ---------- */
+:root:root:root .db-mini { border-width: var(--table-line-width, 1px); border-radius: var(--table-frame-radius, 6px); }

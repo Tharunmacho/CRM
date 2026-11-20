@@ -170,7 +170,7 @@ test('Lead sheet monitoring: five tiles tied to the Lead sheet screen, a table w
   assert.ok(html.includes('title="Leads never contacted, whatever the period: the same number as the Lead sheet screen"')) // the all-time tiles say so
   assert.ok(html.includes('title="+2 vs yesterday"')) // new leads 12 against 10
   assert.ok(html.includes('title="+7 vs yesterday"')) // contacted 31 against 24
-  assert.deepEqual(headings(html), ['Recruiter', 'Assigned', 'Contacted', 'Interested', 'Call back', 'Not interested', 'Wrong number', 'No answer / not reachable', 'Not contacted', 'Contacted %'])
+  assert.deepEqual(headings(html), ['Recruiter', 'Assigned', 'Contacted', 'Interested', 'Call back', 'Not interested', 'Wrong number', 'No response', 'Not contacted', 'Contacted %'])
   assert.deepEqual(personRows(html), [10, 10, 10, 10]) // three recruiters and Unassigned
   assert.match(t, /Meera Nair 8 20 4 5 2 1 6 55 33%/) // assigned today, contacted, ..., never contacted, contacted of the workload (20 of 60)
   assert.match(t, /Unassigned [–\s]+30/) // leads nobody owns: Assigned is a dash, Not contacted is theirs
@@ -234,33 +234,42 @@ test('every table uses one column template: header and row cells line up, and nu
   }
 })
 
-test('the Candidate table: Recruiter 200, Done / Pending / Overdue 84, No order 92, stages 56, Total 84, all right-aligned with 16px padding', async () => {
+test('the Candidate table: the name column is the remainder, every figure column is as wide as its heading needs, all right-aligned', async () => {
   const html = render(views.CandidateMonitoringView)
   const table = html.slice(html.indexOf('<table'))
+  assert.ok(!/min-width/.test(table.slice(0, table.indexOf('<thead>'))), 'no inline min-width: the table fits its panel')
   const widths = [...table.matchAll(/<col style="width:([\d.]+)%/g)].map(m => Number(m[1]))
-  const px = [200, 84, 84, 84, 92, ...Array(12).fill(56), 84]
-  const total = px.reduce((a, b) => a + b, 0)
-  assert.equal(widths.length, px.length)
-  widths.forEach((w, i) => assert.ok(Math.abs(w - (px[i] / total) * 100) < 0.01, 'column ' + i))
+
+  assert.equal(widths.length, 17) // Done, Pending, Overdue, No order, stages 1 to 12, Total; the Recruiter column has no width of its own (auto: it takes the rest)
+  assert.ok(table.includes('<col style="width:auto"/>') || table.includes('<col style="width:auto" />'))
+  const sum = widths.reduce((a, b) => a + b, 0)
+  assert.ok(sum < 90 && sum > 55, 'the figure columns leave the Recruiter column at least 10% of the table (' + sum + ')')
+  assert.ok(widths[3] > widths[4], 'No order (a longer heading) is wider than a stage number')
   assert.match(table, /<th scope="col" class="is-num">Total<\/th>/) // the Total heading is a figure heading: right-aligned like its numbers
   const css = await readFile(new URL('../src/styles/daily-report.css', import.meta.url), 'utf8')
-  assert.match(css, /\.dwr \.dwr-table thead th\.is-num, \.dwr \.dwr-table\.is-dense thead th\.is-num \{ text-align: right; padding-left: 4px; padding-right: 16px; \}/)
-  assert.match(css, /\.dwr \.dwr-table td\.is-num, \.dwr \.dwr-table\.is-dense td\.is-num \{ text-align: right; padding-left: 4px; padding-right: 16px;/)
-  assert.match(css, /\.dwr \.dwr-table thead th \{ height: 44px;/)
+  assert.match(css, /thead th\.is-num \{ padding: 0 10px 0 6px; text-align: right; \}/)
+  assert.match(css, /td\.is-num \{ padding: 8px 10px 8px 6px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right;/)
+  assert.match(css, /\.dwr-table\.dw-table\.dw-main thead th \{[^}]*height: 44px;/)
   assert.match(css, /td\.is-num > \.dw-none[^{]*\{ display: block; margin-left: auto; text-align: right; \}/) // the dash is right-aligned like a number
 })
 
-test('headings are bold in the normal text colour: every report table heading and group band, weight 600 or more', async () => {
+test('headings are the Tasks look: the primary blue band, bold uppercase 11.5px, one line; group bands bold', async () => {
   const css = await readFile(new URL('../src/styles/daily-report.css', import.meta.url), 'utf8')
+  const rule = /:root \.dwr \.dwr-table\.dw-table\.dw-main thead th \{([^}]*)\}/.exec(css)
+  assert.ok(rule, 'no heading rule')
+  assert.match(rule[1], /height: 44px/)
+  assert.match(rule[1], /background: var\(--primary\); color: var\(--on-primary\)/)
+  assert.match(rule[1], /font-size: 11\.5px; font-weight: 700/)
+  assert.match(rule[1], /text-transform: uppercase/)
+  assert.match(rule[1], /white-space: nowrap/)
   const weightOf = selector => {
-    const rule = new RegExp('(?:^|\\n)' + selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\{([^}]*)\\}').exec(css)
-    assert.ok(rule, 'no rule for ' + selector)
-    return { weight: Number(/font-weight: (\d+)/.exec(rule[1])?.[1] ?? 0), colour: /color: ([^;]+);/.exec(rule[1])?.[1] }
+    const found = new RegExp('(?:^|\\n)' + selector.replace(/[.*+?^$\{}()|[\]\\]/g, '\\$&') + ' \\{([^}]*)\\}').exec(css)
+    assert.ok(found, 'no rule for ' + selector)
+    return { weight: Number(/font-weight: (\d+)/.exec(found[1])?.[1] ?? 0), colour: /color: ([^;]+);/.exec(found[1])?.[1] }
   }
-  for (const selector of ['.dwr .dwr-table thead th, .dwr .dwr-status thead th', '.dwr .dw-group th, .dwr .dw-group-title', '.dr-drill .dr-drill-table thead th, .dr-drill .dr-mini thead th']) {
+  for (const selector of ['.dwr .dw-group th, .dwr .dw-group-title', '.dr-drill .dr-drill-table thead th, .dr-drill .dr-mini thead th']) {
     assert.ok(weightOf(selector).weight >= 600, selector)
   }
-  assert.equal(weightOf('.dwr .dwr-table thead th, .dwr .dwr-status thead th').colour, 'var(--text-main)') // not the pale muted grey
   assert.equal(weightOf('.dr-drill .dr-drill-table thead th, .dr-drill .dr-mini thead th').colour, 'var(--text-main)')
 })
 

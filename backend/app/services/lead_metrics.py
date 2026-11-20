@@ -189,7 +189,7 @@ def dashboard_lead_items(db, user, staff_id, card: str, period: str, zone: str, 
 # ------------------------------------------------------------------ weekly staff report
 
 _WEEKLY_SQL = text(f"""
-WITH staff AS (SELECT id FROM auth_users WHERE role = 'staff' AND (CAST(:staff AS varchar) IS NULL OR id = :staff))
+WITH staff AS (SELECT id FROM auth_users WHERE role = 'staff' AND email NOT LIKE '%@deleted.invalid' AND email NOT LIKE '%@system.invalid' AND (CAST(:staff AS varchar) IS NULL OR id = :staff))
 SELECT owner, metric, n FROM (
   SELECT l.owner_id AS owner, 'assigned' AS metric, count(*) AS n FROM crm_leads l
    WHERE l.owner_id IN (SELECT id FROM staff) AND l.assigned_at >= :start AND l.assigned_at < :end GROUP BY l.owner_id

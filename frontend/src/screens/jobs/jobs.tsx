@@ -7,7 +7,7 @@ import { money } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/primitives'
 import { Panel } from '@/shared/ui/display'
 import { DataTable, type Column } from '@/shared/ui/table'
-import { Flag, Progress } from '@/features/clients/components/parts'
+import { Progress } from '@/features/clients/components/parts'
 import { highlightPieces } from '@/features/clients/client-search'
 import { OrderDialog } from '@/features/jobs/components/job-dialogs'
 import { DeleteJobDialog } from '@/features/jobs/components/delete-job-dialog'
@@ -22,6 +22,7 @@ import { useOrderStats } from '@/features/jobs/use-order-stats'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import '@/styles/clients-simple.css'
 import '@/styles/jobs-simple.css'
+import '@/styles/ops-tables.css'
 import '@/styles/touch-targets.css'
 
 type Layout = 'cards' | 'table'
@@ -57,12 +58,11 @@ function Hi({ text, query }: { text?: string | null; query: string }) {
 
 const Quiet = ({ children = 'Not added' }: { children?: string }) => <span className="cl-quiet">{children}</span>
 
-/** Flag in its own colours (a globe when no country is saved), the country in bold and the city under it. */
+/** The country in bold and the city under it (no flag). */
 function Location({ country, city, query }: { country: string; city: string; query: string }) {
-  if (!country && !city) return <Quiet />
+  if (!country && !city) return <span className="cl-quiet" aria-label="Location not set">—</span>
   const primary = country || city
   return <span className="cl-place is-stacked">
-    <Flag country={country} />
     <span className="cl-place-text">
       <b title={primary}><Hi text={primary} query={query} /></b>
       {country && city && <small title={city}><Hi text={city} query={query} /></small>}
@@ -81,7 +81,7 @@ function Openings({ row }: { row: JobRow }) {
 function Salary({ order }: { order: Order }) {
   return order.salary === null || order.salary === undefined
     ? <span className="cl-quiet" aria-label="Salary not set">—</span>
-    : <span className="cl-cell js-salary"><b>{money(order.salary, order.currency)}</b><span>per month</span></span>
+    : <span className="cl-cell js-salary" title="per month"><b>{money(order.salary, order.currency)}</b></span>
 }
 
 function JobCards({ rows, query, newId, onOpen, onEdit, onDelete }: { rows: JobRow[]; query: string; newId: string; onOpen: (o: Order) => void; onEdit?: (o: Order) => void; onDelete?: (o: Order) => void }) {
@@ -113,19 +113,19 @@ function JobCards({ rows, query, newId, onOpen, onEdit, onDelete }: { rows: JobR
 function JobTable({ rows, query, loading, newId, onOpen, onEdit, onDelete }: { rows: JobRow[]; query: string; loading: boolean; newId: string; onOpen: (o: Order) => void; onEdit?: (o: Order) => void; onDelete?: (o: Order) => void }) {
   const columns: Column<JobRow>[] = [
     {
-      key: 'job', header: 'Job', width: '20%',
+      key: 'job', header: 'Job', width: '19%',
       render: (row) => <div className="cl-cell"><b title={row.title}><Hi text={row.title} query={query} /></b><span className="ident" title={row.order.ref}><Hi text={row.order.ref} query={query} /></span></div>,
     },
     {
-      key: 'client', header: 'Client', width: '20%', align: 'left',
-      render: (row) => <div className="cl-cell"><b title={row.company}><Hi text={row.company} query={query} /></b>{row.contact && <span title={row.contact}><Hi text={row.contact} query={query} /></span>}</div>,
+      key: 'client', header: 'Client', width: '18%', align: 'left',
+      render: (row) => <div className="cl-cell"><b title={row.company}><Hi text={row.company} query={query} /></b></div>,
     },
-    { key: 'location', header: 'Location', width: '13%', align: 'left', render: (row) => <Location country={row.country} city={row.city} query={query} /> },
-    { key: 'salary', header: 'Salary', width: '13%', align: 'left', render: (row) => <Salary order={row.order} /> },
-    { key: 'openings', header: 'Openings', width: '12%', align: 'left', render: (row) => <Openings row={row} /> },
-    { key: 'status', header: 'Status', width: '9%', align: 'left', render: (row) => <OrderStatusText order={row.order} /> },
+    { key: 'location', header: 'Location', width: '11%', align: 'left', render: (row) => <Location country={row.country} city={row.city} query={query} /> },
+    { key: 'salary', header: 'Salary', width: '12%', align: 'left', render: (row) => <Salary order={row.order} /> },
+    { key: 'openings', header: 'Openings', width: '13%', align: 'left', render: (row) => <Openings row={row} /> },
+    { key: 'status', header: 'Status', width: '10%', align: 'left', render: (row) => <OrderStatusText order={row.order} /> },
     {
-      key: 'actions', header: 'Actions', actions: true, minWidth: onDelete ? '10.5rem' : '8.5rem',
+      key: 'actions', header: 'Actions', actions: true,
       render: (row) => <span className="cs-row-actions">
         {onEdit && <button type="button" className="cs-icon-act" onClick={(event) => { event.stopPropagation(); onEdit(row.order) }} aria-label={`Edit ${row.title} ${row.order.ref}`} title="Edit"><Pencil size={14} aria-hidden="true" /></button>}
         {onDelete && <button type="button" className="cs-icon-act is-danger" onClick={(event) => { event.stopPropagation(); onDelete(row.order) }} aria-label={`Delete ${row.title} ${row.order.ref}`} title="Delete"><Trash2 size={14} aria-hidden="true" /></button>}
@@ -133,7 +133,7 @@ function JobTable({ rows, query, loading, newId, onOpen, onEdit, onDelete }: { r
       </span>,
     },
   ]
-  return <Panel flush className="js-jobs-table"><DataTable compact sticky maxHeight="72vh" stackBelow={1280} loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.order.id} rowClassName={(row) => row.order.id === newId ? 'js-new' : undefined} onRowClick={(row) => onOpen(row.order)} /></Panel>
+  return <Panel flush className="js-jobs-table tb-blue ops-fit ops-jobs"><DataTable compact stackBelow={1280} loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.order.id} rowClassName={(row) => row.order.id === newId ? 'js-new' : undefined} onRowClick={(row) => onOpen(row.order)} /></Panel>
 }
 
 function Skeleton({ layout }: { layout: Layout }) {

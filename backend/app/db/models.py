@@ -33,6 +33,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    and_,
     func,
     text,
 )
@@ -199,23 +200,25 @@ class User(Base, PkMixin, TimestampMixin):
 
     @property
     def deleted(self) -> bool:
-        """True for a removed account: the login is gone, the row stays only so history keeps a name (see `deleted_user_clause`)."""
-        return (self.email or "").endswith("@" + DELETED_EMAIL_DOMAIN)
+        """True for the "Former user" system account (and for tombstones left by the older delete): never a person who can be listed or assigned."""
+        return (self.email or "").lower().endswith(HIDDEN_EMAIL_SUFFIXES)
 
 
-# A deleted user keeps their auth_users row (some thirty history tables point at it and most of those foreign keys are NOT NULL), but
-# loses the login: password, phone, sessions, and the email, which becomes `deleted-<id>@deleted.invalid` and frees the real address.
-# No schema change: "deleted" is that reserved, unroutable domain. Everything that lists people filters it with `not_deleted_user()`.
+# Deleting a user removes their auth_users row for good. Everything that pointed at them (notes, calls, remarks, stage records, uploads,
+# audit entries, attendance, invoices ...) is re-pointed to ONE permanent system account, created on first use, named "Former user".
+# No schema change: that account is recognised by the reserved, unroutable `system.invalid` domain (sign-in is impossible: no password,
+# inactive, and the domain is refused for real accounts). `deleted.invalid` is the older tombstone marker and stays hidden the same way.
 DELETED_EMAIL_DOMAIN = "deleted.invalid"
-
-
-def deleted_user_email(user_id: str) -> str:
-    return f"deleted-{user_id}@{DELETED_EMAIL_DOMAIN}"
+SYSTEM_EMAIL_DOMAIN = "system.invalid"
+HIDDEN_EMAIL_DOMAINS = (DELETED_EMAIL_DOMAIN, SYSTEM_EMAIL_DOMAIN)
+HIDDEN_EMAIL_SUFFIXES = tuple("@" + domain for domain in HIDDEN_EMAIL_DOMAINS)
+FORMER_USER_NAME = "Former user"
+FORMER_USER_EMAIL = "former-user@" + SYSTEM_EMAIL_DOMAIN
 
 
 def not_deleted_user():
-    """SQL condition: the account has not been deleted."""
-    return ~User.email.like(f"%@{DELETED_EMAIL_DOMAIN}")
+    """SQL condition: a real person's account (not the "Former user" system account, not an old tombstone)."""
+    return and_(*(~User.email.like(f"%@{domain}") for domain in HIDDEN_EMAIL_DOMAINS))
 
 
 class Session(Base, PkMixin):

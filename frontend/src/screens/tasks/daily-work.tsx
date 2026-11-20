@@ -7,6 +7,7 @@ import { EmptyState, PageHeader } from '@/shared/ui/display'
 import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { applicationFormHref } from '@/features/application-form/form-model'
+import { saveApplicationForm } from '@/features/application-form/form-api'
 import { listTitle, recruiterWork, taskRows } from '@/features/daily-work/daily-work-model'
 import { downloadDailyWork } from '@/features/daily-work/daily-work-export'
 import { agencyDay } from '@/shared/lib/task-time'
@@ -125,7 +126,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
           <TaskTable rows={rows} zone={zone} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
             canWork={(row) => !!row.taskId && (store.can('work_any_candidate') || row.ownerId === store.me.id)}
             onOpen={open} onProfile={(row) => navigate(`/candidates/${row.candidateId}`)}
-            onAddDoc={(row) => navigate(`${applicationFormHref(row.candidateId, null, row.applicationId)}#overview`)}
+            onSaveDoc={async (row, iso) => { if (!row.applicationId) return; await saveApplicationForm(row.candidateId, { applicationId: row.applicationId }, { application: { commencementDate: iso } }); await refreshAll() }}
             onRemark={async (row, text) => { if (row.taskId) { await store.addRemark(row.taskId, text); await refreshAll() } }} />
         )}
       </section>
