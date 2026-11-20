@@ -183,6 +183,24 @@ def test_merge_moves_documents_jobs_notes_and_tasks_and_removes_the_duplicate(en
         assert count(db, m.Attachment, m.Attachment.entity_id == SRC) == 0 and count(db, m.DocumentExtractionJob, m.DocumentExtractionJob.candidate_id == SRC) == 0
 
 
+def test_live_original_is_retained_when_the_target_has_removed_its_identical_copy(env):
+    seed_pair(env)
+    with env.sessions() as db:
+        removed = file(env, db, TGT, "source_bundle", "all.pdf", "same-original")
+        removed.deleted_at = NOW
+        incoming = file(env, db, SRC, "source_bundle", "all.pdf", "same-original")
+        db.commit()
+        kept_id = incoming.id
+    response = merge(env)
+    assert response.status_code == 200, response.text
+    from app.services.application_form import build_form
+    with env.sessions() as db:
+        kept = db.get(m.Attachment, kept_id)
+        assert kept.entity_id == TGT and kept.version == 2 and kept.deleted_at is None
+        originals = build_form(db, TGT, db.get(m.User, "admin"))["originalFiles"]
+        assert [file["attachmentId"] for file in originals] == [kept_id]
+
+
 def test_target_values_win_and_empty_target_fields_take_the_duplicates(env):
     seed_pair(env)
     assert merge(env).status_code == 200

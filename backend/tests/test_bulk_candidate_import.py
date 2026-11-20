@@ -1169,10 +1169,11 @@ def test_status_refuses_more_than_two_hundred_ids(env):
 
 # ------------------------------------------------------------------ a scan of several documents is split at upload
 
-def _send_files(env, folder, files, *, default_order="ORD-1", row=None):
+def _send_files(env, folder, files, *, default_order="ORD-1", row=None, duplicate_action="skip", pages=None):
     """The import request with real file contents: files = {path: (bytes, content type)}."""
-    spec = {"folder": folder, "row": {"name": bulk._clean_name(folder), **(row or {"phone": "9876500123"})}, "files": [{"path": n} for n in files],
-            "defaultOrder": default_order, "defaultRecruiterId": "staff"}
+    spec = {"folder": folder, "row": {"name": bulk._clean_name(folder), **(row or {"phone": "9876500123"})},
+            "files": [{"path": n, "pages": (pages or {}).get(n)} for n in files],
+            "defaultOrder": default_order, "defaultRecruiterId": "staff", "duplicateAction": duplicate_action}
     response = env.client.post("/api/candidate-import/candidate", data={"spec": json.dumps(spec)},
                                files=[("files", (n.rsplit("/", 1)[-1], data, kind)) for n, (data, kind) in files.items()])
     assert response.status_code == 200, response.text
@@ -1186,6 +1187,70 @@ def _stored_pdf_text(env, name):
     path = next(env.storage.glob(f"*/{key.rsplit('/', 1)[-1]}"))
     with pymupdf.open(stream=path.read_bytes(), filetype="pdf") as document:
         return document.page_count, " ".join(page.get_text() for page in document).lower()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_bulk_reads_resume_and_education_from_their_own_packet_once(env, existing):
+    from app.services.document_reading import packet_sources
+    from test_document_extraction import pdf
+    from test_ocr_classification import CV, PASSPORT, REAL_DEGREE_WEAK
+
+    if existing:
+        _send_files(env, "Alex Example", {"Medical.pdf": (PDF + b" medical", "application/pdf")})
+    scan = pdf(CV, "DEGREE CERTIFICATE\n" + REAL_DEGREE_WEAK)
+    files = {"scan.pdf": (scan, "application/pdf"), "passport.pdf": (pdf(PASSPORT), "application/pdf")}
+    result = _send_files(env, "Alex Example", files, duplicate_action="add_documents" if existing else "skip")
+    candidate = result["candidateId"]
+    assert result["status"] == ("documents_added" if existing else "imported")
+    assert _jobs(env, candidate) == []
+    with env.sessions() as db:
+        rows = {row.slot: row for row in db.scalars(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate))}
+        source = rows["source_bundle"]
+        assert (env.storage / source.object_key).read_bytes() == scan
+        links = packet_sources(db, [candidate])
+        assert {piece: original.id for (_, piece), original in links.items()} == {
+            rows["resume"].id: source.id, rows["education_certificate"].id: source.id}
+    assert _read_again(env, [candidate]) == 2
+    assert {job.attachment_id for job in _jobs(env, candidate)} == {source.id, rows["passport"].id}
+    assert _read_again(env, [candidate]) == 0
+
+
+def test_adding_a_packet_with_a_previously_read_resume_only_queues_its_new_certificate(env):
+    from app.services.document_reading import packet_sources
+    from test_document_extraction import pdf
+    from test_ocr_classification import CV, REAL_DEGREE_WEAK
+
+    person = "Alex Example"
+    candidate = _send_files(env, person, {"Resume.pdf": (pdf(CV), "application/pdf")})["candidateId"]
+    assert _read_again(env, [candidate]) == 1
+    with env.sessions() as db:
+        db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.candidate_id == candidate)).status = "completed"
+        db.commit()
+    scan = pdf(CV, "DEGREE CERTIFICATE\n" + REAL_DEGREE_WEAK)
+    result = _send_files(env, person, {"scan.pdf": (scan, "application/pdf")}, duplicate_action="add_documents")
+    assert result["status"] == "documents_added"
+    with env.sessions() as db:
+        assert packet_sources(db, [candidate]) == {}
+        degree = db.scalar(select(Attachment).where(Attachment.entity_id == candidate, Attachment.slot == "education_certificate"))
+    assert _read_again(env, [candidate]) == 1
+    pending, = (job for job in _jobs(env, candidate) if job.status == "pending")
+    assert pending.attachment_id == degree.id
+
+
+def test_queueing_a_persons_selected_pages_never_sends_another_persons_pages(env):
+    import pymupdf
+    from test_document_extraction import pdf
+    from test_ocr_classification import CV, REAL_DEGREE_WEAK
+
+    scan = pdf(CV.replace("Alex Example", "Sam Unassigned"), CV, "DEGREE CERTIFICATE\n" + REAL_DEGREE_WEAK)
+    result = _send_files(env, "Alex Example", {"scan.pdf": (scan, "application/pdf")}, pages={"scan.pdf": [2, 3]})
+    candidate = result["candidateId"]
+    assert _read_again(env, [candidate]) == 1
+    job, = _jobs(env, candidate)
+    with pymupdf.open(env.storage / job.object_key) as packet:
+        assert packet.page_count == 2
+        assert "Alex Example" in packet[0].get_text() and "DEGREE CERTIFICATE" in packet[1].get_text()
+        assert all("Sam Unassigned" not in page.get_text() for page in packet)
 
 
 def test_a_scan_of_several_documents_is_split_so_each_slot_holds_only_its_own_pages(env):
@@ -1202,12 +1267,14 @@ def test_a_scan_of_several_documents_is_split_so_each_slot_holds_only_its_own_pa
     with env.sessions() as db:
         rows = list(db.scalars(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == result["candidateId"])))
         by_slot = {row.slot: row for row in rows}
-        assert set(by_slot) == {"passport", "aadhaar", "signed_offer", "medical", "photo"}
+        assert set(by_slot) == {"passport", "aadhaar", "signed_offer", "medical", "photo", "source_bundle"}
+        source = by_slot["source_bundle"]
+        assert (env.storage / source.object_key).read_bytes() == scan
         assert all(row.version == 1 for row in rows)                                 # copy not added again: one file per slot
         assert by_slot["passport"].file_name == "Rashid_Khan-Passport.pdf"
         assert by_slot["aadhaar"].file_name == "Rashid_Khan-Aadhaar_card.pdf"
         assert by_slot["signed_offer"].file_name == "Rashid_Khan-Signed_offer.pdf"
-        assert len({row.object_key for row in rows}) == 5                            # three different files cut from the one scan
+        assert len({row.object_key for row in rows}) == 6                            # the scan plus its three pieces and two separate files
         assert by_slot["medical"].file_name == "Rashid_Khan-Medical.pdf" and by_slot["photo"].file_name == "Rashid_Khan-Photo.jpg"
         # the Passport slot holds the passport page only, the Aadhaar slot the Aadhaar page only, the offer slot the rest
         passport_pages, passport_text = _stored_pdf_text(env, "Rashid_Khan-Passport.pdf")
@@ -1287,6 +1354,10 @@ def test_the_form_and_the_profile_say_which_pages_of_the_scan_each_split_file_ho
                                             "Rashid-Medical.pdf": (PDF + b" medical", "application/pdf")})["candidateId"]
     plain = _send_files(env, "Rahul Kumar", {"Rahul-Medical.pdf": (PDF + b" other medical", "application/pdf")}, row={"phone": "9876500124"})["candidateId"]
 
+    from app.services.application_form import build_form
+    with env.sessions() as db:
+        originals = build_form(db, split, db.get(User, "admin"))["originalFiles"]
+    assert {file["fileName"] for file in originals} == {"Rashid-signed offer,aadhar,pp.pdf", "Rashid-Medical.pdf"}
     documents = _form_documents(env, split)
     for slot, pages in (("passport", [2]), ("aadhaar", [3]), ("signed_offer", [1])):
         assert documents[slot]["current"]["splitFrom"] == {"fileName": "Rashid-signed offer,aadhar,pp.pdf", "pages": pages}, slot
@@ -1302,6 +1373,31 @@ def test_the_form_and_the_profile_say_which_pages_of_the_scan_each_split_file_ho
     assert all("splitFrom" not in file for files in _profile_documents(env, plain).values() for file in files)
 
 
+def test_a_combined_pdf_added_to_a_matched_candidate_remains_downloadable_after_exact_repeat(env):
+    from app.services.application_form import build_form
+    from ocr_synthetic import composite_pdf
+    candidate = _send_files(env, "Rashid Khan", {"Rashid-Medical.pdf": (PDF + b" medical", "application/pdf")})["candidateId"]
+    scan = composite_pdf(["unrelated", "passport", "aadhaar"])
+    filename = "Rashid-signed offer,aadhar,pp.pdf"
+    files = {filename: (scan, "application/pdf")}
+    for attempt in range(2):
+        result = _send_files(env, "Rashid Khan", files, duplicate_action="add_documents")
+        assert result["status"] == "documents_added" and result["candidateId"] == candidate
+        source, = (item for item in result["documents"] if item["slot"] == "source_bundle")
+        assert source["alreadyFiled"] == bool(attempt)
+    with env.sessions() as db:
+        original, = (file for file in build_form(db, candidate, db.get(User, "admin"))["originalFiles"] if file["fileName"] == filename)
+        stored = db.get(Attachment, original["attachmentId"])
+        assert stored.entity_id == candidate and (env.storage / stored.object_key).read_bytes() == scan
+        stored.deleted_at = stored.uploaded_at
+        db.commit()
+    result = _send_files(env, "Rashid Khan", files, duplicate_action="add_documents")
+    assert result["status"] == "documents_added"
+    with env.sessions() as db:
+        replacement, = (file for file in build_form(db, candidate, db.get(User, "admin"))["originalFiles"] if file["fileName"] == filename)
+        assert replacement["attachmentId"] != original["attachmentId"] and replacement["version"] == 2
+
+
 def test_showing_where_a_split_file_came_from_costs_at_most_one_more_statement_whatever_the_number_of_files(env):
     from ocr_synthetic import composite_pdf
     scan = composite_pdf(["unrelated", "passport", "aadhaar"])
@@ -1314,9 +1410,9 @@ def test_showing_where_a_split_file_came_from_costs_at_most_one_more_statement_w
         _, without = _statements_while(env, lambda: read(env, plain))
         assert len(with_splits) == len(without), read.__name__                       # three split files, no statement per file
         assert sum("split_pages" in statement for statement in with_splits) <= 1
-    # the form's one extra read is the upload entries that carry split_pages; the profile folds it into its single statement
+    # The form reads upload provenance once for all originals and split files. The profile includes it in its main read.
     _, form_statements = _statements_while(env, lambda: _form_documents(env, split))
-    assert sum("split_pages" in statement for statement in form_statements) == 1
+    assert sum("Uploaded document" in statement for statement in form_statements) == 1
     _, profile_statements = _statements_while(env, lambda: _profile_documents(env, split))
     assert len(profile_statements) == 1 and "split_pages" in profile_statements[0]
 

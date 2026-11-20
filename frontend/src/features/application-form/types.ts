@@ -325,6 +325,7 @@ export interface ApplicationFormData {
   education: EducationRow[]
   experience: ExperienceDetails
   /** Every document slot, keyed by slot. */
+  originalFiles?: FormDocument[]
   documents: Record<DocumentKind, DocumentSlot>
   /** The slots in display order. */
   documentOrder: DocumentKind[]

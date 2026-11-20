@@ -227,6 +227,14 @@ export function DocumentsSection({
           </div>
         )}
       />
+      {!!form.originalFiles?.length && (
+        <section className="af-docgroup" aria-label="Original files">
+          <h3>Original files</h3>
+          <ul className="af-doclist">
+            {form.originalFiles.map((file) => <li key={file.attachmentId}><FileRow file={file} /></li>)}
+          </ul>
+        </section>
+      )}
       {/* Four small groups, each a grid of compact cards: a name, a status chip and one action, so the whole list is seen at a glance. */}
       <div className="af-docgroups">
         {groups.map((group) => (

@@ -651,12 +651,15 @@ def test_same_content_twice_in_one_message_does_not_repeat_extraction(intake, mo
             content_hash=original.content_hash, object_key=original.object_key, size_kb=1,
         ))
         db.commit()
-    calls = fake_extraction(monkeypatch)
+    reading = extraction()
+    reading["inspection"].update(document_pages={"resume": [2], "passport": [3], "aadhaar": []}, supporting_pages={})
+    calls = fake_extraction(monkeypatch, reading)
     run(intake, job_id)
     with intake.sessions() as db:
         job = db.get(EmailIngestionJob, job_id)
         assert job.status == "completed"
-        assert row_count(db, Candidate) == 1 and row_count(db, Attachment) == 2
+        assert row_count(db, Candidate) == 1
+        assert sorted(db.scalars(select(Attachment.slot))) == ["passport", "resume", "source_bundle"]
         assert len(job.inspection) == 2
     assert len(calls) == 1
 
@@ -1227,6 +1230,9 @@ def test_when_the_message_resolves_to_the_candidate_that_already_has_the_file_no
         assert "already-filed.pdf: already filed for this candidate, so it was not filed again." in job.last_error
         held = list(db.scalars(select(Attachment).where(Attachment.entity_id == holder, Attachment.content_hash == hashlib.sha256(ORIGINAL).hexdigest())))
         assert len(held) == 1 and held[0].slot == "passport"                                 # no second copy, no source_bundle copy
+        from app.services.application_form import build_form
+        originals = build_form(db, holder, db.get(User, "staff-b"))["originalFiles"]
+        assert {file["attachmentId"] for file in originals if file["fileName"] == "already-filed.pdf"} == {held[0].id}
         assert row_count(db, Candidate) == 1
 
 

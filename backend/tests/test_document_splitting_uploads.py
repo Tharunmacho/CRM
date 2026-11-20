@@ -120,16 +120,43 @@ def test_a_combined_scan_put_in_the_passport_field_is_filed_by_content_and_nothi
     assert audit["passport"]["extraction_deferred"] is True
 
 
-def test_reading_is_queued_for_each_identity_piece_exactly_as_an_upload_to_that_field_does(desk):
+def test_reading_is_queued_once_for_the_combined_original_across_piece_actions(desk):
     response = send(desk, composite_pdf(SCAN), slot="passport", defer="false")
     assert response.status_code == 201, response.text
     with desk.sessions() as db:
         jobs = list(db.scalars(select(DocumentExtractionJob).where(DocumentExtractionJob.candidate_id == "candidate")))
-    assert sorted(job.kind for job in jobs) == ["aadhaar", "passport"] and all(job.status == "pending" for job in jobs)
+        assert len(jobs) == 1
+        piece_ids = set(jobs[0].draft["packetPieceIds"])
+    [job] = jobs
+    stored = {row.slot: row for row in rows(desk)}
+    assert job.attachment_id == stored["source_bundle"].id and job.status == "pending"
+    assert piece_ids == {stored["passport"].id, stored["aadhaar"].id}
+    again = desk.client.post("/api/candidates/candidate/application-form/extract", json={"attachmentIds": [stored["aadhaar"].id]})
+    assert again.status_code == 200 and again.json()["queued"] == 0, again.text
     # deferred (the screens' default): stored only, nothing is read until a person asks
     send(desk, composite_pdf(["passport", "aadhaar", "unrelated"]), slot="aadhaar", defer="true")
     with desk.sessions() as db:
-        assert len(list(db.scalars(select(DocumentExtractionJob)))) == 2
+        assert len(list(db.scalars(select(DocumentExtractionJob)))) == 1
+
+
+def test_profile_queues_deferred_resume_and_degree_on_their_single_original(desk):
+    from app.api.routers import candidate_import
+    from test_email_intake_split import everything
+    data = everything(["resume_1", "resume_2", "degree"])
+    uploaded = send(desk, data, slot="resume", name="resume-and-degree.pdf", defer="true")
+    assert uploaded.status_code == 201, uploaded.text
+    stored = {row.slot: row for row in rows(desk)}
+    assert {"source_bundle", "resume", "education_certificate"} <= stored.keys()
+    with desk.sessions() as db:
+        candidate, user = db.get(Candidate, "candidate"), db.get(User, "staff")
+        first = candidate_import.queue_unread(db, user, [candidate], retry_failed=False, limit=1)
+        db.commit()
+        assert first[0] == 1 and not first[2]
+        assert candidate_import.queue_unread(db, user, [candidate], retry_failed=False)[0] == 0
+        [job] = list(db.scalars(select(DocumentExtractionJob)))
+        assert job.attachment_id == stored["source_bundle"].id and job.object_key == stored["source_bundle"].object_key
+    response = desk.client.post("/api/candidates/candidate/application-form/extract", json={"attachmentIds": [stored["education_certificate"].id]})
+    assert response.status_code == 200 and response.json()["queued"] == 0, response.text
 
 
 def test_the_same_combined_scan_again_adds_no_new_versions(desk):
@@ -280,11 +307,20 @@ def test_a_part_that_lands_in_the_air_ticket_field_starts_the_invoice_request_li
 # ------------------------------------------------------------------ the application form's slot upload
 
 def test_the_form_upload_answers_with_the_pieces_and_the_form_shows_every_field_filled(desk):
+    scan = composite_pdf(SCAN)
     response = desk.client.post("/api/candidates/candidate/application-form/documents", data={"slot": "passport"},
-                                files={"file": ("everything.pdf", composite_pdf(SCAN), "application/pdf")})
+                                files={"file": ("everything.pdf", scan, "application/pdf")})
     assert response.status_code == 202, response.text
     body = response.json()
     assert {piece["slot"] for piece in body["split"]["pieces"]} == {"passport", "aadhaar", "other"}
+    original, = body["form"]["originalFiles"]
+    assert original["fileName"] == "everything.pdf"
+    downloaded = desk.client.get(original["url"], params={"download": "true"})
+    assert downloaded.status_code == 200 and downloaded.content == scan
+    repeat = send(desk, scan, slot="passport", name="same-again.pdf")
+    assert repeat.status_code == 201
+    form = desk.client.get("/api/candidates/candidate/application-form").json()
+    assert [file["attachmentId"] for file in form["originalFiles"]] == [original["attachmentId"]]
     documents = body["form"]["documents"]
     assert documents["passport"]["uploaded"] and documents["aadhaar"]["uploaded"] and documents["other"]["uploaded"]
     assert "were filed in their own fields" in body["split"]["message"]

@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session, undefer
 from app.core.config import get_settings
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry, Candidate, Client, Company,
-    Designation, DocumentExtractionJob, Order, Priority, Role, Source, Task, TodoItem, User,
+    Designation, DocumentExtractionJob, EmailIngestionJob, MailAttachment, Order, Priority, Role, Source, Task, TodoItem, User,
 )
 from app.domain.stages import STOP_OUTCOMES, TOTAL_STAGES, stage_by_no
 from app.services import form_assignment, form_feedback
@@ -356,11 +356,14 @@ def extraction_view(job) -> dict | None:
     return {**base, "status": "done", "message": None}
 
 
+def upload_sources_statement(candidate_id: str):
+    return select(AuditEntry.meta).where(AuditEntry.entity_type == "candidate", AuditEntry.entity_id == candidate_id,
+                                         AuditEntry.action == "Uploaded document")
+
+
 def split_sources_statement(candidate_id: str):
-    """The upload entries of a candidate's files that were cut from a larger scan (one statement for all of them)."""
-    return select(AuditEntry.meta).where(
-        AuditEntry.entity_type == "candidate", AuditEntry.entity_id == candidate_id,
-        AuditEntry.action == "Uploaded document", AuditEntry.meta.has_key("split_pages"))
+    """The upload entries of a candidate's files that were cut from a larger scan."""
+    return upload_sources_statement(candidate_id).where(AuditEntry.meta.has_key("split_pages"))
 
 
 def split_sources(metas) -> dict[str, dict]:
@@ -463,7 +466,8 @@ def set_document_status(db: Session, user: User, candidate_id: str, slot: str, u
 
 
 def _file_reading(row, jobs):
-    job = next((job for job in jobs if job.attachment_id == row.id or row.id in
+    job = next((job for job in jobs if job.attachment_id == row.id or row.id in ((job.draft or {}).get("packetPieceIds") or [])
+                or row.id in
                 (((job.draft or {}).get("applicationForm") or {}).get("attachedDocuments") or {}).values()), None)
     return extraction_view(job)
 
@@ -489,6 +493,31 @@ def _combined_reading(files):
     for key in ("filled", "kept", "kindsFound"):
         result[key] = list(dict.fromkeys(value for read in reads for value in read.get(key, [])))
     return result
+
+
+def _original_files(attachments, jobs, upload_metas, receipts, names):
+    """Only retained candidate uploads (or their reviewed per-person pages). A derived PDF is not a full upload."""
+    upload_names = {meta["attachment_id"]: meta.get("original_name") for meta in upload_metas
+                    if isinstance(meta, dict) and meta.get("attachment_id") and "split_pages" not in meta}
+    # Older manual intakes can have the whole file in the resume/passport slot while waiting for the reader.
+    manual = {(job.attachment_id, job.content_hash) for job in jobs if job.status == "attached" and job.content_hash}
+    seen = set()
+    originals = []
+    for row in sorted(attachments, key=lambda r: (r.uploaded_at, r.version, r.id), reverse=True):
+        if row.entity_type != "candidate" or row.slot == INVOICE_SLOT or row.identity_mismatch:
+            continue
+        if row.slot != "source_bundle":
+            if row.content_type != "application/pdf" and not (receipts.get(row.content_hash) or row.file_name).lower().endswith(".pdf"):
+                continue
+            if row.id not in upload_names and (row.id, row.content_hash) not in manual and row.content_hash not in receipts:
+                continue
+        key = row.content_hash or row.id
+        if key not in seen:
+            file = _document(row, names)
+            file["fileName"] = upload_names.get(row.id) or receipts.get(row.content_hash) or row.file_name
+            originals.append(file)
+            seen.add(key)
+    return originals
 
 
 def document_slots(attachments: list, jobs: list, names: dict[str, str], stage: int | None = None,
@@ -597,19 +626,20 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
         application_ids = select(Application.id).where(Application.candidate_id == candidate_id)
         stored = STORED_SLOTS if show_invoice else tuple(slot for slot in STORED_SLOTS if slot != INVOICE_SLOT)
         # Invoice PDFs are the admin's: nobody else's form reads, lists or links them.
-        scope = [(Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id) & Attachment.slot.in_(stored)]
+        scope = [(Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id) & Attachment.slot.in_((*stored, "source_bundle"))]
         if show_invoice:
             scope.append((Attachment.entity_type == "application") & Attachment.entity_id.in_(application_ids) & (Attachment.slot == "invoice"))
         return list(session.execute(
             select(Attachment.id, Attachment.slot, Attachment.version, Attachment.file_name, Attachment.size_kb,
-                   Attachment.content_type, Attachment.uploaded_at, Attachment.uploaded_by, Attachment.entity_type, Attachment.entity_id, rejected_expression())
+                   Attachment.content_type, Attachment.uploaded_at, Attachment.uploaded_by, Attachment.entity_type, Attachment.entity_id,
+                   Attachment.content_hash, rejected_expression())
             .where(or_(*scope), Attachment.deleted_at.is_(None))).all())
 
     def read_jobs(session):
         return list(session.execute(
             select(DocumentExtractionJob.id, DocumentExtractionJob.kind, DocumentExtractionJob.status,
                    DocumentExtractionJob.attempts, DocumentExtractionJob.last_error, DocumentExtractionJob.attachment_id,
-                   DocumentExtractionJob.updated_at, DocumentExtractionJob.draft)
+                   DocumentExtractionJob.updated_at, DocumentExtractionJob.draft, DocumentExtractionJob.content_hash)
             .where(DocumentExtractionJob.candidate_id == candidate_id, DocumentExtractionJob.kind.in_(READ_SLOTS))
             .order_by(DocumentExtractionJob.created_at.desc())).all())
 
@@ -622,7 +652,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
         # Who uploaded a file or completed a stage, resolved inside the same round as everything else (a superset of the
         # selected application's people, which is harmless): a second round trip just for names is avoided.
         uploaders = select(Attachment.uploaded_by).where(
-            or_((Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id) & Attachment.slot.in_(STORED_SLOTS),
+            or_((Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id) & Attachment.slot.in_((*STORED_SLOTS, "source_bundle")),
                 (Attachment.entity_type == "application") & (Attachment.slot == "invoice")
                 & Attachment.entity_id.in_(select(Application.id).where(Application.candidate_id == candidate_id))))
         completers = select(ApplicationStage.completed_by).join(Application, Application.id == ApplicationStage.application_id).where(
@@ -646,13 +676,22 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
                       lambda: (form_assignment.read_agencies(session), form_assignment.read_recruiters(session)))
 
     def read_audit(session):
-        # Two small reads of the same audit rows in ONE statement: each document's manual "uploaded" mark and which scan each split file was cut from.
+        # Read manual checklist marks and original upload names/page assignments in one statement.
         from app.services.desk_snapshot import _rows
-        row = session.execute(select(_rows("manual", latest_statement([candidate_id])), _rows("splits", split_sources_statement(candidate_id)))).mappings().one()
-        return statuses_by_candidate(row["manual"]).get(candidate_id, {}), [item["meta"] for item in row["splits"] or []]
+        # A repeated email file can be kept in a regular slot: match the exact receipt hash only when intake confirmed the same holder.
+        own_hashes = select(Attachment.content_hash).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
+                                                            Attachment.deleted_at.is_(None), Attachment.content_hash.is_not(None))
+        same_holder = select(MailAttachment.content_hash, MailAttachment.file_name).join(
+            EmailIngestionJob, EmailIngestionJob.message_id == MailAttachment.message_id).where(
+            MailAttachment.content_hash.in_(own_hashes), EmailIngestionJob.candidate_id == candidate_id, EmailIngestionJob.status == "completed",
+            EmailIngestionJob.state[MailAttachment.id]["output"]["alreadyFiled"]["candidateId"].astext == candidate_id)
+        row = session.execute(select(_rows("manual", latest_statement([candidate_id])), _rows("uploads", upload_sources_statement(candidate_id)),
+                                     _rows("receipts", same_holder))).mappings().one()
+        return (statuses_by_candidate(row["manual"]).get(candidate_id, {}), [item["meta"] for item in row["uploads"] or []],
+                {item["content_hash"]: item["file_name"] for item in row["receipts"] or [] if item["content_hash"]})
 
     # Every read is one statement, and there are no more of them than parallel_reads has slots, so the whole form is one round trip.
-    found, application_rows, attachments, jobs, stages, names, feedback_items, tasks, job_rows, (agencies, recruiters), (manual_records, split_metas) = parallel_reads(
+    found, application_rows, attachments, jobs, stages, names, feedback_items, tasks, job_rows, (agencies, recruiters), (manual_records, upload_metas, receipts) = parallel_reads(
         db, read_candidate, read_applications, read_attachments, read_jobs, read_stages, read_names, read_feedback, read_tasks,
         lambda session: form_assignment.read_job_options(session, candidate_id), read_lists, read_audit)
     if found is None:
@@ -667,7 +706,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
 
     sources = fx.sources_of(candidate)
     slots = document_slots(selected_document_attachments(attachments, application.id if application else None),
-                           jobs, names, application.current_stage if application is not None else None, manual_records, split_sources(split_metas))
+                           jobs, names, application.current_stage if application is not None else None, manual_records, split_sources(upload_metas))
     if not show_invoice:
         slots.pop(INVOICE_SLOT, None)
     listing = _applications(application_rows)
@@ -728,6 +767,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
             "history": [_history_out(r) for r in (candidate.work_history or []) if isinstance(r, dict)],
         },
         "documents": slots,
+        "originalFiles": _original_files(attachments, jobs, upload_metas, receipts, names),
         # Only the last four digits of an Aadhaar card read for this candidate ("XXXX XXXX 1234"); the number itself is never in this payload.
         "aadhaar": {"maskedNumber": fx.aadhaar_of(candidate)} if fx.aadhaar_of(candidate) else None,
         "recruitment": {
@@ -1053,6 +1093,10 @@ def queue_reading(db: Session, user: User, candidate: Candidate, attachment: Att
         queued_at=datetime.now(timezone.utc),
     )
     db.add(job)
+    if attachment.slot == "source_bundle":
+        from app.services.document_reading import packet_sources
+        job.draft = {**job.draft, "packetPieceIds": [piece for (_, piece), source in packet_sources(db, [candidate.id]).items()
+                                                     if source.id == attachment.id]}
     from app.services.extraction_queue import notify_work
     notify_work(db, "manual")  # a sleeping worker starts reading at once (delivered when the caller commits)
     return job
@@ -1104,6 +1148,8 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
     `apply_job_output` has open (`_FILING_NOTES`).
     """
     notes = _FILING_NOTES.get()
+    if output.get("splitSuggested"):
+        return {}
     source = db.get(Attachment, meta.get("attachmentId") or job.attachment_id)
     if source is None or source.entity_type != "candidate" or source.entity_id != job.candidate_id:
         return {}
@@ -1113,24 +1159,32 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
     extractions = output.get("extractions") or {}
     documents = (job.state or {}).get("documents") or {}
     other_document = documents.get("other") if isinstance(documents.get("other"), dict) else None
-    mixed = sum(bool(inspection.get(kind + "_pages")) for kind in fx.SLOT_KINDS) > 1 or other_document is not None
+    local = isinstance(inspection.get("document_pages"), dict)
+    whole = inspection.get("page_count")
+    if local:
+        mixed = len(documents) > 1 or any(0 < len(doc.get("selected_pages") or []) < (whole or 0) for doc in documents.values())
+    else:
+        mixed = sum(bool(inspection.get(kind + "_pages")) for kind in fx.SLOT_KINDS) > 1 or other_document is not None
     attached = dict(meta.get("attachedDocuments") or {})
     candidate = db.get(Candidate, job.candidate_id)
     settings = get_settings()
     taken: set[str] = set()
-    whole = inspection.get("page_count")
     superseded = False
-    for kind in [*extractions, *(["other"] if other_document is not None else [])]:
+    for kind in (documents if local else [*extractions, *(["other"] if other_document is not None else [])]):
         document = documents.get(kind)
         if not document:
             continue
-        if kind != "other" and (kind not in fx.SLOT_KINDS or (not mixed and kind == source.slot and not derive_source_slot)):
+        if kind not in SLOTS or kind in splitting.NEVER_FILED:
             continue
-        if source.slot in JOB_KIND and kind == JOB_KIND[source.slot]:
+        if kind != "other" and ((not local and kind not in fx.SLOT_KINDS) or (not mixed and kind == source.slot and not derive_source_slot)):
+            continue
+        if not local and source.slot in JOB_KIND and kind == JOB_KIND[source.slot]:
             continue   # an education certificate is typed as a resume to be read: its pages are never filed as a Resume
         versions = db.scalars(select(Attachment).where(
             Attachment.entity_type == "candidate", Attachment.entity_id == job.candidate_id, Attachment.slot == kind)
             .order_by(Attachment.uploaded_at.desc(), Attachment.version.desc())).all()
+        next_version = max((version.version for version in versions), default=0) + 1
+        versions = [version for version in versions if version.deleted_at is None]
         previous = versions[0] if versions else None
         pages = [number for number in document.get("selected_pages") or [] if type(number) is int]
         label = splitting.label_of(kind)
@@ -1169,7 +1223,7 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
             continue
         file_name = splitting.derived_file_name(candidate, kind, taken, source.file_name)
         row = Attachment(id=str(uuid.uuid4()), entity_type="candidate", entity_id=job.candidate_id,
-            slot=kind, version=(previous.version if previous else 0) + 1,
+            slot=kind, version=next_version,
             object_key=document["object_key"], content_hash=document["content_hash"],
             file_name=file_name, content_type=document["content_type"], size_kb=document["size_kb"],
             uploaded_by=job.owner_id, uploaded_at=source.uploaded_at)
@@ -1182,11 +1236,12 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
         superseded = superseded or own_slot
         if kind == "other" and notes is not None and pages:
             notes.append(f"{_pages_text(pages).capitalize()} of this file {'was' if len(pages) == 1 else 'were'} filed under Other documents.")
-    recognized = any(kind in fx.SLOT_KINDS and kind in documents for kind in extractions)
-    own_pages = (documents.get(source.slot) or {}).get("selected_pages") if source.slot in fx.SLOT_KINDS else None
-    partial = bool(own_pages) and source.slot in extractions and isinstance(whole, int) and len(own_pages) < whole
-    if (recognized and source.slot in fx.SLOT_KINDS and source.slot not in extractions
-            and not inspection.get(source.slot + "_pages")) or (superseded and partial and mixed):
+    recognized = bool(set(documents) - {"other"}) if local else any(kind in fx.SLOT_KINDS and kind in documents for kind in extractions)
+    own_pages = (documents.get(source.slot) or {}).get("selected_pages")
+    partial = bool(own_pages) and isinstance(whole, int) and len(own_pages) < whole
+    original_kind_absent = source.slot not in documents if local else source.slot not in extractions and not inspection.get(source.slot + "_pages")
+    checked_slot = source.slot in fx.SLOT_KINDS or (local and source.slot in JOB_KIND)
+    if (recognized and checked_slot and original_kind_absent) or (superseded and partial and mixed):
         # A passport uploaded in the resume control must not count as an uploaded resume, and a whole scan whose own kind was
         # filed as a file of just its pages must not stay beside it as a second copy. Retain the original by the same ID as a
         # source bundle instead.
@@ -1221,7 +1276,7 @@ def file_other_documents(db: Session, job: DocumentExtractionJob, output: dict, 
     education certificate that was filed is queued for reading like any upload to that field. The caller holds the candidate lock and
     commits. Done once per job (`othersFiled` in its draft). When the filing itself fails the pages go to Other documents instead,
     so nothing is lost and the reading of the three kinds is never held back. Returns the pieces stored."""
-    if (job.draft or {}).get(OTHERS_FILED) or meta.get("slot") not in IDENTITY_SLOTS or not job.candidate_id:
+    if (output or {}).get("splitSuggested") or (job.draft or {}).get(OTHERS_FILED) or meta.get("slot") not in IDENTITY_SLOTS or not job.candidate_id:
         return []
     state = getattr(job, "state", None)
     state = state if isinstance(state, dict) else {}
@@ -1256,7 +1311,7 @@ def file_other_documents(db: Session, job: DocumentExtractionJob, output: dict, 
     try:
         with db.begin_nested():
             stored = splitting.store_pieces(db, owner, candidate, plan, source.file_name, settings=settings, written=written,
-                                            skip_slots=set(splitting.READER_FILED), audit_extra=audit, uploaded_at=source.uploaded_at)
+                                            skip_slots=set(splitting.READER_FILED) | set(state.get("documents") or {}), audit_extra=audit, uploaded_at=source.uploaded_at)
     except Exception:
         discard_written(settings, written)
         log.warning("Filing the other documents of job %s failed; their pages go to Other documents.", job.id, exc_info=True)
@@ -1271,7 +1326,10 @@ def file_other_documents(db: Session, job: DocumentExtractionJob, output: dict, 
             discard_written(settings, written)
             raise
     queued: set[str] = set()
+    education_read = set(((output.get("extractions") or {}).get("resume") or {}).get("selected_pages") or [])
     for piece in stored:     # an education certificate is read like one uploaded to its field (once per stored file)
+        if piece.slot == "education_certificate" and set(piece.pages) <= education_read:
+            continue
         if piece.slot in splitting.READ_SLOTS and not piece.duplicate and piece.attachment.object_key not in queued:
             queued.add(piece.attachment.object_key)
             queue_reading(db, owner, candidate, piece.attachment, "application/pdf")
@@ -1693,6 +1751,10 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
             # The other documents of the same file (experience / education certificates, offer, visa, medical, police clearance) are
             # filed in their own fields from the reading just made.
             own_field = {number for piece in file_other_documents(db, job, output, meta) for number in piece.pages}
+            if isinstance((output.get("inspection") or {}).get("document_pages"), dict):
+                documents = (job.state or {}).get("documents") or {}
+                for kind in form["attachedDocuments"].keys() - {"other"}:
+                    own_field.update((documents.get(kind) or {}).get("selected_pages") or [])
         finally:
             _FILING_NOTES.reset(token)
         filing.extend(_unfiled_page_notes(output, meta, bool((((getattr(job, "state", None) or {}).get("documents")) or {}).get("other")), own_field))

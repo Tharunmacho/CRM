@@ -92,6 +92,15 @@ test('manual document marks preserve attribution without inventing file links, a
   assert.equal(older.capabilities.deferredDocumentReading, false)
 })
 
+test('retained originals keep their download links separately from the document checklist', () => {
+  const file = { attachmentId: 'original', fileName: 'Full scan.pdf', url: '/api/files/original' }
+  const form = model.normalizeForm(server({ originalFiles: [file, null], documents: {} }))
+  assert.equal(form.originalFiles.length, 1)
+  assert.equal(form.originalFiles[0].url, file.url)
+  assert.equal(form.originalFiles[0].fileName, file.fileName)
+  assert.equal(form.documents.passport.uploaded, false)
+})
+
 test('a file cut from a larger scan keeps the scan name and pages; a malformed splitFrom is dropped', () => {
   const file = (splitFrom) => ({ attachmentId: 'p', fileName: 'passport.pdf', url: '/api/files/p', splitFrom })
   const read = (splitFrom) => model.normalizeForm(server({ documents: { passport: { current: file(splitFrom), files: [file(splitFrom)] } } })).documents.passport

@@ -191,22 +191,23 @@ def _plan(db: Session, source: Candidate, target: Candidate, confirm: bool) -> S
     # Documents: a new version per slot on the target; the same file (hash) already in a slot is skipped.
     have: dict[tuple[str, str], str] = {}
     newest: dict[str, int] = {}
-    for slot, content_hash, attachment_id, version in db.execute(select(Attachment.slot, Attachment.content_hash, Attachment.id, Attachment.version)
-                                                                  .where(Attachment.entity_type == "candidate", Attachment.entity_id == target.id)):
-        if content_hash:
+    present = select(Attachment.slot, Attachment.content_hash, Attachment.id, Attachment.version, Attachment.deleted_at).where(
+        Attachment.entity_type == "candidate", Attachment.entity_id == target.id).order_by(Attachment.version.desc(), Attachment.id)
+    for slot, content_hash, attachment_id, version, deleted_at in db.execute(present):
+        if content_hash and deleted_at is None:
             have.setdefault((slot, content_hash), attachment_id)
         newest[slot] = max(newest.get(slot, 0), version)
     documents = db.scalars(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == source.id)
                            .order_by(Attachment.slot, Attachment.version, Attachment.uploaded_at, Attachment.id)).all()
     for document in documents:
-        if document.content_hash and (document.slot, document.content_hash) in have:
+        if document.deleted_at is None and document.content_hash and (document.slot, document.content_hash) in have:
             plan.remap[document.id] = have[(document.slot, document.content_hash)]
             plan.skipped.append({"kind": "document", "name": document.file_name, "slot": document.slot,
                                  "reason": f"The same file is already on {_short(target)}."})
             continue
         newest[document.slot] = newest.get(document.slot, 0) + 1
         plan.moves.append((document, newest[document.slot]))
-        if document.content_hash:
+        if document.deleted_at is None and document.content_hash:
             have[(document.slot, document.content_hash)] = document.id
 
     source_apps = db.execute(select(Application.status, Order.ref).join(Order, Order.id == Application.order_id)

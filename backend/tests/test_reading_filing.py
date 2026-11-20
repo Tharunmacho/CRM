@@ -111,6 +111,19 @@ def files(env):
         return [(row.slot, row.version, row.file_name) for row in rows]
 
 
+def test_local_pages_are_attached_without_a_matching_provider_result(storage):
+    _source, job_id, output = reading(storage)
+    output["inspection"]["document_pages"] = {"resume": [1, 2], "passport": [3, 4], "aadhaar": [5]}
+    output["extractions"].pop("aadhaar")
+    output["extractions"]["passport"]["selected_pages"] = [3]
+    form = apply(storage, job_id, output)
+    assert {"resume", "passport", "aadhaar"} <= set(form["attachedDocuments"])
+    with storage.sessions() as db:
+        for kind, pages in output["inspection"]["document_pages"].items():
+            row = db.get(Attachment, form["attachedDocuments"][kind])
+            assert document_storage.read_bytes(storage.settings, row.object_key) == cut_pdf_pages(whole_scan(), pages)
+
+
 def test_every_derived_file_is_named_like_the_others_and_the_whole_scan_becomes_the_source_evidence(storage):
     source_id, job_id, output = reading(storage)
     meta = apply(storage, job_id, output)

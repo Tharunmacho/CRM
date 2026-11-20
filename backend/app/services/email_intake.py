@@ -26,7 +26,7 @@ from app.integrations.ocr.mapping import parse_loose_date
 from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.mail.mime import document_mime
 from app.services.document_extraction import (
-    extract_attachment, ExtractionDeferred, ExtractionPending, request_extraction_retry, UnreadableDocument,
+    extract_candidate_attachment as extract_attachment, ExtractionDeferred, ExtractionPending, request_extraction_retry, UnreadableDocument,
 )
 from app.services.mail_config import configured_mailboxes
 from app.services.mail_providers import account_config
@@ -369,14 +369,18 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
         for link in links:
             if db.scalar(select(Attachment.id).where(
                 Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
-                Attachment.slot == link["slot"], Attachment.content_hash == link["content_hash"],
+                Attachment.slot == link["slot"], Attachment.content_hash == link["content_hash"], Attachment.deleted_at.is_(None),
             )):
                 continue
             version = (db.scalar(select(func.max(Attachment.version)).where(
                 Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
                 Attachment.slot == link["slot"])) or 0) + 1
-            db.add(Attachment(entity_type="candidate", entity_id=candidate.id, version=version, **link))
+            filed = Attachment(entity_type="candidate", entity_id=candidate.id, version=version, **link)
+            db.add(filed)
             db.flush()
+            if link["slot"] in ((document.get("output") or {}).get("extractions") or {}):
+                from app.services.document_reading import record_read
+                record_read(db, candidate, filed, {"email_message_id": message.id})
             new_resume = new_resume or link["slot"] == "resume"
     # Every other document of the attachments (offer, visa, medical, police clearance, ticket, certificates ...) in its own field,
     # cut by the worker before this transaction. A piece the field already holds is skipped, so a retry adds nothing.
@@ -445,7 +449,8 @@ def _cached_document(db, attachment):
     for prior_id, state in candidates:
         document = state.get(prior_id, {})
         output = document.get("output") or {}
-        if document.get("source_sha256") == attachment.content_hash and output.get("status") == "complete":
+        if (document.get("source_sha256") == attachment.content_hash and output.get("status") == "complete"
+                and "document_pages" in (output.get("inspection") or {})):
             saved = copy.deepcopy(document)
             saved["reused_from_attachment_id"] = prior_id
             # Derived files belong to the new receipt's storage namespace.
@@ -498,15 +503,11 @@ def _save_selected_documents(settings, account_id, attachment, data, result):
         document_timeout=settings.ocr_document_timeout_seconds, allow_partial=True,
     )
     documents = {}
-    for kind, extraction in result["extractions"].items():
-        if kind not in {"resume", "passport", "aadhaar"}:
-            raise IntakeReviewError("We could not tell what kind of document this is. Please check it.")
-        selected = extraction["selected_pages"]
-        # Payload preparation may omit duplicate passport pages or narrow to the
-        # verified data page. It must stay within the locally checked kind.
-        if not selected or not set(selected) <= set(getattr(inspected, f"{kind}_pages")):
-            raise IntakeReviewError("The pages we read do not match the saved check. Please check the document.")
-        content = inspected.pdf_for_pages(selected)
+    for kind, selected in intake_documents.filing_pages(result).items():
+        try:
+            content = intake_documents.filing_pdf(inspected, result, kind, selected)
+        except ValueError as exc:
+            raise IntakeReviewError("The pages we read do not match the saved check. Please check the document.") from exc
         key = store_original(
             settings, account_id, f"{attachment.message_id}:{attachment.id}:{kind}", 0, content,
         )
@@ -533,21 +534,24 @@ def _split_attachments(settings, account_id, attachments, results, state, checkp
     done = set()
     for result in results:
         attachment = by_id.get(result["source"]["attachment_id"])
-        if attachment is None or result.get("synthetic") or attachment.content_hash in done:
+        if attachment is None or result.get("synthetic") or result.get("splitSuggested") or attachment.content_hash in done:
             continue
         done.add(attachment.content_hash)
         document_state = copy.deepcopy(state.get(attachment.id, {}))
-        if intake_documents.usable(document_state.get("split"), attachment.content_hash, lambda key: read_bytes(settings, key)):
+        filing = intake_documents.filing_pages(result)
+        if intake_documents.same_filing(document_state, "split_filing_pages", result, filing) and intake_documents.usable(
+                document_state.get("split"), attachment.content_hash, lambda key: read_bytes(settings, key)):
             continue
-        extractions = result.get("extractions") or {}
         document_state["split"] = intake_documents.build_split(
             read_bytes(settings, attachment.object_key),
             lambda index, content: store_original(
                 settings, account_id, f"{attachment.message_id}:{attachment.content_hash}:piece", index, content),
-            covered=[number for part in extractions.values() for number in part.get("selected_pages") or []],
-            extracted=bool(extractions), original_name=attachment.file_name or "",
+            covered=[number for pages in filing.values() for number in pages],
+            extracted=bool(filing), original_name=attachment.file_name or "",
             readings=readings, report=result.get("inspection"), page_kinds=document_state.get("page_kinds"),
         )
+        document_state["split_filing_pages"] = filing
+        document_state["split"]["resume_read_pages"] = ((result.get("extractions") or {}).get("resume") or {}).get("selected_pages") or []
         checkpoint(attachment.id, document_state)
 
 
@@ -628,6 +632,7 @@ def process_job(job_id, *, sessions, settings):
                             and isinstance(prior, dict)
                             and prior.get("source_sha256") == attachment.content_hash
                             and (prior.get("output") or {}).get("status") == "complete"
+                            and "document_pages" in ((prior.get("output") or {}).get("inspection") or {})
                         ):
                             cached = copy.deepcopy(prior)
                             cached["reused_from_attachment_id"] = prior_id
@@ -681,18 +686,23 @@ def process_job(job_id, *, sessions, settings):
                     result = _synthetic_output("needs_review", str(exc)[:300], attachment.file_name)
                 document_state["output"] = result
                 checkpoint(attachment.id, document_state)
-            if result["status"] in {"complete", "needs_review"} and result.get("extractions"):
+            filing = intake_documents.filing_pages(result)
+            if filing:
                 documents = document_state.get("documents")
-                if not documents:
+                if not documents or not intake_documents.same_filing(document_state, "filed_pages", result, filing):
                     document_state["documents"] = _save_selected_documents(
                         settings, account_id, attachment, data, result,
                     )
+                    document_state["filed_pages"] = filing
                     checkpoint(attachment.id, document_state)
                 else:
                     for document in documents.values():
                         content = read_bytes(settings, document["object_key"])
                         if hashlib.sha256(content).hexdigest() != document["content_hash"]:
                             raise IntakeReviewError("A selected document looks different from the saved copy. Restore the original, then try again.")
+            elif document_state.get("documents"):
+                document_state["documents"] = {}
+                checkpoint(attachment.id, document_state)
             results.append({**result, "source": {
                 "channel": "email", "message_id": attachment.message_id,
                 "attachment_id": attachment.id, "file_name": attachment.file_name,
@@ -700,7 +710,7 @@ def process_job(job_id, *, sessions, settings):
         if pending is not None:
             raise pending
         # Only a receipt that will create or enrich a candidate pays for cutting the other documents out of its attachments.
-        if any(result.get("extractions") for result in results) and not any(result.get("splitSuggested") for result in results):
+        if not any(result.get("splitSuggested") for result in results):
             _split_attachments(settings, account_id, attachments, results, state, checkpoint, readings)
         with sessions() as db:
             lock_assignment_cursor(db)
@@ -719,7 +729,7 @@ def process_job(job_id, *, sessions, settings):
                     for result in unresolved if not result.get("extractions")
                 ]
                 commit_candidate(db, job, results, notes=notes)
-            elif unresolved:
+            elif unresolved or any((state.get(a.id) or {}).get("documents") or ((state.get(a.id) or {}).get("split") or {}).get("pieces") for a in attachments):
                 job.status, job.last_error = "needs_review", "One or more document pages need review. No candidate was changed."
             else:
                 already = [f'{result["source"]["file_name"]}: {result["reason"]}' for result in results if result.get("alreadyFiled")]

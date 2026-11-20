@@ -13,7 +13,7 @@ from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import resume_text_from
 from app.integrations.whatsapp import download_media, WhatsAppError, WhatsAppReviewError
 from app.services.candidate_identity import enrich_empty, identity_matches
-from app.services.document_extraction import extract_attachment, ExtractionPending, request_extraction_retry
+from app.services.document_extraction import extract_candidate_attachment as extract_attachment, ExtractionPending, request_extraction_retry
 from app.services import intake_documents
 from app.services.document_storage import put_bytes, read_bytes
 
@@ -89,11 +89,17 @@ def attach_original(db, message, candidate):
               "content_hash": message.content_hash, "content_type": message.content_type, "size_kb": message.processing_state.get("sizeKb")}]
     links.extend({"slot": kind, **document} for kind, document in message.processing_state.get("documents", {}).items())
     for link in links:
-        if db.scalar(select(Attachment.id).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id, Attachment.slot == link["slot"], Attachment.content_hash == link["content_hash"])):
+        if db.scalar(select(Attachment.id).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
+                                                Attachment.slot == link["slot"], Attachment.content_hash == link["content_hash"],
+                                                Attachment.deleted_at.is_(None))):
             continue
         version = (db.scalar(select(func.max(Attachment.version)).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id, Attachment.slot == link["slot"])) or 0) + 1
-        db.add(Attachment(entity_type="candidate", entity_id=candidate.id, version=version, **link))
+        filed = Attachment(entity_type="candidate", entity_id=candidate.id, version=version, **link)
+        db.add(filed)
         db.flush()
+        if link["slot"] in (((message.processing_state or {}).get("output") or {}).get("extractions") or {}):
+            from app.services.document_reading import record_read
+            record_read(db, candidate, filed, {"whatsapp_message_id": message.id})
         added.add(link["slot"])
     # Every other document of a combined PDF (offer, visa, medical, police clearance, ticket, certificates ...) in its own field.
     split = (message.processing_state or {}).get("split")
@@ -258,6 +264,8 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
                     cached = (receipt.processing_state or {}).get("output")
                     if not isinstance(cached, dict) or cached.get("status") == "needs_review" or not cached.get("extractions") or not receipt.object_key:
                         continue
+                    if "document_pages" not in (cached.get("inspection") or {}):
+                        continue
                     try:
                         valid = hashlib.sha256(read_bytes(settings, receipt.object_key)).hexdigest() == state["originalHash"]
                     except (OSError, ValueError):
@@ -296,29 +304,25 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
         checkpoint(state)
         # Keep usable fields/documents from a partial single-person reading just
         # as email/manual intake do. Mixed identities still require a human split.
-        if output.get("splitSuggested") or (output.get("status") == "needs_review" and not output.get("extractions")):
+        if output.get("splitSuggested"):
             raise WhatsAppReviewError("Some pages need a check. Open the original file before you finish this message.")
-        if not output.get("extractions"):
-            with sessions() as db:
-                connected_channel(db, phone_id, settings, lock=True)
-                row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
-                if not row or row.status not in {"pending", "processing", "retry"}:
-                    return
-                row.status = "ignored"
-                db.commit()
-            return
-        if not state.get("documents"):
+        filing = intake_documents.filing_pages(output)
+        if filing and (not state.get("documents") or not intake_documents.same_filing(state, "filed_pages", output, filing)):
             inspected = restore_inspection(data, output["inspection"], document_timeout=settings.ocr_document_timeout_seconds, allow_partial=True)
             documents = {}
-            for kind, part in output["extractions"].items():
-                selected = part["selected_pages"]
-                if kind not in {"resume", "passport", "aadhaar"} or not selected or not set(selected) <= set(getattr(inspected, f"{kind}_pages")):
-                    raise WhatsAppReviewError("The pages chosen need a check")
-                content = inspected.pdf_for_pages(part["selected_pages"])
+            for kind, selected in filing.items():
+                try:
+                    content = intake_documents.filing_pdf(inspected, output, kind, selected)
+                except ValueError as exc:
+                    raise WhatsAppReviewError("The pages chosen need a check") from exc
                 digest = hashlib.sha256(content).hexdigest()
                 documents[kind] = {"object_key": put_bytes(settings, f"whatsapp/{message_id}/{kind}-{digest}.pdf", content, "application/pdf"),
                                    "content_hash": digest, "file_name": f"{kind}.pdf", "content_type": "application/pdf", "size_kb": (len(content) + 1023) // 1024}
             state["documents"] = documents
+            state["filed_pages"] = filing
+            checkpoint(state)
+        elif not filing and state.get("documents"):
+            state["documents"] = {}
             checkpoint(state)
         # A retained extraction checkpoint is useful only if every selected file
         # still has its recorded bytes. Never attach a missing or changed version.
@@ -327,20 +331,28 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             if hashlib.sha256(content).hexdigest() != document["content_hash"]:
                 raise WhatsAppReviewError("The saved file looks damaged. Restore the original file, then try again.")
         # The other documents of a combined PDF are cut out here, outside any transaction, and checkpointed; the commit files them.
-        if not intake_documents.usable(state.get("split"), state["originalHash"], lambda piece_key: read_bytes(settings, piece_key)):
+        if not intake_documents.same_filing(state, "split_filing_pages", output, filing) or not intake_documents.usable(
+                state.get("split"), state["originalHash"], lambda piece_key: read_bytes(settings, piece_key)):
             state["split"] = intake_documents.build_split(
                 data, lambda index, content: put_bytes(
                     settings, f"whatsapp/{message_id}/piece{index}-{hashlib.sha256(content).hexdigest()}.bin", content, "application/octet-stream"),
-                covered=[number for part in output["extractions"].values() for number in part.get("selected_pages") or []],
-                extracted=True, readings=readings, report=output.get("inspection"), page_kinds=state.get("page_kinds"))
+                covered=[number for pages in filing.values() for number in pages],
+                extracted=bool(filing), readings=readings, report=output.get("inspection"), page_kinds=state.get("page_kinds"))
+            state["split_filing_pages"] = filing
+            state["split"]["resume_read_pages"] = ((output.get("extractions") or {}).get("resume") or {}).get("selected_pages") or []
             checkpoint(state)
+        if not output.get("extractions") and (output.get("status") == "needs_review" or filing or state["split"].get("pieces")):
+            raise WhatsAppReviewError("Open the original file and choose the candidate for these documents.")
         with sessions() as db:
             connected_channel(db, phone_id, settings, lock=True)
             lock_assignment_cursor(db)
             row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
             if not row or row.status not in {"pending", "processing", "retry"}:
                 return
-            commit_candidate(db, row, output)
+            if output.get("extractions"):
+                commit_candidate(db, row, output)
+            else:
+                row.status = "ignored"
             db.commit()
     except ChannelPaused:
         with sessions() as db:

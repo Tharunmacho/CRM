@@ -11,7 +11,7 @@ by 40 pages / 8 s a page / 120 s, any failure leaves the file whole) in two step
     named "<Candidate>-<Document>.pdf", with an audit entry carrying the original name and the pages. It writes nothing for a piece
     whose bytes the field already holds, so a retried commit never adds duplicate versions.
 
-Identity pieces (resume, passport, Aadhaar) are not filed here: the reader-derived documents are. A page the reader did not take and
+Identity documents use the locally classified page groups, which can differ from the pages used to extract fields. A page those groups omit and
 no other piece holds goes to "Other documents", so every page of an attachment is in the original `source_bundle` AND in at least one
 field. Nothing in here raises for a document that cannot be split: the result is then no pieces and an info note.
 """
@@ -29,9 +29,49 @@ from app.services import bulk_candidate_import as bulk
 from app.services.application_form import SLOTS
 from app.services.document_splitting import NEVER_FILED
 
-IDENTITY = tuple(bulk.READ_SLOTS)   # resume, passport, aadhaar: filed from what the reader was given, never from a piece
+IDENTITY = tuple(bulk.READ_SLOTS)
 _IMAGE_EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/tiff": ".tiff", "image/webp": ".webp", "image/gif": ".gif",
                      "image/bmp": ".bmp"}
+
+
+def filing_pages(output: dict) -> dict[str, list[int]]:
+    """Pages to file, independently of the smaller selection used for extracting fields."""
+    if output.get("splitSuggested") or output.get("synthetic"):
+        return {}
+    report = output.get("inspection") or {}
+    groups = report.get("document_pages")
+    if isinstance(groups, dict):
+        if isinstance(report.get("supporting_pages"), dict):
+            for kind, part in (output.get("extractions") or {}).items():
+                allowed = set(groups.get(kind) or [])
+                if kind == "resume":
+                    allowed.update(int(number) for number, slot in report["supporting_pages"].items() if slot == "education_certificate")
+                selected = part.get("selected_pages") or []
+                if not selected or not set(selected) <= allowed:
+                    raise ValueError("The selected pages no longer match what was checked earlier.")
+        return {slot: list(pages) for slot in IDENTITY if (pages := groups.get(slot))}
+    # Older jobs kept the local classification in per-kind page lists. Include the checked address page even
+    # if that passport reader only needed the data page. Any inconsistent provider pages still fail filing_pdf.
+    return {slot: sorted(set(part["selected_pages"]) | set(report.get(slot + "_pages") or [])) if part.get("selected_pages") else []
+            for slot, part in (output.get("extractions") or {}).items()}
+
+
+def filing_pdf(inspected, output, kind, pages):
+    if kind not in IDENTITY or not pages:
+        raise ValueError("A document has no checked pages to file.")
+    if isinstance(output.get("inspection", {}).get("document_pages"), dict):
+        # The full local classifier can identify an address/continuation page the narrow identity reader called unknown.
+        return inspected.pdf_for_pages(pages, allow_unresolved=True)
+    if not set(pages) <= set(getattr(inspected, kind + "_pages")):
+        raise ValueError("The pages do not match the checked document.")
+    return inspected.pdf_for_pages(pages)
+
+
+def same_filing(state: dict, key: str, output: dict, pages: dict) -> bool:
+    """Whether a checkpoint was built for these page boundaries. Legacy workers filed exactly their provider selection."""
+    if key in state:
+        return state[key] == pages
+    return pages == {slot: part.get("selected_pages") or [] for slot, part in (output.get("extractions") or {}).items()}
 
 
 def slots_for(kinds: Iterable[str]) -> list[str]:
@@ -132,8 +172,12 @@ def _plan_pdf(data: bytes, covered: set[int], extracted: bool, original_name: st
     """(planned pieces, note). A planned piece is (slots, pages, bytes). `reading` is a local reading of these bytes (see
     `_reading_of`): when it cannot be used the engine reads the pages itself."""
     count = _page_count(data)
-    if count < 2:
+    if count < 1:
         return [], None
+    if count == 1:
+        if covered:
+            return [], None
+        return _plan_image(data, "application/pdf", reading)
     result = None
     if reading is not None:
         try:
@@ -199,8 +243,8 @@ def build_split(data: bytes, store: Callable[[int, bytes], str], *, covered: Ite
                 page_kinds: dict | None = None) -> dict:
     """Cut one attachment into the documents it holds and store the bytes of the ones that are not identity documents.
 
-    `covered` are the pages the reader was given (the resume / passport / Aadhaar pages already filed from the reader's own
-    documents); `extracted` says the reader took something from this attachment; `store(index, bytes)` writes one piece and returns
+    `covered` are the pages already filed in the identity slots. `extracted` indicates that there is an identity document.
+    `store(index, bytes)` writes one piece and returns
     its object key. Never raises for a document that cannot be read: it returns no pieces and a note. A storage failure does raise
     (the intake retries, as for the reader's own documents).
 
@@ -259,7 +303,7 @@ def file_pieces(db: Session, candidate: Candidate, splits: list[dict], *, origin
                     slot = "other"
                 if db.scalar(select(Attachment.id).where(
                     Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
-                    Attachment.slot == slot, Attachment.content_hash == piece["content_hash"],
+                    Attachment.slot == slot, Attachment.content_hash == piece["content_hash"], Attachment.deleted_at.is_(None),
                 ).limit(1)):
                     continue
                 if file_name is None:
@@ -271,6 +315,9 @@ def file_pieces(db: Session, candidate: Candidate, splits: list[dict], *, origin
                                  object_key=piece["object_key"], content_hash=piece["content_hash"])
                 db.add(row)
                 db.flush()
+                if slot == "education_certificate" and set(piece["pages"]) <= set(split.get("resume_read_pages") or []):
+                    from app.services.document_reading import record_read
+                    record_read(db, candidate, row, origin)
                 db.add(AuditEntry(action="Uploaded document", target=file_name, entity_type="candidate", entity_id=candidate.id,
                                   meta={"attachment_id": row.id, "slot": slot, "version": version, "original_name": split.get("original_name"),
                                         "split_pages": piece["pages"], **origin}))

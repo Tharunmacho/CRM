@@ -283,7 +283,6 @@ export default function CandidateProfilePage() {
   const ownerActive = !!cand.ownerId && !!store.user(cand.ownerId)?.active
   const initialTask = store.tasks.find(task => task.candidateId === cand.id && task.kind === 'initial_call' && !task.completedAt && !task.cancelledAt)
   const profileDocuments = fullText?.id === id ? fullText.documents : cand.documents
-  const hasOriginals = profileDocuments.some(document => document.key === 'source_bundle' && document.versions.length > 0)
   const resumeFile = newestFileVersions(profileDocuments.find(document => document.key === 'resume')?.versions ?? [])[0]
 
   // One filled button for the next thing that moves this candidate forward; the rest stay outlined.
@@ -491,7 +490,6 @@ export default function CandidateProfilePage() {
               <DocumentList
                 documents={profileDocuments}
                 uploaderName={(userId) => store.user(userId)?.name || 'Former team member'}
-                emptyFor={(slot) => hasOriginals && ['resume', 'passport', 'aadhaar'].includes(slot.key) ? 'In the original upload' : undefined}
                 onExtract={canWork ? async (attachmentIds) => {
                   await extractFormDocuments(cand.id, attachmentIds, { applicationId: active?.id })
                   try { await store.refresh({ keepCurrent: true }) }

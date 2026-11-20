@@ -367,6 +367,8 @@ def _passport_bundle():
 
 
 def _agreeing_passport_result(env, number):
+    # Exercise a partial answer to one multi-page request; three separate one-page jobs would each have complete coverage.
+    env.settings.veris_passport_together_pages = 3
     reading = result("passport", 1)
     reading["mrz"] = {"given_names": "TESTER", "surname": "SAMPLE1", "passport_number": number, "all_check_digits_valid": True}
     env.results["passport"] = reading
@@ -378,31 +380,32 @@ def _passport_pages_the_local_check_found(env, identifier):
     return state["inspection"]["passport_pages"], state["provider_jobs"]["passport"]["selected_pages"]
 
 
-def test_a_passport_plan_that_sends_fewer_pages_than_were_checked_still_completes_with_only_those_pages_saved(intake):
+def test_all_locally_checked_passport_pages_are_sent_and_saved_when_the_reader_returns_one_page(intake):
     data, number = _passport_bundle()
     _agreeing_passport_result(intake, number)
     job = upload(intake, data)
     start(intake, job["id"]); process(intake, job["id"])
 
     inspected, sent = _passport_pages_the_local_check_found(intake, job["id"])
-    assert inspected == [1, 2, 3] and sent == [2]  # the neighbours took the passport kind but only page 2 was sent
+    assert inspected == sent == [1, 2, 3]
     detail = intake.client.get("/api/ocr/jobs/" + job["id"]).json()
-    assert detail["status"] in ("completed", "needs_review"), detail
+    assert detail["status"] == "needs_review", detail["lastError"]
+    assert [kind for kind, _ in intake.submissions] == ["passport"]
     assert "no longer match" not in (detail["lastError"] or "")
-    assert detail["result"]["scans"]["passport"]["source"]["selected_pages"] == [2]
+    assert detail["result"]["scans"]["passport"]["source"]["selected_pages"] == [1, 2, 3]
     assert detail["result"]["scans"]["passport"]["fields"]  # the passport scan reached the form
     with intake.sessions() as db:
         saved = db.get(DocumentExtractionJob, job["id"])
-        assert saved.status in ("completed", "needs_review") and saved.attempts == 0
+        assert saved.status == "needs_review" and saved.attempts == 0
         with fitz.open(stream=read_bytes(intake.settings, saved.state["documents"]["passport"]["object_key"]), filetype="pdf") as doc:
-            assert doc.page_count == 1  # exactly the sent page, not the three inspected ones
-            assert number in doc[0].get_text().replace(" ", "")
+            assert doc.page_count == 3
+            assert number in doc[1].get_text().replace(" ", "")
     attached = intake.client.post("/api/ocr/jobs/" + job["id"] + "/attach", json={"candidateId": "candidate"})
     assert attached.status_code == 200, attached.text
     with intake.sessions() as db:
         row = db.scalar(select(Attachment).where(Attachment.entity_id == "candidate", Attachment.slot == "passport"))
         with fitz.open(stream=read_bytes(intake.settings, row.object_key), filetype="pdf") as doc:
-            assert doc.page_count == 1
+            assert doc.page_count == 3
 
 
 @pytest.mark.parametrize("tampered", [[2, 99], [99], []])
@@ -506,7 +509,7 @@ def test_original_only_requires_a_boolean_before_any_attachment(intake, value):
         assert db.scalar(select(func.count()).select_from(Attachment)) == 0
 
 
-def test_conflicting_probe_results_finish_as_review_not_repeated_selected_page_failure(intake, monkeypatch):
+def test_an_unidentified_page_is_held_for_review_and_stale_guesses_are_not_filed(intake, monkeypatch):
     from test_document_extraction import UNCLASSIFIED
     monkeypatch.setattr(document_extraction, "_probe_pages", lambda inspected: {"passport": [2], "aadhaar": [2]})
     intake.settings.veris_early_dispatch = False
@@ -516,8 +519,8 @@ def test_conflicting_probe_results_finish_as_review_not_repeated_selected_page_f
         saved = db.get(DocumentExtractionJob, job["id"])
         assert saved.status == "needs_review" and saved.attempts == 0
         assert set(saved.state["documents"]) == {"resume"}
-        assert saved.state["provider_jobs"]["passport"]["result"]
-        assert saved.state["provider_jobs"]["aadhaar"]["result"]
+        assert set(saved.state["provider_jobs"]) == {"resume"}
+        assert saved.result["coverage"]["pages"]["unresolved"] == [2]
         assert saved.result["coverage"]["complete"] is False
         # An earlier failed run could have filed a now-rejected interpretation.
         # A retry removes only its current pointer, retaining bytes/history and paid jobs.

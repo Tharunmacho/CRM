@@ -57,7 +57,9 @@ export function profileDocuments(documents: ServerSlot[] | undefined, options: {
   for (const [key, versions] of held) {
     if (sharedKeys.has(key)) continue
     if (versions.length === 0 && !(key in ALWAYS_LISTED)) continue
-    extras.push({ key, label: labels.get(key) || ALWAYS_LISTED[key] || key, versions, multiple: false, manualStatus: manual.get(key) })
+    const originals = key === 'source_bundle'
+    extras.push({ key, label: originals ? 'Original files' : labels.get(key) || ALWAYS_LISTED[key] || key,
+      versions, multiple: originals, manualStatus: manual.get(key) })
   }
   for (const [key, label] of Object.entries(ALWAYS_LISTED)) {
     if (!held.has(key) && !sharedKeys.has(key)) extras.push({ key, label, versions: [], multiple: false })

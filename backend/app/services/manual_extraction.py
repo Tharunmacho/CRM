@@ -24,7 +24,7 @@ from app.db.models import Attachment, AuditEntry, Candidate, Designation, Docume
 from app.integrations.ocr import reader_failures
 from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import OcrFields
-from app.services.document_extraction import extract_attachment, ExtractionFailure, ExtractionPending, provider_codes, request_extraction_retry
+from app.services.document_extraction import extract_candidate_attachment as extract_attachment, ExtractionFailure, ExtractionPending, provider_codes, request_extraction_retry
 from app.services import page_sort
 from app.services.document_storage import put_bytes, read_bytes
 from app.services.reading_notes import plain_notes
@@ -573,23 +573,37 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
         # A previous attempt may already have stored a typed PDF before later
         # review changed its classification or page set. Keep the old object and
         # metadata as history, but never attach it as the current document.
+        from app.services import intake_documents
+        selected_by_slot = intake_documents.filing_pages(output)
+        local = isinstance(output.get("inspection", {}).get("document_pages"), dict) and not output.get("splitSuggested")
+        # Local-only documents, including school/experience certificates, can be filed even when no identity fields were read.
+        if local:
+            for kind, pages in (kinds or {}).items():
+                if kind not in (*intake_documents.IDENTITY, "other") and pages:
+                    selected_by_slot[kind] = list(pages)
+            for number, kind in (output["inspection"].get("supporting_pages") or {}).items():
+                for slot in intake_documents.slots_for([kind]):
+                    if slot != "other":
+                        selected_by_slot[slot] = sorted(set(selected_by_slot.get(slot, [])) | {int(number)})
         current_extractions = output.get("extractions") or {}
         for kind, document in list(documents.items()):
-            selected = (current_extractions.get(kind) or {}).get("selected_pages")
+            selected = selected_by_slot.get(kind)
             if not selected or document.get("selected_pages") != selected:
                 state.setdefault("document_history", {}).setdefault(kind, []).append(deepcopy(document))
                 del documents[kind]
-        if current_extractions:
+        if selected_by_slot or (form_candidate and local and output.get("inspection", {}).get("pages")):
             inspected = restore_inspection(data, output["inspection"], document_timeout=settings.ocr_document_timeout_seconds, allow_partial=True)
             cut = []
-            for kind, extraction in output["extractions"].items():
+            for kind, selected in selected_by_slot.items():
                 if kind in documents:
                     continue
-                selected = extraction["selected_pages"]
-                # The pages sent are the checked pages or fewer: a passport plan sends only the pages with passport details of their own.
-                if not selected or not set(selected) <= set(getattr(inspected, kind + "_pages")):
-                    raise ExtractionFailure("The selected pages no longer match what was checked earlier. Check the pages and try again.")
-                content = inspected.pdf_for_pages(selected)
+                if local and kind not in intake_documents.IDENTITY:
+                    content = inspected.pdf_for_pages(selected, allow_unresolved=True)
+                else:
+                    try:
+                        content = intake_documents.filing_pdf(inspected, output, kind, selected)
+                    except ValueError as exc:
+                        raise ExtractionFailure("The selected pages no longer match what was checked earlier. Check the pages and try again.") from exc
                 cut.append((kind, selected, content, hashlib.sha256(content).hexdigest()))
             if form_candidate and "other" not in documents:
                 # The pages of the file that are none of the three kinds (read but not recognised, or unreadable) are kept as ONE file
@@ -598,13 +612,16 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 from app.services.document_extraction import other_pages
                 from app.services import document_splitting
                 rest = other_pages(output["inspection"], current_extractions)
+                if local:
+                    filed = {n for pages in selected_by_slot.values() for n in pages}
+                    rest = sorted(set(rest).union((kinds or {}).get("other", [])) - filed)
                 if kinds and form_slot in ("resume", "passport", "aadhaar"):
                     # The pages the content classifier gave a field of their own (medical, experience certificate, offer ...) are filed
                     # in those fields when the reading is applied (`application_form.file_other_documents`), not twice.
                     own = document_splitting.own_field_pages(kinds)
                     rest = [number for number in rest if number not in own]
                 if rest:
-                    content = cut_pdf_pages(data, rest)
+                    content = inspected.pdf_for_pages(rest, allow_unresolved=True) if local else cut_pdf_pages(data, rest)
                     cut.append(("other", rest, content, hashlib.sha256(content).hexdigest()))
             # Classification can add pages to a previously read document. Storage is
             # immutable: retain its earlier PDF and publish the expanded bytes at a
@@ -830,6 +847,11 @@ def attach_original(db, user, identifier, candidate_id, settings, *, original_on
         db.add(row)
         attached[slot] = row.id
         stored[slot] = row
+        extraction = (state.get("output") or {}).get("extractions") or {}
+        if slot in extraction or (slot == "education_certificate" and document.get("selected_pages")
+                                  and set(document["selected_pages"]) <= set((extraction.get("resume") or {}).get("selected_pages") or [])):
+            from app.services.document_reading import record_read
+            record_read(db, candidate, row, {"document_job_id": job.id})
         db.add(AuditEntry(actor_id=user.id, action="Added a saved document to a candidate", target=row.file_name,
             entity_type="candidate", entity_id=candidate.id, meta={"attachment_id": row.id, "slot": slot,
             "version": row.version, "document_job_id": job.id, "original_only": original_only}))
@@ -859,11 +881,16 @@ def attach_original(db, user, identifier, candidate_id, settings, *, original_on
         carried = {key: deepcopy(value) for key, value in state.items() if key not in _NOT_CARRIED}
         if carried:   # the same file: its local reading and any reader job already accepted are not done twice
             reading.state = carried
+    # The reader may already have cut most of the documents before attach. Include those confirmed pages alongside
+    # the pieces filed during attach, using the actual stored rows for their links.
+    selected = [document_splitting.StoredPiece(slot, document_splitting.label_of(slot), row.file_name, pages, row)
+                for slot, row in stored.items() if slot != "source_bundle"
+                if (pages := documents[slot].get("selected_pages"))]
+    summary = document_splitting.report(selected + filed) if filed or len(selected) > 1 else None
     db.commit()
     answer = job_out(job, detail=True)
     if read_later:
         answer["split"] = {"pieces": [], "message": SAVED_UNREAD}
-    if filed:
-        from app.services import document_splitting
-        answer["split"] = document_splitting.report(filed)   # the screen tells the person which documents went to which field
+    if summary:
+        answer["split"] = summary
     return answer

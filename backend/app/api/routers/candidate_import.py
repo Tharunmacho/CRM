@@ -546,6 +546,7 @@ def import_one(spec: str = Form(...), files: list[UploadFile] = File(default=[])
 
     sorted_at = time.perf_counter()
     uploads, seen = [], {}
+    split_originals = {}
     for entry in candidates:
         kinds, short = entry["kinds"], entry["short"]
         if "photo" in kinds and not entry["content_type"].startswith("image/"):
@@ -555,6 +556,12 @@ def import_one(spec: str = Form(...), files: list[UploadFile] = File(default=[])
         if result is not None and result.note:
             dropped.append({"level": "info", "message": result.note})
         if result is not None and result.split:
+            # Capture the incoming scan before piece-level deduplication. For a shared PDF, entry["data"]
+            # already contains only this candidate's assigned pages.
+            source_hash = hashlib.sha256(entry["data"]).hexdigest()
+            if source_hash not in split_originals:
+                split_originals[source_hash] = bulk.Upload(path=entry["name"], kinds=[bulk.SOURCE_BUNDLE],
+                                                          data=entry["data"], content_type=entry["content_type"], original_name=entry["name"])
             stem = entry["name"].rsplit(".", 1)[0] if "." in entry["name"].rsplit("/", 1)[-1] else entry["name"]
             # pages are numbered in the piece that was read; when the piece was itself cut from a larger scan, in that scan
             cut = entry.get("cut")
@@ -581,6 +588,8 @@ def import_one(spec: str = Form(...), files: list[UploadFile] = File(default=[])
     # The same physical page filed twice in one kind of document (the passport scan on its own and the same pages inside the picker
     # scan, the signed offer scan ...): keep one copy of each page, note every page left out, keep the scans they came from.
     uploads, repeated = duplicate_pages.dedupe_uploads(uploads, settings=get_settings())
+    existing_sources = {hashlib.sha256(upload.data).hexdigest() for upload in uploads if upload.kinds == [bulk.SOURCE_BUNDLE]}
+    uploads.extend(source for digest, source in split_originals.items() if digest not in existing_sources)
     dropped += [{"level": "info", "message": message} for message in repeated.messages()]
 
     row = _row_values(parsed.row)
@@ -789,7 +798,9 @@ def queue_unread(db: Session, user: User, candidates: list, *, retry_failed: boo
     more): queued jobs (new, and failed ones put back), the stored files that can be read at all (read or not), and whether the cap
     left files unqueued. The caller commits."""
     from sqlalchemy import select
-    from app.db.models import Attachment, AuditEntry, DocumentExtractionJob
+    from app.db.models import Attachment, AuditEntry, Candidate, DocumentExtractionJob
+    from app.services import document_reading
+    from app.services.document_identity import rejected_expression
     from app.services.application_form import requeue_failed
     queued = 0
     readable = 0        # stored files that can be read (resume, passport, Aadhaar, education certificate), read or not: tells "nothing to read" from "all read"
@@ -797,12 +808,19 @@ def queue_unread(db: Session, user: User, candidates: list, *, retry_failed: boo
     if not candidates:
         return queued, readable, more
     wanted = [candidate.id for candidate in candidates]
+    # The profile, explicit Extract, and an upload may ask for the same packet concurrently.
+    db.scalars(select(Candidate.id).where(Candidate.id.in_(wanted)).order_by(Candidate.id).with_for_update()).all()
+    packets = document_reading.packet_sources(db, wanted)
+    source_ids = {source.id for source in packets.values()}
+    blocked = set(db.scalars(select(Attachment.id).where(Attachment.id.in_(source_ids), rejected_expression()))) if source_ids else set()
     by_slot: dict[tuple[str, str], list[Attachment]] = {}       # newest version first
     for attachment in db.scalars(select(Attachment).where(
-            Attachment.entity_type == "candidate", Attachment.entity_id.in_(wanted), Attachment.slot.in_(bulk.SENT_TO_READER))
+            Attachment.entity_type == "candidate", Attachment.entity_id.in_(wanted), Attachment.slot.in_(bulk.SENT_TO_READER),
+            Attachment.deleted_at.is_(None), ~rejected_expression())
             .order_by(Attachment.version.desc())):
         by_slot.setdefault((attachment.entity_id, attachment.slot), []).append(attachment)
     keys = {attachment.object_key for rows in by_slot.values() for attachment in rows}
+    keys.update(source.object_key for source in packets.values())
     newest_job: dict[tuple[str, str], tuple[str, str | None]] = {}      # (candidate, stored file) -> (status, attachment) of its latest job
     if keys:
         for candidate_id, object_key, job_status, attachment_id in db.execute(
@@ -824,6 +842,9 @@ def queue_unread(db: Session, user: User, candidates: list, *, retry_failed: boo
             # the slot in one go) is read; a version replaced by a later, separate upload is not.
             batch = [latest] + [row for row in versions[1:] if row.uploaded_at == latest.uploaded_at]
             for attachment in batch:
+                attachment = packets.get((candidate.id, attachment.id), attachment)
+                if attachment.id in blocked or attachment.deleted_at is not None:
+                    continue
                 if attachment.object_key in seen:
                     continue        # one stored file may sit in several slots (a scan of passport + Aadhaar + resume): it is read once
                 seen.add(attachment.object_key)
@@ -840,7 +861,7 @@ def queue_unread(db: Session, user: User, candidates: list, *, retry_failed: boo
         # `application_form._attach_read_documents`) was read together with that file: it has no job of its own and needs none.
         derived = {meta.get("attachment_id") for meta in db.scalars(select(AuditEntry.meta).where(
             AuditEntry.entity_type == "candidate", AuditEntry.entity_id.in_(list(waiting)),
-            AuditEntry.action == "Separated a document from a combined upload")) if isinstance(meta, dict)}
+            AuditEntry.action.in_(("Separated a document from a combined upload", document_reading.READ_PROOF)))) if isinstance(meta, dict)}
         for candidate in candidates:
             unread = {slot: [row for row in rows if row.id not in derived] for slot, rows in waiting.get(candidate.id, {}).items()}
             unread = {slot: rows for slot, rows in unread.items() if rows}

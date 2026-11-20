@@ -261,8 +261,8 @@ def test_a_page_the_reader_left_out_is_still_in_a_field(splitting, monkeypatch):
     with splitting.sessions() as db:
         job = db.get(EmailIngestionJob, job_id)
         rows = slots(db, job.candidate_id)
-        assert audit_of(db, job.candidate_id)[("other", 1)]["split_pages"] == [4]
-        assert len(page_texts(stored(splitting, rows["other"][0]))) == 1 and set(rows) == {"source_bundle", "resume", "passport", "other"}
+        assert page_texts(stored(splitting, rows["passport"][0])) == page_texts(data)[2:4]
+        assert set(rows) == {"source_bundle", "resume", "passport"}
 
 
 @pytest.mark.parametrize("failure", ["engine_raises", "reading_fails"])
@@ -290,7 +290,10 @@ def test_a_failing_split_still_creates_the_candidate_and_keeps_the_original(spli
 
 def test_an_email_for_an_existing_candidate_adds_the_documents_as_new_versions_without_overwriting(splitting, monkeypatch):
     data = everything()
-    install_reader(monkeypatch, {data: everything_output({"current_address": "Reader address"})})
+    output = everything_output({"current_address": "Reader address"})
+    output["inspection"]["document_pages"] = {"resume": [1, 2], "passport": [3, 4], "aadhaar": [5]}
+    output["extractions"]["passport"]["selected_pages"] = [3]  # only the identity page was necessary to read the details
+    install_reader(monkeypatch, {data: output})
     with splitting.sessions() as db:
         db.add(Candidate(id="known", ref="CND-9", name=NAME, phone=PERSON.phone, email=PERSON.email, owner_id="staff-b",
                          current_address="Typed by a recruiter", source=subject.Source.walk_in))
@@ -311,6 +314,9 @@ def test_an_email_for_an_existing_candidate_adds_the_documents_as_new_versions_w
         assert [row.version for row in rows["visa"]] == [1, 2] and rows["visa"][0].file_name == "old-visa.pdf"   # the old one is kept
         assert rows["visa"][1].file_name == piece_name("visa")
         assert set(rows) == {"source_bundle", "resume", "passport", "aadhaar", *FILED_BY_SPLIT}
+        original = page_texts(data)
+        for kind, numbers in {**output["inspection"]["document_pages"], **FILED_BY_SPLIT}.items():
+            assert page_texts(stored(splitting, rows[kind][-1])) == [original[n - 1] for n in numbers]
 
 
 # ------------------------------------------------------------------------------------------------------ images, Word, single pages
@@ -362,6 +368,17 @@ def test_a_whole_file_of_one_kind_is_filed_in_that_field_unless_the_reader_took_
     assert [piece["slots"] for piece in REAL_BUILD(nothing, store, extracted=False)["pieces"]] == [["other"]]
 
 
+def test_standalone_education_is_filed_without_creating_a_resume_attachment():
+    output = reader_output(["resume"], {"resume": [1]})
+    output["inspection"]["document_pages"] = {"resume": [], "passport": [], "aadhaar": []}
+    assert subject.intake_documents.filing_pages(output) == {}
+    contents = []
+    data = everything(["degree"])
+    result = REAL_BUILD(data, lambda index, content: contents.append(content) or f"piece-{index}")
+    assert [(p["slots"], p["pages"]) for p in result["pieces"]] == [(["education_certificate"], [1])]
+    assert contents == [data]
+
+
 # --------------------------------------------------------------------------------------------------------------------- WhatsApp
 
 def test_whatsapp_combined_pdf_is_filed_the_same_way(setup, monkeypatch):
@@ -372,6 +389,8 @@ def test_whatsapp_combined_pdf_is_filed_the_same_way(setup, monkeypatch):
     data = everything()
     message_id = whatsapp_receipt(sessions, settings)
     output = everything_output()
+    output["inspection"]["document_pages"] = {"resume": [1, 2], "passport": [3, 4], "aadhaar": [5]}
+    output["extractions"]["passport"]["selected_pages"] = [3]
 
     process_message(message_id, sessions=sessions, settings=settings, fetch_media=lambda *_: (data, "application/pdf"),
                     extract=lambda *_, **__: deepcopy(output))
@@ -381,6 +400,9 @@ def test_whatsapp_combined_pdf_is_filed_the_same_way(setup, monkeypatch):
         assert row.status == "completed", row.last_error
         rows = slots(db, row.candidate_id)
         assert set(rows) == {"source_bundle", "resume", "passport", "aadhaar", *FILED_BY_SPLIT}
+        for kind, pages in output["inspection"]["document_pages"].items():
+            content = (Path(settings.storage_dir) / rows[kind][0].object_key).read_bytes()
+            assert page_texts(content) == [page_texts(data)[n - 1] for n in pages]
         audit = audit_of(db, row.candidate_id)
         for slot, pages in FILED_BY_SPLIT.items():
             assert audit[(slot, 1)]["split_pages"] == pages and audit[(slot, 1)]["whatsapp_message_id"] == message_id

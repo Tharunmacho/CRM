@@ -112,5 +112,5 @@ test('other slots the server holds are listed after the shared ones only when th
   ])
   assert.deepEqual(rows.slice(EMPTY_ORDER.length).map((row) => row.key), [])
   const withEvidence = model.profileDocuments([{ key: 'source_bundle', label: 'Source document evidence', versions: [file('s1', 1, '2026-10-01T09:00:00Z')] }])
-  assert.deepEqual(withEvidence.slice(EMPTY_ORDER.length).map((row) => [row.key, row.label]), [['source_bundle', 'Source document evidence']])
+  assert.deepEqual(withEvidence.slice(EMPTY_ORDER.length).map((row) => [row.key, row.label]), [['source_bundle', 'Original files']])
 })

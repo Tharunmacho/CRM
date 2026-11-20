@@ -423,6 +423,7 @@ function normaliseDocuments(root: Record<string, unknown>, stage: number | null)
   }).filter((item) => item.slot)
   return {
     documents: out,
+    originalFiles: list(root.originalFiles).map(normaliseDocument).filter((file): file is FormDocument => file !== null && !!file.url),
     documentOrder: order,
     optionalDocuments: optional.length || 'optionalDocuments' in root ? optional : order.filter((slot) => !out[slot].required && out[slot].requiredFromStage == null).map((slot) => ({ slot, label: out[slot].label, uploaded: out[slot].uploaded })),
   }

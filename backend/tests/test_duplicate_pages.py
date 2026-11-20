@@ -306,7 +306,7 @@ def test_the_import_files_the_passport_once_records_the_skipped_pages_and_keeps_
         from app.api.routers.files import _safe_name
         kept = {row.file_name for row in by_slot["source_bundle"]}
         # (the offer scan's passport pages are byte for byte the picker's: the import already kept that piece once, "is a copy of")
-        assert kept == {_safe_name(name) for name in ("Rashid Khan-picker.pdf", "rashidkhan (3 files merged) 9.pdf", "rashidkhan (3 files merged) 10.pdf")}
+        assert kept == {_safe_name(name) for name in ("Rashid Khan-picker.pdf", "Rashid khan-signed offer,aadhar,pp.pdf", "rashidkhan (3 files merged) 9.pdf", "rashidkhan (3 files merged) 10.pdf")}
         notes = [entry.meta for entry in db.scalars(select(AuditEntry).where(AuditEntry.action == "Skipped duplicate pages", AuditEntry.entity_id == result["candidateId"]))]
         assert {note["slot"] for note in notes} >= {"passport"} and all("not filed again" in note["message"] for note in notes)
     # the answer says what was left out, per kept file and overall

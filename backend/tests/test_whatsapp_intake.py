@@ -331,9 +331,11 @@ def test_duplicate_content_reuses_validated_extraction_and_keeps_new_receipt_on_
         db.get(Candidate, "candidate").phone = "919999999999"
         db.commit()
     first = receipt(sessions, settings)
+    saved_reading = extraction(fields={"phone": "9000000002"})
+    saved_reading["inspection"].update(document_pages={"resume": [2], "passport": [3], "aadhaar": []}, supporting_pages={})
     process_message(first, sessions=sessions, settings=settings,
                     fetch_media=lambda *_: (ORIGINAL, "application/pdf"),
-                    extract=lambda *_, **__: extraction(fields={"phone": "9000000002"}))
+                    extract=lambda *_, **__: deepcopy(saved_reading))
     with sessions() as db:
         original = db.get(WhatsAppMessage, first)
         candidate_id = original.candidate_id

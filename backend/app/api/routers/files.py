@@ -296,19 +296,9 @@ def upload(
             stored_pieces = document_splitting.store_pieces(db, user, record, split_plan, file.filename or "file", settings=settings,
                                                             written=written, deferred=deferred)
             # The whole scan is kept as received (the pieces are cuts of it), so nothing is lost and it can be cut again.
-            document_splitting.store_source_bundle(db, user, record, payload, content_type, file.filename or "file",
-                                                   settings=settings, written=written)
-            if not deferred:
-                from app.services.application_form import queue_reading, requeue_failed
-                queued: set[str] = set()
-                for piece in stored_pieces:
-                    if piece.slot not in document_splitting.READ_SLOTS:
-                        continue
-                    if piece.duplicate:
-                        requeue_failed(db, entity_id, piece.attachment.id)
-                    elif piece.attachment.object_key not in queued:   # one reading per stored file, however many fields it fills
-                        queued.add(piece.attachment.object_key)
-                        queue_reading(db, user, record, piece.attachment, "application/pdf")
+            source = document_splitting.store_source_bundle(db, user, record, payload, content_type, file.filename or "file",
+                                                          settings=settings, written=written)
+            document_splitting.queue_packet(db, user, record, source, stored_pieces, deferred=deferred)
             row = next((piece.attachment for piece in stored_pieces if piece.slot == slot), stored_pieces[0].attachment)
             answer = {**_uploaded_file(row), "split": document_splitting.report(stored_pieces), **({"notes": notes} if notes else {})}
             db.flush()

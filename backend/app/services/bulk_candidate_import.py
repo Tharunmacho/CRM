@@ -48,9 +48,8 @@ SOURCE_BUNDLE = "source_bundle"   # the scan as received, kept when pages cut fr
 KIND_LABELS: dict[str, str] = {**SLOT_LABELS, ADVANCE_RECEIPT: "Advance receipt (stage 9)", "aadhaar": "Aadhaar card"}
 CANDIDATE_SLOTS = tuple(spec[0] for spec in SLOT_SPECS)
 READ_SLOTS = ("resume", "passport", "aadhaar")  # the three identity documents: pages of these kinds are told apart by content
-# Every document sent to the online reader to fill in the profile: the identity documents plus the education certificates (the
-# reader types an education page as resume, so the education details are extracted). One list for every path that queues a reading.
-SENT_TO_READER = READ_SLOTS + ("education_certificate",)
+# Only these slots supply candidate form fields. Other document types are sorted and filed locally.
+SENT_TO_READER = tuple(spec[0] for spec in SLOT_SPECS if spec[5])
 IMAGE_ONLY = ("photo",)
 # Candidate document -> (stage, field) whose evidence it is. The same stored file is attached to both places.
 STAGE_FILES: dict[str, tuple[int, str]] = {
@@ -880,6 +879,20 @@ class Upload:
     source: bytes | None = None
 
 
+def _register_import_packets(db: Session, candidate: Candidate, filed: list[tuple[Upload, Attachment]],
+                             previously_filed: set[bytes]) -> None:
+    from app.services.document_reading import register_packet
+
+    originals = {upload.data: row for upload, row in filed if row.slot == SOURCE_BUNDLE}
+    groups: dict[bytes, list[tuple[str, Attachment]]] = {}
+    for upload, row in filed:
+        if upload.pages and row.slot in SENT_TO_READER and upload.source in originals and upload.source not in previously_filed:
+            groups.setdefault(upload.source, []).append((row.slot, row))
+    for source, pieces in groups.items():
+        if len({slot for slot, _ in pieces}) > 1:
+            register_packet(db, candidate, originals[source], pieces)
+
+
 # --------------------------------------------------------------------------------------------- splitting a scan by content
 
 # Bounded cost: a scan the local reader cannot finish in this time is stored whole, as before.
@@ -1317,7 +1330,7 @@ def candidates_with_files(db: Session, groups: list[set[str]]) -> tuple[Candidat
     if not groups or not everything:
         return None
     rows = db.execute(select(Attachment.entity_id, Attachment.content_hash).where(
-        Attachment.entity_type == "candidate", Attachment.content_hash.in_(everything))).all()
+        Attachment.entity_type == "candidate", Attachment.deleted_at.is_(None), Attachment.content_hash.in_(everything))).all()
     held: dict[str, set[str]] = {}
     for entity_id, digest in rows:
         held.setdefault(entity_id, set()).add(digest)
@@ -1411,6 +1424,8 @@ def add_documents(db: Session, user: User, candidate: Candidate, uploads: list[U
     taken = {row.file_name.lower() for rows in existing.values() for row in rows}
     person = splitting._person(candidate, "")
     answer: list[dict] = []
+    packet_files: list[tuple[Upload, Attachment]] = []
+    previously_filed: set[bytes] = set()
     for upload in sorted(uploads, key=lambda item: (item.kinds == [SOURCE_BUNDLE], item.path.lower())):
         digest = hashlib.sha256(upload.data).hexdigest()
         extension = PurePosixPath(upload.path.replace("\\", "/")).suffix.lower()
@@ -1422,11 +1437,17 @@ def add_documents(db: Session, user: User, candidate: Candidate, uploads: list[U
                 continue
             slot = kind if (kind in CANDIDATE_SLOTS or kind == "aadhaar" or kind == SOURCE_BUNDLE) else "other"
             versions = existing.setdefault(slot, [])
-            same = next((row for row in versions if row.content_hash == digest), None)
+            live = [row for row in versions if row.deleted_at is None]
+            same = next((row for row in live if row.content_hash == digest), None)
             if same is None and slot != SOURCE_BUNDLE and upload.content_type == "application/pdf":
-                same = splitting._already_filed(splitting.PlannedPiece([slot], upload.data, list(upload.pages or []), upload.facts), slot, versions, settings)
+                same = splitting._already_filed(splitting.PlannedPiece([slot], upload.data, list(upload.pages or []), upload.facts), slot, live, settings)
             entry = {"slot": slot, "label": KIND_LABELS.get(slot, slot), "pages": list(upload.pages or []), "added": same is None, "alreadyFiled": same is not None}
             if same is not None:
+                if slot == SOURCE_BUNDLE:
+                    packet_files.append((upload, same))
+                elif slot in SENT_TO_READER and upload.source is not None:
+                    # Reading the whole scan again would include a document that was already filed.
+                    previously_filed.add(upload.source)
                 answer.append({**entry, "fileName": same.file_name})
                 continue
             if slot == SOURCE_BUNDLE:
@@ -1445,10 +1466,12 @@ def add_documents(db: Session, user: User, candidate: Candidate, uploads: list[U
                                     **({"split_pages": upload.pages} if upload.pages else {}),
                                     **({"extraction_deferred": True} if slot in SENT_TO_READER else {})}, at=now))
             versions.insert(0, row)
+            packet_files.append((upload, row))
             answer.append({**entry, "fileName": file_name})
     db.add(AuditEntry(actor_id=user.id, action="Added documents from an import", target=candidate.name, entity_type="candidate", entity_id=candidate.id,
                       meta={"bulk_import": True, "added": sum(1 for item in answer if item["added"]), "already_filed": sum(1 for item in answer if item["alreadyFiled"])}, at=now))
     db.flush()
+    _register_import_packets(db, candidate, packet_files, previously_filed)
     return answer
 
 
@@ -1562,6 +1585,7 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
     # Each file is stored once. A candidate document row is written for every candidate slot; a later file of the same
     # kind becomes the next version. The stage 9 receipt is not a candidate document, only stage evidence.
     stored: dict[str, Attachment] = {}
+    packet_files: list[tuple[Upload, Attachment]] = []
     receipt: Attachment | None = None
     # The listed name of a file: "<Name>-<Document>.<ext>"; "<CI_167>-<Document>.<ext>" while no name was read from the documents
     # (a later reading renames "<CI_167>-..." to the real name, see application_form.rename_imported_files).
@@ -1589,6 +1613,7 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
                                   meta={"attachment_id": bundle.id, "slot": SOURCE_BUNDLE, "version": bundle.version, "bulk_import": True,
                                         "kept_original": True, "original_name": (upload.original_name or upload.path).rsplit("/", 1)[-1][:200]}, at=now))
                 stored[SOURCE_BUNDLE] = bundle
+                packet_files.append((upload, bundle))
                 continue
             if kind not in CANDIDATE_SLOTS and kind != "aadhaar":
                 receipt = Attachment(id=str(uuid.uuid4()), entity_type="application", entity_id="", slot="", version=1, **common)
@@ -1604,7 +1629,9 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
                                   # Stored, not read: the profile and the form offer "Extract details" for it (see document_reading.pending_expression).
                                   **({"extraction_deferred": True} if kind in SENT_TO_READER else {})}, at=now))
             stored[kind] = attachment
+            packet_files.append((upload, attachment))
     db.flush()
+    _register_import_packets(db, candidate, packet_files, set())
     # The import only SPLITS the files into their documents and stores them. Reading them (OCR) starts when a person asks for
     # it (Extract details on the candidate's form, or "Read the documents" on the Import screen), never by itself.
     result = {"candidateId": candidate.id, "ref": candidate.ref, "careId": candidate.care_id, "name": candidate.name, "action": plan["action"], "issues": plan["issues"],

@@ -406,6 +406,24 @@ def report(pieces: list[StoredPiece]) -> dict:
     return {"pieces": [piece.as_dict() for piece in pieces], "message": filing_message(pieces)}
 
 
+def queue_packet(db, user, candidate, source, stored, *, deferred):
+    """Read a new packet as one source. When some readable pages were already filed, read only the new cuts."""
+    from app.services import document_reading
+    readable = [piece for piece in stored if piece.slot in READ_SLOTS]
+    fresh = [piece for piece in readable if not piece.duplicate]
+    if fresh and len(fresh) == len(readable):
+        document_reading.register_packet(db, candidate, source, [(p.slot, p.attachment) for p in fresh])
+    if deferred or not readable:
+        return
+    if fresh:
+        document_reading.start(db, candidate.id, user, [p.attachment.id for p in fresh])
+    else:
+        links = document_reading.packet_sources(db, [candidate.id])
+        same = [p.attachment.id for p in readable if links.get((candidate.id, p.attachment.id)) is source]
+        if same:
+            document_reading.start(db, candidate.id, user, same)
+
+
 def store_split_upload(db: Session, user: User, candidate: Candidate, slot: str, filename: str, data: bytes, content_type: str, *,
                        settings, written: list[str], deferred: bool = False) -> list[StoredPiece]:
     """The one-call form for callers that store a file themselves (no endpoint around it): analyse `data`, file its pieces in
@@ -413,7 +431,10 @@ def store_split_upload(db: Session, user: User, candidate: Candidate, slot: str,
     from app.api.routers.files import _safe_name
     plan = plan_split(slot, filename, data, content_type)
     if plan is not None:
-        return store_pieces(db, user, candidate, plan, filename, settings=settings, written=written, deferred=deferred)
+        stored = store_pieces(db, user, candidate, plan, filename, settings=settings, written=written, deferred=deferred)
+        source = store_source_bundle(db, user, candidate, data, content_type, filename, settings=settings, written=written)
+        queue_packet(db, user, candidate, source, stored, deferred=deferred)
+        return stored
     now = datetime.now(timezone.utc)
     digest = hashlib.sha256(data).hexdigest()
     previous = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
