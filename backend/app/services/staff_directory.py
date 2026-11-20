@@ -74,7 +74,7 @@ def staff_directory(db, zone, from_date=None, to_date=None, *, now=None):
         Candidate.owner_id).subquery("candidate_workload")
     # One row per task/author prevents multiple daily remarks multiplying counts.
     remarks = select(Remark.task_id, Remark.author_id).where(
-        Remark.created_at >= day_start, Remark.created_at < day_end,
+        Remark.created_at >= day_start, Remark.created_at < day_end, Remark.deleted_at.is_(None),
     ).distinct().subquery("owner_updates_today")
     opened = and_(Task.completed_at.is_(None), Task.cancelled_at.is_(None))
     completed = and_(Task.cancelled_at.is_(None), Task.completed_at >= period_start, Task.completed_at < period_end)

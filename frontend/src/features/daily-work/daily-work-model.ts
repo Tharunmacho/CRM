@@ -6,7 +6,8 @@
 
 export type GoogleReview = 'obtained' | 'pending' | null
 
-export interface DailyNote { id: string; body: string; at: string; by: string }
+/** One note written on the agency day. `byId` is its author (the people who may delete it: the author, the candidate's recruiter, Admin and MD). */
+export interface DailyNote { id: string; body: string; at: string; by: string; byId?: string | null }
 
 export interface DailyItem {
   /** The candidate id: one row per candidate. */

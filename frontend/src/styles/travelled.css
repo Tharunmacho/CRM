@@ -128,6 +128,7 @@
 .tv-table .tv-hint { color: var(--text-muted); font-weight: 400; }
 .tv-table-card .db-foot { padding: 12px 2px 0; border-top: 0; }
 .tv-table-card .db-pagesize { width: 140px; }
+.tv-table-card .db-pagesize { flex: none; min-width: 132px; }  /* "25 / page" shows whole, never "25 / pa…" */
 .tv-table-card .db-pager-num { display: inline-grid; place-items: center; min-width: 34px; height: 34px; padding: 0 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; }
 .tv-table-card .db-pager-num:hover { border-color: var(--border-hover); background: var(--tint-1); color: var(--text-main); }
 .tv-table-card .db-pager-num.is-on { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); font-weight: 700; color: var(--primary); }

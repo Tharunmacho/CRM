@@ -154,10 +154,10 @@ def _read_rows(db: Session, user: User) -> list[dict]:
                      ApplicationStage.amount, ApplicationStage.amount_currency, ApplicationStage.data)
               .where(ApplicationStage.stage.in_((ADVANCE_STAGE, TOTAL_STAGES)), ApplicationStage.reopened_reason.is_(None),
                      ApplicationStage.application_id.in_(app_ids)))
-    # The newest remark of every placement's tasks; tasks with no placement (the initial call) give one per candidate.
+    # The newest remark of every placement's tasks (a deleted or cleared one is not shown); tasks with no placement (the initial call) give one per candidate.
     remarks = (select(Task.application_id, Task.candidate_id, Remark.body)
                .select_from(Remark).join(Task, Task.id == Remark.task_id)
-               .where(Task.candidate_id.in_(candidate_ids), or_(Task.application_id.is_(None), Task.application_id.in_(app_ids)))
+               .where(Task.candidate_id.in_(candidate_ids), or_(Task.application_id.is_(None), Task.application_id.in_(app_ids)), Remark.deleted_at.is_(None), Remark.cleared_at.is_(None))
                .distinct(Task.application_id, Task.candidate_id)
                .order_by(Task.application_id, Task.candidate_id, Remark.created_at.desc(), Remark.id))
     reads = [lambda s: s.execute(placements).all(), lambda s: s.execute(stages).all(), lambda s: s.execute(remarks).all(),

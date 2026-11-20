@@ -716,7 +716,9 @@ class Task(Base, PkMixin):
 
 
 class Remark(Base, PkMixin):
-    """Daily updates. Append-only by design — they cannot be edited or deleted."""
+    """Daily updates (notes). Never edited. A note is never erased: deleting one is a SOFT delete (``deleted_at`` / ``deleted_by``, with an
+    audit entry holding its text), and "Select remark" on the Tasks page only *clears* the remark cell (``cleared_at``): both stay in the
+    database, and only readers of the candidate's history show a cleared one."""
 
     __tablename__ = "workflow_task_remarks"
     __table_args__ = {
@@ -731,6 +733,12 @@ class Remark(Base, PkMixin):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="Set when someone deleted this note (soft delete): every screen, report and export ignores it; the audit log keeps its text.")
+    deleted_by: Mapped[str | None] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="SET NULL"), comment="Who deleted this note.")
+    cleared_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="Set when the Tasks page's Select remark cleared the candidate's remark cell: the note stays in the history and the day's notes, but is no longer the shown remark.")
 
 
 class TaskEvent(Base, PkMixin):

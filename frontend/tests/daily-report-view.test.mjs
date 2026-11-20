@@ -394,6 +394,10 @@ test('By client rows: busiest first, online interviews from the client, hidden w
   for (const key of ['forwarded', 'prescreened', 'shortlisted', 'interviewsOnline', 'offers', 'visas']) {
     assert.equal(rows.reduce((s, r) => s + r.cells[key], 0), v.totalCells(report, report.staff)[key], key)
   }
+  // the Total is the sum of the seven visible columns even when an older server added every metric (interviews conducted too)
+  const stale = v.clientRows({ byClient: [{ id: 'f', name: 'Finesco', metrics: { forwarded: 6, prescreened: 7, shortlisted: 6, interviews: 6, offers: 6, visas: 0, travelled: 0 }, interviewsOnline: 0, total: 31 }] })
+  assert.equal(stale[0].cells.total, 25)
+  assert.equal(stale[0].cells.total, v.DAILY_ORDER.reduce((all, key) => all + stale[0].cells[key], 0))
   assert.deepEqual(v.clientRows({}), []) // an older server sends no byClient
   assert.deepEqual(v.clientRows({ byClient: [{ id: 'c', name: 'Idle', metrics: {}, total: 0 }] }), []) // no activity, no row
   assert.equal(v.showByClient(rows, 'all'), true)

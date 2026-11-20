@@ -13,7 +13,7 @@ import {
   type DailyItem,
 } from '@/features/daily-work/daily-work-model'
 import {
-  OTHERS_MAX, TYPED_VALUE, canAddTemplate, isAddChoice, isOthersChoice, othersText, remarkSelectView, remarkStatus, textForChoice, type RemarkSaveState,
+  CLEAR_VALUE, OTHERS_MAX, TYPED_VALUE, canAddTemplate, isAddChoice, isClearChoice, isOthersChoice, othersText, remarkSelectView, remarkStatus, textForChoice, type RemarkSaveState,
 } from '@/features/daily-work/remark-select-model'
 import { createRemarkTemplate, useRemarkTemplates } from '@/features/remark-templates/remark-templates-api'
 import { TEMPLATE_MAX, createdText, newTemplateCheck } from '@/features/remark-templates/remark-templates-model'
@@ -253,8 +253,9 @@ export function StageCell({ item, zone }: { item: Pick<DailyItem, 'stage'> & { o
 }
 
 /**
- * REMARKS: a compact dropdown. It shows the candidate's current remark as its value ("Select remark" while there is none) and offers the
- * active remark templates, then "Others"; choosing a template saves it at once through `onSave`. "Others" turns the cell into a one-line
+ * REMARKS: a compact dropdown. It shows the candidate's current remark as its value ("Select remark" while there is none) and offers, in
+ * order, "Select remark" (always first, muted: choosing it while a remark exists clears the cell through `onClear`, the notes and the history
+ * stay), the active remark templates, then "Others"; choosing a template saves it at once through `onSave`. "Others" turns the cell into a one-line
  * box of the same height (autofocus, Enter or the check button saves through the same call, Esc or an empty box cancels), and the saved
  * text then shows as the dropdown's value: that is the only way to type. Admins also get "+ Add a template" under it, which opens the same
  * kind of box and adds the text as a template. A remark that is not a template is simply shown as the value (it is never labelled custom).
@@ -262,7 +263,7 @@ export function StageCell({ item, zone }: { item: Pick<DailyItem, 'stage'> & { o
  * only in Follow-up, and it is always in a polite live region, so a row never changes height when it says something. Read-only people see
  * the remark as plain text, or a dash. `lead` is a muted line such as "Last update 3 days ago" shown while nothing else needs saying.
  */
-export function RemarkCell({ item, canWork, onSave, lead }: { item: Pick<DailyItem, 'remark' | 'candidate'>; canWork: boolean; onSave: (text: string) => Promise<void>; lead?: string }) {
+export function RemarkCell({ item, canWork, onSave, onClear, lead }: { item: Pick<DailyItem, 'remark' | 'candidate'>; canWork: boolean; onSave: (text: string) => Promise<void>; /** "Select remark": empty the cell. Without it the prompt does nothing. */ onClear?: () => Promise<void>; lead?: string }) {
   const templates = useRemarkTemplates()
   const canAdd = canAddTemplate(useStore().me.role)
   const [mode, setMode] = useState<'select' | 'others' | 'template'>('select')
@@ -301,8 +302,22 @@ export function RemarkCell({ item, canWork, onSave, lead }: { item: Pick<DailyIt
       return false
     } finally { setPending(null) }
   }
+  /** "Select remark" while a remark is shown: the cell is cleared (the server keeps every note in the history) and reads "Select remark" again. */
+  const clearRemark = async () => {
+    if (!onClear) return
+    window.clearTimeout(timer.current)
+    setPending(CLEAR_VALUE); setState('saving'); setError('')
+    try {
+      await onClear()
+      setState('saved')
+      timer.current = window.setTimeout(() => setState('idle'), 2500)
+    } catch (failure) {
+      setState('error'); setError(failure instanceof Error ? failure.message : 'The remark could not be cleared.')
+    } finally { setPending(null) }
+  }
   const choose = async (value: string) => {
     if (state === 'saving') return
+    if (isClearChoice(value)) { if (last) await clearRemark(); return }
     if (isOthersChoice(value)) { setTyped(''); setError(''); setState('idle'); setMode('others'); return }
     if (isAddChoice(value)) { if (canAdd) { setTyped(''); setError(''); setState('idle'); setMode('template') } return }
     const text = textForChoice(value, templates.items)
@@ -353,7 +368,7 @@ export function RemarkCell({ item, canWork, onSave, lead }: { item: Pick<DailyIt
         </form>
       ) : <Select compact searchable={false} className="dw-remark-select" aria-label={`Remark for ${item.candidate}`}
         value={pending ?? view.value} disabled={state === 'saving'} onChange={(event) => void choose(event.target.value)}>
-        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        {options.map((option) => <option key={option.value} value={option.value} data-muted={option.muted ? '' : undefined}>{option.label}</option>)}
       </Select>}
       <small className={cn('dw-remark-status', `is-${status.tone}`)} title={status.tone === 'error' ? status.text : undefined} role="status" aria-live="polite">{status.text}</small>
     </div>

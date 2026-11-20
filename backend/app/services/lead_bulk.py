@@ -340,6 +340,6 @@ def export_selected(db: Session, user: User, body: dict) -> tuple[bytes, int]:
     expected = body.get("expectedCount")
     if not body.get("ids") and expected is not None and expected != len(found):
         raise fail(409, "selection_changed", f"The matching leads changed: {len(found):,} now match, not {expected:,}. Review the list and try again.", matching=len(found))
-    header, rows = lead_sheet.export_table(found)
+    header, rows = lead_sheet.export_table(found, lead_sheet.place_states(db))
     sheet = [header] + [[(float(v) if isinstance(v, Decimal) else v) for v in row] for row in rows]
     return lead_xlsx.build_workbook([{"name": "Lead sheet", "rows": sheet, "widths": lead_xlsx.fit_widths(sheet)}]), len(found)

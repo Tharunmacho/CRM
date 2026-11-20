@@ -12,6 +12,7 @@ import {
   exportLabel, isClosed, listTitle, parseView, recruiterWork, taskRows, viewEmptyTitle, viewSummary, viewTabs, type DailyView, type DailyWorkResponse,
 } from '@/features/daily-work/daily-work-model'
 import { downloadDailyWork } from '@/features/daily-work/daily-work-export'
+import { canDeleteNote, deleteFailure, withoutNotes } from '@/features/daily-work/note-delete-model'
 import { agencyDay } from '@/shared/lib/task-time'
 import { useDailyWork, useFollowUp } from '@/features/daily-work/use-daily-work'
 import { TaskTable } from './task-table'
@@ -55,6 +56,10 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const zone = store.agencyTimezone || 'Asia/Kolkata'
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState('')
+  // A deleted note leaves the screen at once (its id waits here until the server answers and the list is read again); a refusal brings it back.
+  const [hiddenNotes, setHiddenNotes] = useState<ReadonlySet<string>>(() => new Set())
+  const [noteError, setNoteError] = useState('')
+  const hide = <T extends { todayNotes?: { id: string }[] }>(items: T[]): T[] => (hiddenNotes.size ? items.map((item) => withoutNotes(item, hiddenNotes)) : items)
 
   const setStaff = (value: string) => setParams((previous) => {
     const next = new URLSearchParams(previous)
@@ -71,11 +76,23 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const today = shown?.data.agencyDate ?? ''
   // Follow-up placements are part of the current process (Current process and All); the closed views list only what ended.
   const withFollowUp = shown?.view === 'current' || shown?.view === 'all'
-  const rows = useMemo(() => taskRows(shown?.data.items ?? [], withFollowUp ? follow.data?.items ?? [] : [], today, zone), [shown?.data, withFollowUp, follow.data, today, zone])
+  const rows = useMemo(() => taskRows(hide(shown?.data.items ?? []), withFollowUp ? hide(follow.data?.items ?? []) : [], today, zone), [shown?.data, withFollowUp, follow.data, today, zone, hiddenNotes]) // eslint-disable-line react-hooks/exhaustive-deps
   const boardDaily = keptBoard.current
   const boardFollow = filtered ? everyoneFollow.data : follow.data
-  const everyoneRows = useMemo(() => taskRows(boardDaily?.items ?? [], boardFollow?.items ?? [], today, zone), [boardDaily, boardFollow, today, zone])
+  const everyoneRows = useMemo(() => taskRows(hide(boardDaily?.items ?? []), hide(boardFollow?.items ?? []), today, zone), [boardDaily, boardFollow, today, zone, hiddenNotes]) // eslint-disable-line react-hooks/exhaustive-deps
   const work = useMemo(() => recruiterWork(everyoneRows), [everyoneRows])
+
+  const forgetNote = (id: string) => setHiddenNotes((previous) => { const next = new Set(previous); next.delete(id); return next })
+  const deleteNote = (id: string) => {
+    setNoteError('')
+    setHiddenNotes((previous) => new Set(previous).add(id))
+    void (async () => {
+      try { await store.deleteRemark(id) }
+      catch (failure) { forgetNote(id); setNoteError(deleteFailure(failure)); return }
+      await refreshAll().catch(() => undefined)
+      forgetNote(id)
+    })()
+  }
 
   // The same list the screen shows, as an Excel file: everyone or the chosen recruiter for a supervisor, the recruiter's own list otherwise.
   const exportList = async (person: string) => {
@@ -126,6 +143,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
         {(data.truncated || follow.data?.truncated) && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />
           Not every candidate is listed. {supervisor ? 'Pick a recruiter to see all of theirs.' : ''}</p>}
         {exportError && <p className="is-warn" role="alert"><TriangleAlert size={16} aria-hidden="true" />{exportError}</p>}
+        {noteError && <p className="is-warn" role="alert"><TriangleAlert size={16} aria-hidden="true" />{noteError}</p>}
         {daily.error && !failed && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />The list could not refresh just now ({daily.error}). Showing the last version.</p>}
       </div>
 
@@ -159,7 +177,9 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
             canWork={(row) => !!row.taskId && (store.can('work_any_candidate') || row.ownerId === store.me.id)}
             onOpen={open} onProfile={(row) => navigate(`/candidates/${row.candidateId}`)}
             onSaveDoc={async (row, iso) => { if (!row.applicationId) return; await saveApplicationForm(row.candidateId, { applicationId: row.applicationId }, { application: { commencementDate: iso } }); await refreshAll() }}
-            onRemark={async (row, text) => { if (row.taskId) { await store.addRemark(row.taskId, text); await refreshAll() } }} />
+            onRemark={async (row, text) => { if (row.taskId) { await store.addRemark(row.taskId, text); await refreshAll() } }}
+            onClearRemark={async (row) => { if (row.taskId) { await store.clearRemark(row.taskId); await refreshAll() } }}
+            canDeleteNote={(row, note) => canDeleteNote(note, row, store.me)} onDeleteNote={(_row, note) => deleteNote(note.id)} />
         )}
       </section>
       <StageModal applicationId={openApp?.id ?? null} open={!!openApp} focusStage={openApp?.stage} onClose={() => { setOpenApp(null); void refreshAll() }} />

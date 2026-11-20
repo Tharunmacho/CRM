@@ -20,7 +20,7 @@ export function formFromLead(lead: Lead): Form {
     name: lead.name ?? '', dob: lead.dob ?? '', gender: lead.gender ?? '', phone: lead.phone ?? '', email: lead.email ?? '',
     positionApplied: lead.positionApplied ?? '', countryInterest: lead.countryInterest ?? '', educationLevel: lead.educationLevel ?? '',
     experienceIndia: experienceText(lead, 'india'), experienceAbroad: experienceText(lead, 'abroad'), experienceTotal: experienceText(lead, 'total'),
-    city: lead.city ?? '', state: lead.state ?? '', status: statusPick(lead), notes: lead.notes ?? '',
+    city: lead.cityRaw ?? lead.city ?? '', state: lead.stateRaw ?? lead.state ?? '', status: statusPick(lead), notes: lead.notes ?? '',
   }
 }
 

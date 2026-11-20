@@ -9,7 +9,7 @@ import { WhatsAppTemplateButton } from './wa-template'
 import { Avatar, RowMenu } from '@/features/candidates/components/db-parts'
 import {
   cleanPhone, createdParts, dobLabel, experienceAnswer, extraAnswer, followUpLabel, followUpState, isClosed, leadAge, leadDate, leadStatus, uploadedLabel, uploadedParts,
-  platformKind, PLATFORM_LABEL, type ExtraColumn, type Lead,
+  locationLines, platformKind, PLATFORM_LABEL, type ExtraColumn, type Lead,
 } from '../lead-model'
 import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
 import { EMPTY_VALUE, leadFieldRows, type LeadFieldDef } from '../lead-fields'
@@ -115,11 +115,12 @@ export function StateCell({ lead }: { lead: Lead }) {
 }
 
 export function LocationCell({ lead }: { lead: Lead }) {
-  if (!lead.city && !lead.state) return <Dash />
+  const { first, second, title } = locationLines(lead)
+  if (!first) return <Dash />
   return (
-    <span className="db-2l ld-location" title={[lead.city, lead.state].filter(Boolean).join(', ')}>
-      <strong className="ld-answer-text">{lead.city || lead.state}</strong>
-      {lead.city && lead.state && <small>{lead.state}</small>}
+    <span className="db-2l ld-location" title={title}>
+      <strong className="ld-answer-text">{first}</strong>
+      {second && <small>{second}</small>}
     </span>
   )
 }

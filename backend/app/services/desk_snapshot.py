@@ -165,7 +165,7 @@ def snapshot_statement(user_id: str, *, compact: bool = False, slim: bool = Fals
             ("stage", False), ("attempt", False),
         ),
         _rows("tasks", _fields(Task, TaskOut).where(visible_tasks)),
-        _rows("remarks", _fields(Remark, RemarkOut).where(Remark.task_id.in_(select(Task.id).where(visible_tasks)))),
+        _rows("remarks", _fields(Remark, RemarkOut).where(Remark.deleted_at.is_(None), Remark.task_id.in_(select(Task.id).where(visible_tasks)))),
         _rows("todos", _fields(TodoItem, TodoOut).where(TodoItem.owner_id == user_id)),
         _rows(
             "notifications",

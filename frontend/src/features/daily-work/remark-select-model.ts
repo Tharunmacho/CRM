@@ -3,7 +3,8 @@ import { isAdminLevel } from '@/shared/model/role-labels'
  * The REMARKS dropdown of the Tasks list, as plain data: which choices it offers, which one is selected, and when the current remark
  * is free text that is not a template ("custom": it stays valid and shown as the select's value, and it is NEVER labelled as custom on
  * screen). The only way to type is the "Others" entry: it turns the cell into an inline box (OTHERS_MAX characters) that saves through the
- * same remark save.
+ * same remark save. "Select remark" is ALWAYS the first entry: choosing it while a remark exists clears the candidate's remark cell (the notes
+ * and the history stay, see `clear_task_remark` on the server) and the cell reads "Select remark" again.
  * No imports, so it runs under node:test.
  */
 
@@ -34,18 +35,28 @@ export const isAddChoice = (value: string): boolean => value === ADD_VALUE
 /** Only an admin or MD keeps the template list, so only they are offered the add row (the same check as the admin card). */
 export const canAddTemplate = (role: string | null | undefined): boolean => isAdminLevel(role)
 
-export interface RemarkChoice { value: string; label: string }
+export interface RemarkChoice {
+  value: string
+  label: string
+  /** The "Select remark" entry: drawn in the muted style, and it carries the check only while nothing is chosen. */
+  muted?: boolean
+}
 
 export interface RemarkSelectView {
   /** The selected entry: a template id, CUSTOM_VALUE, or '' when the candidate has no remark yet. */
   value: string
   /** The current remark is free text no template matches (only said once the templates have loaded). */
   custom: boolean
-  /** In order: the "Select remark" prompt (only while nothing is chosen), the custom remark, the templates, "Others", then (admins) "+ Add a template". */
+  /** In order: the "Select remark" prompt (always first), the custom remark (when the remark is not a template), the templates, "Others", then (admins) "+ Add a template". */
   options: RemarkChoice[]
 }
 
 export const SELECT_PLACEHOLDER = 'Select remark'
+/** The value of the "Select remark" entry (and of the select while the candidate has no remark). */
+export const CLEAR_VALUE = ''
+export const isClearChoice = (value: string): boolean => value === CLEAR_VALUE
+/** The first entry of the dropdown, whatever is chosen: it is how a person goes back to no remark. */
+const PROMPT: RemarkChoice = { value: CLEAR_VALUE, label: SELECT_PLACEHOLDER, muted: true }
 
 /** Capitals and runs of spaces do not make a remark different from its template. */
 const key = (text: string): string => text.replace(/\s+/g, ' ').trim().toLowerCase()
@@ -55,15 +66,15 @@ export function remarkSelectView(current: string | null | undefined, templates: 
   const match = body ? templates.find((item) => key(item.text) === key(body)) : undefined
   const listed: RemarkChoice[] = templates.map((item) => ({ value: item.id, label: item.text }))
   const tail: RemarkChoice[] = [{ value: OTHERS_VALUE, label: OTHERS_LABEL }, ...(canAdd ? [{ value: ADD_VALUE, label: ADD_LABEL }] : [])]
-  const options: RemarkChoice[] = [...listed, ...tail]
+  const options: RemarkChoice[] = [PROMPT, ...listed, ...tail]
   if (match) return { value: match.id, custom: false, options }
-  if (!body) return { value: '', custom: false, options: [{ value: '', label: SELECT_PLACEHOLDER }, ...options] }
+  if (!body) return { value: CLEAR_VALUE, custom: false, options }
   // Not a template: it is the selected entry (so it is shown), listed first and marked custom, and it stays valid. While the templates
   // are still loading nothing is claimed: a template remark must not flash as custom.
-  return { value: CUSTOM_VALUE, custom: loaded, options: [{ value: CUSTOM_VALUE, label: body }, ...options] }
+  return { value: CUSTOM_VALUE, custom: loaded, options: [PROMPT, { value: CUSTOM_VALUE, label: body }, ...listed, ...tail] }
 }
 
-/** The text to save for a chosen entry, or null when the choice is not a template (the prompt, "Others", or the row's own custom remark). */
+/** The text to save for a chosen entry, or null when the choice is not a template (the prompt, "Others", or the row's own custom remark). The prompt clears instead (`isClearChoice`). */
 export function textForChoice(value: string, templates: readonly TemplateChoice[]): string | null {
   return templates.find((item) => item.id === value)?.text ?? null
 }

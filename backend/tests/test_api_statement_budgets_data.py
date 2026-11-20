@@ -198,13 +198,13 @@ KNOWN_REPEATS = {"lead batch report xlsx"}
 # (label, method, path, kwargs, roles -> statement budget). A budget is the measured count plus a little headroom.
 def cases(ids):
     return [
-        ("leads list 25", "GET", "/api/leads?page_size=25", {}, 2),
-        ("leads list 100 + search", "GET", "/api/leads?page_size=100&q=lead%20person", {}, 2),
-        ("leads list filtered + extra cols", "GET", "/api/leads?status=new&campaign=Campaign%202&extra=*&page_size=10&page=1", {}, 2),
+        ("leads list 25", "GET", "/api/leads?page_size=25", {}, 3),  # + the cities' usual states (one grouped read, kept with the leads cache), side by side with the page
+        ("leads list 100 + search", "GET", "/api/leads?page_size=100&q=lead%20person", {}, 3),
+        ("leads list filtered + extra cols", "GET", "/api/leads?status=new&campaign=Campaign%202&extra=*&page_size=10&page=1", {}, 3),
         ("leads summary", "GET", "/api/leads/summary", {}, 2),
         ("leads facets", "GET", "/api/leads/facets", {}, 4),  # sign-in + the grouped lists + the status counts + the template list, read side by side
         ("leads columns", "GET", "/api/leads/columns", {}, 2),
-        ("lead detail", "GET", f"/api/leads/{ids.lead}", {}, 5),
+        ("lead detail", "GET", f"/api/leads/{ids.lead}", {}, 6),
         ("lead batches", "GET", "/api/leads/batches", {}, 3),
         ("candidates list 20", "GET", "/api/candidates", {}, 2),
         ("candidates list search", "GET", "/api/candidates?q=cook%20kitchen&page_size=50", {}, 2),
@@ -236,8 +236,8 @@ def cases(ids):
 
 
 ADMIN_ONLY = [
-    ("leads export csv", "GET", "/api/leads/export.csv", {}, 3),
-    ("leads export xlsx", "GET", "/api/leads/export.xlsx", {}, 3),
+    ("leads export csv", "GET", "/api/leads/export.csv", {}, 4),
+    ("leads export xlsx", "GET", "/api/leads/export.xlsx", {}, 4),
     ("candidates export xlsx", "GET", "/api/candidates/export", {}, 10),
     ("lead batch report xlsx", "GET", "/api/leads/batches/lb1/report.xlsx", {}, 6),
 ]
@@ -291,7 +291,7 @@ def write_cases(world):
         ("lead import dry run 300 rows", "POST", "/api/leads/import", {"files": {"file": ("sheet.csv", lead_sheet_upload(6000, 300), "text/csv")}, "data": {"dry_run": "true"}}, 6),
         ("leads bulk status (100 ids)", "POST", "/api/leads/bulk", {"json": {"action": "status", "ids": ids, "status": "contacted"}}, 10),
         ("leads bulk assign (100 ids)", "POST", "/api/leads/bulk", {"json": {"action": "assign", "ids": ids, "ownerId": "a"}}, 17),
-        ("leads bulk export (100 ids)", "POST", "/api/leads/bulk", {"json": {"action": "export", "ids": ids}}, 4),
+        ("leads bulk export (100 ids)", "POST", "/api/leads/bulk", {"json": {"action": "export", "ids": ids}}, 5),
         ("lead patch", "PATCH", "/api/leads/ld7", {"json": {"notes": "called back"}}, 7),
         ("candidate patch", "PATCH", f"/api/candidates/{world.ids.candidate}", {"json": {"name": "Candidate Person 0001 Edited"}}, 13),
         ("application form save", "PUT", f"/api/candidates/{world.ids.candidate}/application-form", {"json": {"personal": {"fatherName": "Father Person"}}}, 19),
@@ -414,8 +414,8 @@ def test_a_page_of_leads_and_candidates_counts_over_narrow_rows(world):
     spilled every lead's / candidate's wide row to disk on each page. Still one data statement."""
     for path, table in (("/api/leads?page_size=10", "crm_leads"), ("/api/candidates?page_size=10", "crm_candidates")):
         response, statements = measure(world, path, "admin", "GET", path)
-        assert response.status_code == 200 and len(statements) == 2
-        sql = statements[-1]
+        assert response.status_code == 200 and len(statements) == (3 if table == "crm_leads" else 2)   # the leads page also reads the cities' usual states
+        sql = next(item for item in statements if "OVER ()" in item)
         assert sql.count("OVER ()") == 1 and " AS chosen" in sql, sql[:300]
         # the subquery that carries the window count selects the id and nothing else
         assert f"(SELECT {table}.id AS id, count(*) OVER () AS total FROM {table}" in sql, sql[:400]

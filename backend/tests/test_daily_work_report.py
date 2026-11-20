@@ -867,7 +867,7 @@ SNAPSHOT = ["forwarded", "prescreened", "shortlisted", "interviews", "interviews
 def test_by_client_groups_the_same_stage_rows_per_employer(env, monkeypatch):
     day = {"from": "2026-11-05", "to": "2026-11-05"}
     body = report(env, **day)
-    gulf = {"id": "company", "name": "Gulf Builders", "interviewsOnline": 1, "total": 11,
+    gulf = {"id": "company", "name": "Gulf Builders", "interviewsOnline": 1, "total": 10,
             "metrics": {"prescreened": 3, "forwarded": 3, "shortlisted": 1, "interviews": 2, "offers": 1, "visas": 0, "travelled": 1}}
     desert = {"id": "company2", "name": "Desert Co", "interviewsOnline": 0, "total": 3,
               "metrics": {"prescreened": 0, "forwarded": 1, "shortlisted": 0, "interviews": 0, "offers": 1, "visas": 1, "travelled": 0}}
@@ -875,12 +875,12 @@ def test_by_client_groups_the_same_stage_rows_per_employer(env, monkeypatch):
     for key in CLIENT_KEYS:   # the rows add up to the team figures (leads aside)
         assert sum(c["metrics"][key] for c in body["byClient"]) == metric(body, key)["value"]
     week = report(env, **{"from": "2026-11-02", "to": "2026-11-05"})["byClient"]
-    assert [(c["name"], c["total"]) for c in week] == [("Gulf Builders", 14), ("Desert Co", 3)]
+    assert [(c["name"], c["total"]) for c in week] == [("Gulf Builders", 13), ("Desert Co", 3)]
     # the staff filter and a recruiter see only their own work per client
-    ravi = [{"id": "company", "name": "Gulf Builders", "interviewsOnline": 0, "total": 3,
-             "metrics": {"prescreened": 0, "forwarded": 1, "shortlisted": 0, "interviews": 1, "offers": 1, "visas": 0, "travelled": 0}},
-            {"id": "company2", "name": "Desert Co", "interviewsOnline": 0, "total": 2,
-             "metrics": {"prescreened": 0, "forwarded": 1, "shortlisted": 0, "interviews": 0, "offers": 1, "visas": 0, "travelled": 0}}]
+    ravi = [{"id": "company2", "name": "Desert Co", "interviewsOnline": 0, "total": 2,   # 2 and 2: the tie goes to the name
+             "metrics": {"prescreened": 0, "forwarded": 1, "shortlisted": 0, "interviews": 0, "offers": 1, "visas": 0, "travelled": 0}},
+            {"id": "company", "name": "Gulf Builders", "interviewsOnline": 0, "total": 2,
+             "metrics": {"prescreened": 0, "forwarded": 1, "shortlisted": 0, "interviews": 1, "offers": 1, "visas": 0, "travelled": 0}}]
     assert report(env, staff="ravi", **day)["byClient"] == ravi and report(env, "ravi", **day)["byClient"] == ravi
     assert [c["id"] for c in report(env, "meena", **day)["byClient"]] == ["company", "company2"]   # c23 / c11 on Gulf, c9 on Desert
     assert [c["id"] for c in report(env, client="company2", **day)["byClient"]] == ["company2"]
@@ -970,8 +970,11 @@ def test_the_history_of_submitted_reports_and_its_export_sheets(env):
                                                             ("2026-11-04", "Ravi", "Late close")]
     assert submitted[2][3 + SNAPSHOT.index("forwarded")] == 2 and submitted[2][3 + SNAPSHOT.index("leadsContacted")] == 6
     clients = book["By client"]
-    assert clients[0] == ["Client"] + [service.LABELS[k] for k in CLIENT_KEYS] + ["Interviews online", "Total"]
-    assert [r[0] for r in clients[1:]] == ["Gulf Builders", "Desert Co"] and clients[1][-1] == 14 and clients[2][-1] == 3
+    assert clients[0] == ["Client", "Resumes forwarded to clients", "Resumes prescreened", "Workers shortlisted by clients", "Online interviews",
+                          "Offer letters received", "Visas received", "Workers travelled", "Total", "Interviews conducted (all modes)"]
+    assert [r[0] for r in clients[1:]] == ["Gulf Builders", "Desert Co"]
+    for row in clients[1:]:   # the Total is the sum of the figure columns beside it, exactly like the table on screen
+        assert row[8] == sum(row[1:8])
     only = sheets_of(get(env, "asha", "/export", **{"from": "2026-11-04", "to": "2026-11-05"}).content)[0]["Submitted reports"]
     assert [r[1] for r in only[1:]] == ["Asha"]
 

@@ -114,7 +114,7 @@ def scan_workflow(db, *, now=None, agency_timezone=None):
             or_(Task.completed_at.is_(None), Task.completed_at >= end),
             or_(Task.cancelled_at.is_(None), Task.cancelled_at >= end),
         )))
-        updated = set(db.execute(select(Remark.task_id, Remark.author_id).where(Remark.created_at >= start, Remark.created_at < end)).all())
+        updated = set(db.execute(select(Remark.task_id, Remark.author_id).where(Remark.created_at >= start, Remark.created_at < end, Remark.deleted_at.is_(None))).all())
         # A catch-up scan can run after a reassignment. The first assignment at
         # or after the day boundary records who owned the task just before it.
         # Earlier legacy transfers without events cannot be reconstructed.

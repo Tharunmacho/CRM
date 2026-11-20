@@ -712,6 +712,31 @@ def test_export_is_filtered_formula_safe_and_a_recruiter_gets_only_their_own_lea
     assert "Test Lead 00001" in sheet
 
 
+def test_the_state_beside_a_city_is_a_real_state_on_the_list_the_detail_and_the_file(env):
+    """Junk left in the state field by ad sheets ('H', '31') is not shown: the state is read from the place instead, or left out.
+    The stored text is untouched. The screen's list, the lead detail and the CSV all say the same thing."""
+    imported(env, [lead_row(n) for n in range(1, 8)])
+    places = [("Pollachi", "H"), ("Chennai", "31"), ("Kuttiyadi", "KL"), ("kuttiyadi  ", "7"), ("Qwertyville", "H"), ("Kottayam", "Tamilnadu"), ("H", "Kerala")]
+    for n, (city, state) in enumerate(places, 1):   # the 6th is a real state that disagrees with the place: the stored state wins
+        env.db.execute(text("UPDATE crm_leads SET city = :c, state = :s WHERE name LIKE :n"), {"c": city, "s": state, "n": f"%0000{n}"})
+    env.db.commit()
+    act_as(env, "admin")
+    items = {i["name"][-1]: i for i in env.client.get("/api/leads", params={"page_size": 50}).json()["items"]}
+    shown = [items[str(n)]["state"] for n in range(1, 8)]
+    assert shown == ["Tamil Nadu", "Tamil Nadu", "Kerala", "Kerala", None, "Tamil Nadu", "Kerala"]
+    assert items["7"]["city"] is None and items["7"]["cityRaw"] == "H" and items["3"]["city"] == "Kuttiyadi" and items["4"]["city"] == "kuttiyadi".title()   # 4th: from the other Kuttiyadi lead
+    assert [items[str(n)]["stateRaw"] for n in range(1, 8)] == [s for _, s in places]
+    detail = env.client.get(f"/api/leads/{items['4']['id']}").json()
+    assert detail["state"] == "Kerala" and detail["stateRaw"] == "7"
+    assert env.db.scalar(text("SELECT state FROM crm_leads WHERE id = :i"), {"i": items["1"]["id"]}) == "H"
+    rows = list(csv.reader(io.StringIO(env.client.get("/api/leads/export.csv").content.decode("utf-8-sig"))))
+    head = rows[0]
+    by_name = {r[head.index("Name")][-1]: r for r in rows[1:]}
+    assert [by_name[str(n)][head.index("State")] for n in range(1, 8)] == ["Tamil Nadu", "Tamil Nadu", "Kerala", "Kerala", "", "Tamil Nadu", "Kerala"]
+    assert by_name["1"][head.index("Location")] == "Pollachi, Tamil Nadu" and by_name["5"][head.index("Location")] == "Qwertyville"
+    assert by_name["5"][head.index("City")] == "Qwertyville" and by_name["7"][head.index("City")] == "" and by_name["7"][head.index("Location")] == "Kerala"
+
+
 # ------------------------------------------------------------------ live updates and migration
 
 def test_lead_tables_publish_the_leads_topic():

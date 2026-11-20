@@ -122,7 +122,7 @@ def load_inspection(db: Session, candidate_id: str, user: User, *, application_i
         lambda session: list(session.scalars(select(ApplicationFeedback).where(ApplicationFeedback.candidate_id == candidate_id)
                                             .order_by(ApplicationFeedback.created_at, ApplicationFeedback.id).limit(MAX_HISTORY_ROWS + 1))),
         lambda session: list(session.scalars(select(Task).where(*task_scope).order_by(Task.created_at, Task.id).limit(MAX_HISTORY_ROWS + 1))),
-        lambda session: list(session.scalars(select(Remark).where(Remark.task_id.in_(select(Task.id).where(*task_scope)))
+        lambda session: list(session.scalars(select(Remark).where(Remark.deleted_at.is_(None), Remark.task_id.in_(select(Task.id).where(*task_scope)))
                                             .order_by(Remark.created_at, Remark.id).limit(MAX_HISTORY_ROWS + 1))),
         # Every person's name (the team is small): read with the rest, not in a statement of its own once the ids are known.
         lambda session: dict(session.execute(select(User.id, User.name)).all()),

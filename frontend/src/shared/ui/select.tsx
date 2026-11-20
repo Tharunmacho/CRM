@@ -21,6 +21,8 @@ interface Option {
   value: string
   label: string
   disabled: boolean
+  /** A prompt entry such as "Select remark" (`<option data-muted>`): drawn in the muted style. */
+  muted?: boolean
   group?: string
 }
 interface OptionProps {
@@ -28,6 +30,7 @@ interface OptionProps {
   children?: ReactNode
   disabled?: boolean
   label?: string
+  'data-muted'?: string
 }
 
 function optionText(children: ReactNode): string {
@@ -48,6 +51,7 @@ function collectOptions(children: ReactNode, group?: string, disabled = false): 
           value: String(child.props.value ?? label),
           label,
           disabled: disabled || Boolean(child.props.disabled),
+          muted: child.props['data-muted'] !== undefined,
           group,
         },
       ]
@@ -357,6 +361,7 @@ export const Select = forwardRef<
                         'custom-select-option',
                         index === activeIndex && 'is-active',
                         selectedValues.includes(option.value) && 'is-selected',
+                        option.muted && 'is-muted',
                       )}
                       onMouseMove={() => {
                         if (!option.disabled) setActiveIndex(index)

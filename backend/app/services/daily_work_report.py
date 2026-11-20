@@ -142,6 +142,17 @@ METRICS: tuple[tuple[str, str, str], ...] = (
 )
 METRIC_KEYS = tuple(key for key, _label, _definition in METRICS)
 LABELS = {key: label for key, label, _definition in METRICS}
+# The seven columns of the By client table, in the screen's order (frontend DAILY_ORDER). `interviewsOnline` is the online share of
+# the interviews, counted beside the metrics (it is not a METRICS key). A client's Total is the sum of exactly these columns.
+CLIENT_COLUMNS = ("forwarded", "prescreened", "shortlisted", "interviewsOnline", "offers", "visas", "travelled")
+CLIENT_COLUMN_LABELS = {"interviewsOnline": "Online interviews"}
+
+
+def client_total(metrics: dict, interviews_online: int) -> int:
+    """The Total of a By client row: the sum of the figures the table shows (not every metric: interviews conducted is not a column)."""
+    return sum(int(interviews_online if key == "interviewsOnline" else metrics.get(key, 0)) for key in CLIENT_COLUMNS)
+
+
 FUNNEL_ORDER = ("prescreened", "forwarded", "shortlisted", "interviews", "offers", "visas", "travelled")
 
 OUTCOME_LABELS = {
@@ -703,14 +714,15 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
     for cid, entry in by_company.items():
         figures_ = {key: int(entry["metrics"].get(key, 0)) for key in METRIC_KEYS if key != "leadsContacted"}
         by_client.append({"id": cid, "name": entry["name"], "metrics": figures_, "interviewsOnline": int(entry["online"]),
-                          "total": sum(figures_.values())})
+                          "total": client_total(figures_, int(entry["online"]))})
     by_client.sort(key=lambda r: (-r["total"], r["name"].casefold(), r["id"]))
     if len(by_client) > BY_CLIENT_MAX:
         rest, by_client = by_client[BY_CLIENT_MAX:], by_client[:BY_CLIENT_MAX]
         rolled = {key: sum(r["metrics"][key] for r in rest) for key in by_client[0]["metrics"]} if by_client else \
             {key: sum(r["metrics"][key] for r in rest) for key in rest[0]["metrics"]}
+        rolled_online = sum(r["interviewsOnline"] for r in rest)
         by_client.append({"id": "other", "name": "Other clients", "metrics": rolled,
-                          "interviewsOnline": sum(r["interviewsOnline"] for r in rest), "total": sum(rolled.values())})
+                          "interviewsOnline": rolled_online, "total": client_total(rolled, rolled_online)})
     listed = {r["id"] for r in rows}
     total_status = sum(by_status.values())
     owned_total = sum(owned.get(uid, 0) for uid in listed)
@@ -1138,9 +1150,12 @@ def export_workbook(report: dict, history_rows: list[dict] | None = None) -> byt
         table.append(["Total"] + [x["count"] for x in stages["totals"]] + [sum(x["total"] for x in stages["perStaff"])])
         sheets.append(("Stages now", table))
 
-    keys = [k for k in METRIC_KEYS if k != "leadsContacted"]
-    by_client = [["Client"] + [LABELS[k] for k in keys] + ["Interviews online", "Total"]]
-    by_client += [[c["name"]] + [c["metrics"][k] for k in keys] + [c["interviewsOnline"], c["total"]] for c in report["byClient"]]
+    # Same columns and order as the By client table on screen; Total is the sum of exactly those. Interviews conducted (every mode) is
+    # not a column of the table, so it stands after Total as a note and is not part of it.
+    def column(c, key):
+        return c["interviewsOnline"] if key == "interviewsOnline" else c["metrics"][key]
+    by_client = [["Client"] + [CLIENT_COLUMN_LABELS.get(k) or LABELS[k] for k in CLIENT_COLUMNS] + ["Total", "Interviews conducted (all modes)"]]
+    by_client += [[c["name"]] + [column(c, k) for k in CLIENT_COLUMNS] + [c["total"], c["metrics"]["interviews"]] for c in report["byClient"]]
     sheets.append(("By client", by_client))
 
     submitted = [["Date", "Recruiter", "Submitted at"] + [k for k in SNAPSHOT_KEYS] + ["Note"]]

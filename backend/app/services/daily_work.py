@@ -244,11 +244,12 @@ def fetch_rows(db, owner_ids, *, now: datetime | None = None, tz=None) -> list:
 
 
 def _remark_query(*where):
-    """Remarks (newest first) as (body, author name, time, task id, remark id, candidate id, application id) rows. The author's name rides
-    along in the same statement (no separate read of the whole user table)."""
-    return (select(Remark.body, User.name, Remark.created_at, Remark.task_id, Remark.id, Task.candidate_id, Task.application_id)
+    """Remarks (newest first) as (body, author name, time, task id, remark id, candidate id, application id, cleared at, author id) rows. A deleted note is
+    never listed. `cleared at` is set once the Remarks cell was cleared ("Select remark"): such a note is still one of the day's notes but is no
+    longer the shown remark. The author's name rides along in the same statement (no separate read of the whole user table)."""
+    return (select(Remark.body, User.name, Remark.created_at, Remark.task_id, Remark.id, Task.candidate_id, Task.application_id, Remark.cleared_at, Remark.author_id)
             .select_from(Remark).join(Task, Task.id == Remark.task_id)
-            .outerjoin(User, User.id == Remark.author_id).where(*where).order_by(Remark.created_at.desc(), Remark.id))
+            .outerjoin(User, User.id == Remark.author_id).where(Remark.deleted_at.is_(None), *where).order_by(Remark.created_at.desc(), Remark.id))
 
 
 def _written_today(now: datetime, tz=None):
@@ -258,11 +259,12 @@ def _written_today(now: datetime, tz=None):
 
 
 def _remark_summary(remark_rows, *, by_application: bool = False) -> dict[str, dict]:
-    """{task id (or application id): newest remark, its author's name and how many there are} from `_remark_query` rows, newest first."""
+    """{task id (or application id): newest remark, its author's name and how many there are} from `_remark_query` rows, newest first.
+    A remark the cell was cleared of ("Select remark") is not the shown remark: a row whose remarks are all cleared has none."""
     result: dict[str, dict] = {}
-    for body, name, at, task_id, _note_id, _candidate_id, application_id in remark_rows:
+    for body, name, at, task_id, _note_id, _candidate_id, application_id, cleared_at, _author_id in remark_rows:
         key = application_id if by_application else task_id
-        if key is None:
+        if key is None or cleared_at is not None:
             continue
         entry = result.setdefault(key, {"body": body, "at": at, "by": name or "Unknown", "count": 0})
         entry["count"] += 1
@@ -273,9 +275,9 @@ def _daily_notes(remark_rows, *, now: datetime, tz=None) -> dict[str, list]:
     """{candidate id: [(application id, note)]}: every note written on this agency day (finished tasks included), newest first."""
     start, end = day_bounds(agency_today(now, tz), tz)
     daily: dict[str, list] = defaultdict(list)
-    for body, name, at, _task_id, note_id, candidate_id, application_id in remark_rows:
+    for body, name, at, _task_id, note_id, candidate_id, application_id, _cleared_at, author_id in remark_rows:
         if start <= at < end:
-            daily[candidate_id].append((application_id, {"id": note_id, "body": body, "at": at, "by": name or "Unknown"}))
+            daily[candidate_id].append((application_id, {"id": note_id, "body": body, "at": at, "by": name or "Unknown", "byId": author_id}))
     return daily
 
 
@@ -674,7 +676,8 @@ def outcome_reads(app_ids) -> tuple:
     who made the last change to each placement (the closure), all in the same round."""
     remark_query = (select(Task.application_id, Remark.body, User.name, Remark.created_at).select_from(Remark)
                     .join(Task, Task.id == Remark.task_id).outerjoin(User, User.id == Remark.author_id)
-                    .where(Task.application_id.in_(app_ids)).order_by(Remark.created_at.desc(), Remark.id))
+                    .where(Task.application_id.in_(app_ids), Remark.deleted_at.is_(None), Remark.cleared_at.is_(None))
+                    .order_by(Remark.created_at.desc(), Remark.id))
     closed_by = (select(AuditEntry.entity_id, User.name).select_from(AuditEntry).outerjoin(User, User.id == AuditEntry.actor_id)
                  .where(AuditEntry.entity_type == "application", AuditEntry.entity_id.in_(app_ids))
                  .distinct(AuditEntry.entity_id).order_by(AuditEntry.entity_id, AuditEntry.at.desc()))
@@ -730,7 +733,7 @@ def fetch_follow_up(db, owner_ids) -> list:
     stage_at = (select(func.max(ApplicationStage.completed_at)).where(ApplicationStage.application_id == Application.id)
                 .correlate(Application).scalar_subquery())
     remark_at = (select(func.max(Remark.created_at)).select_from(Remark).join(Task, Task.id == Remark.task_id)
-                 .where(Task.application_id == Application.id).correlate(Application).scalar_subquery())
+                 .where(Task.application_id == Application.id, Remark.deleted_at.is_(None)).correlate(Application).scalar_subquery())
     last = func.greatest(stage_at, remark_at, Application.draft_saved_at, Application.created_at).label("last_update")
     # When a stage was last finished (never a reopened one): the Tasks screen shows "Stage moved" for a placement moved today.
     moved_at = (select(func.max(ApplicationStage.completed_at)).where(ApplicationStage.application_id == Application.id,

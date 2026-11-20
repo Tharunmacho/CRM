@@ -19,8 +19,14 @@ export interface Lead {
   name: string
   phone?: string | null
   email?: string | null
+  /** The city to show: tidied, and null when the sheet left junk (a digit, a single letter, N/A). */
   city?: string | null
+  /** The city as stored (an older server does not send it). */
+  cityRaw?: string | null
+  /** The state to show: the server sends a real state (the stored one, or the one its place gives) or nothing; never sheet junk. */
   state?: string | null
+  /** What the lead stores in its state field, untouched (an older server does not send it). The edit form starts from this. */
+  stateRaw?: string | null
   positionApplied?: string | null
   experienceRestaurantYears?: number | string | null
   experienceTotalYears?: number | string | null
@@ -146,6 +152,18 @@ export const LEAD_HEADINGS = {
 
 /** A custom question column the stored sheets contain (GET /leads/columns). */
 export interface ExtraColumn { key: string; label: string; count: number }
+
+/**
+ * The two lines of the Location column: the city, and under it the state. The server decides what the state is (a real state, or
+ * the one the place gives, or none: services/place_state.py), so this only lays it out: nothing under a city when there is no
+ * state or it only repeats the city; a lead with no city shows its state alone.
+ */
+export function locationLines(lead: Pick<Lead, 'city' | 'state'>): { first: string; second: string; title: string } {
+  const city = (lead.city ?? '').trim()
+  const state = (lead.state ?? '').trim()
+  const second = city && state && state.toLowerCase() !== city.toLowerCase() ? state : ''
+  return { first: city || state, second, title: [city, second || (city ? '' : state)].filter(Boolean).join(', ') }
+}
 
 export const EXTRA_PREFIX = 'x:'
 export const extraKeyOf = (columnKey: string) => (columnKey.startsWith(EXTRA_PREFIX) ? columnKey.slice(EXTRA_PREFIX.length) : null)

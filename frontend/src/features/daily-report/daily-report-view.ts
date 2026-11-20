@@ -523,7 +523,8 @@ export function clientRows(report: Pick<DailyReport, 'byClient'>): ClientTableRo
   return (report.byClient ?? []).map(row => {
     const cells: Cells = {}
     for (const key of DAILY_ORDER) cells[key] = key === 'interviewsOnline' ? row.interviewsOnline ?? 0 : row.metrics[key] ?? 0
-    cells.total = row.total ?? DAILY_ORDER.reduce((all, key) => all + (cells[key] ?? 0), 0)
+    // Always the sum of the columns the table shows, whatever an older server sent as `total` (it added every metric).
+    cells.total = DAILY_ORDER.reduce((all, key) => all + (cells[key] ?? 0), 0)
     return { id: row.id, name: row.name, cells }
   }).filter(row => (row.cells.total ?? 0) > 0).sort((a, b) => (b.cells.total ?? 0) - (a.cells.total ?? 0) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
 }

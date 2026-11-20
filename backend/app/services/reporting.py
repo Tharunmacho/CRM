@@ -121,6 +121,8 @@ def read_reporting_data(db, filters: Filters | None = None, zone=None):
             elif name == "remarks":
                 # Report missed-update totals use persisted events, not remarks.
                 query = query.where(False)
+        elif name == "remarks":
+            query = query.where(m.Remark.deleted_at.is_(None))   # a deleted note is not an update
         rows = query.subquery(name)
         collections.append(select(func.json_agg(func.row_to_json(rows.table_valued()), type_=JSON)).scalar_subquery().label(name))
     mail = select(m.MailMessage.id, m.MailAccount.address).join(m.MailAccount, m.MailAccount.id == m.MailMessage.account_id)
@@ -180,7 +182,7 @@ def read_dashboard_data(db, user, staff_id=None, zone=None, now=None):
         elif name == "tasks":
             query = query.where(*open_tasks)
         elif name == "remarks":
-            query = query.join(m.Task, m.Task.id == m.Remark.task_id).where(*open_tasks,
+            query = query.join(m.Task, m.Task.id == m.Remark.task_id).where(*open_tasks, m.Remark.deleted_at.is_(None),
                 m.Remark.author_id == m.Task.owner_id, m.Remark.created_at >= start, m.Remark.created_at < end)
         rows = query.subquery(name)
         collections.append(select(func.json_agg(func.row_to_json(rows.table_valued()), type_=JSON)).scalar_subquery().label(name))

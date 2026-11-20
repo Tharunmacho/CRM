@@ -160,7 +160,7 @@ test('the Export Excel button sits next to Refresh and reuses the shared blob do
 
 /* ------------------------------------------------------------------ the REMARKS dropdown */
 
-test('the dropdown shows the current remark as its value, "Select remark" when there is none', () => {
+test('the dropdown shows the current remark as its value, "Select remark" when there is none, and "Select remark" is ALWAYS the first entry', () => {
   const none = select.remarkSelectView(null, list)
   assert.equal(none.value, '')
   assert.equal(none.options[0].label, 'Select remark')
@@ -168,8 +168,27 @@ test('the dropdown shows the current remark as its value, "Select remark" when t
   const current = select.remarkSelectView('PCC Pending', list)
   assert.equal(current.value, 't6')
   assert.equal(current.custom, false)
-  assert.equal(current.options.some((o) => o.label === 'Select remark'), false, 'the prompt goes once a remark is chosen')
-  assert.deepEqual(current.options.map((o) => o.label), [...SEEDS, 'Others'])
+  // The owner's rule (replaces "the prompt goes once a remark is chosen"): the prompt stays on top, so a person can go back to no remark.
+  assert.equal(current.options[0].label, 'Select remark', 'the prompt stays once a remark is chosen')
+  assert.equal(current.options[0].value, select.CLEAR_VALUE)
+  assert.deepEqual(current.options.map((o) => o.label), ['Select remark', ...SEEDS, 'Others'])
+  assert.notEqual(current.value, current.options[0].value, 'no check on the prompt while a remark is chosen')
+  assert.equal(none.value, none.options[0].value, 'the check is on the prompt only while nothing is chosen')
+  for (const [remark, canAdd] of [[null, false], ['PCC Pending', false], ['Typed long ago', true], [null, true], ['pcc pending', true]]) {
+    for (const loaded of [true, false]) {
+      const options = select.remarkSelectView(remark, list, loaded, canAdd).options
+      assert.deepEqual(options[0], { value: '', label: 'Select remark', muted: true }, `${remark} ${loaded}: first, muted`)
+      assert.equal(options.filter((o) => o.label === 'Select remark').length, 1)
+    }
+  }
+  assert.equal(select.remarkSelectView(null, [], true, false).options[0].label, 'Select remark', 'even with no templates')
+})
+
+test('choosing "Select remark" clears the remark; it saves no text and does nothing when there is no remark', () => {
+  assert.equal(select.isClearChoice(''), true)
+  assert.equal(select.isClearChoice('t1'), false)
+  assert.equal(select.isClearChoice(select.CUSTOM_VALUE), false)
+  assert.equal(select.textForChoice(select.CLEAR_VALUE, list), null, 'the prompt is never saved as a remark')
 })
 
 test('a template remark is recognised whatever its capitals and spacing', () => {
@@ -180,8 +199,10 @@ test('a template remark is recognised whatever its capitals and spacing', () => 
 test('a free-text remark that is not a template stays selected as the value and listed first (it is never labelled custom on screen)', () => {
   const view = select.remarkSelectView('Called, will join next week', list)
   assert.equal(view.value, select.CUSTOM_VALUE)
-  assert.deepEqual(view.options[0], { value: select.CUSTOM_VALUE, label: 'Called, will join next week' })
-  assert.equal(view.options.length, SEEDS.length + 2, 'the remark, the templates and Others')
+  assert.equal(view.options[0].label, 'Select remark', 'the prompt is still the first entry')
+  assert.deepEqual(view.options[1], { value: select.CUSTOM_VALUE, label: 'Called, will join next week' }, 'the selected remark is right under it')
+  assert.deepEqual(view.options.slice(2, 4).map((o) => o.label), SEEDS.slice(0, 2), 'the templates follow')
+  assert.equal(view.options.length, SEEDS.length + 3, 'the prompt, the remark, the templates and Others')
   // Choosing the custom entry again, or the prompt, saves nothing.
   assert.equal(select.textForChoice(select.CUSTOM_VALUE, list), null)
   assert.equal(select.textForChoice('', list), null)
@@ -263,6 +284,11 @@ test('the Remarks cell types only through Others (and the admin add row), saves 
   assert.doesNotMatch(cell, /Textarea|<textarea|Add remark|remark-save|placeholder="Add remark"/)
   assert.match(cell, /aria-label=\{`Remark for \$\{item\.candidate\}`\}/)
   assert.match(cell, /await onSave\(text\)/)
+  // "Select remark" (always the first entry) clears the cell through onClear, only while a remark is shown; the option is muted
+  assert.match(cell, /onClear\?: \(\) => Promise<void>/)
+  assert.match(cell, /if \(isClearChoice\(value\)\) \{ if \(last\) await clearRemark\(\); return \}/)
+  assert.match(cell, /await onClear\(\)/)
+  assert.match(cell, /data-muted=\{option\.muted \? '' : undefined\}/)
   assert.match(cell, /aria-live="polite"/)
   // the one input serves Others (everyone) and the admin's add-template row
   assert.equal((cell.match(/<input/g) ?? []).length, 1)

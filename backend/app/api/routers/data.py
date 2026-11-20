@@ -1089,6 +1089,59 @@ def add_remark(task_id: str, body: RemarkIn, db: Session = Depends(get_db), user
                      created_at=row.created_at).model_dump(by_alias=True, mode="json")
 
 
+@router.delete("/remarks/{remark_id}")
+def delete_remark(remark_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """Delete one note (the NOTES column of the Tasks page). A SOFT delete: the row stays with `deleted_at` / `deleted_by`, every reader ignores
+    it, and the audit entry "Deleted a note" keeps its text, who deleted it and when. Allowed for the note's author, the candidate's recruiter
+    (or the task's owner) and any Admin / MD. ONE statement; the change feed announces the update like an added remark."""
+    row = db.execute(text(
+        "WITH r AS (SELECT m.id, m.task_id, m.body, m.author_id, m.deleted_at, t.title, t.owner_id AS task_owner, c.owner_id AS candidate_owner "
+        "FROM workflow_task_remarks m JOIN workflow_tasks t ON t.id = m.task_id LEFT JOIN crm_candidates c ON c.id = t.candidate_id "
+        "WHERE m.id = :remark), "
+        "ok AS (SELECT id FROM r WHERE deleted_at IS NULL AND (CAST(:anyone AS boolean) OR author_id = :me OR candidate_owner = :me OR task_owner = :me)), "
+        "u AS (UPDATE workflow_task_remarks SET deleted_at = now(), deleted_by = :me WHERE id IN (SELECT id FROM ok) AND deleted_at IS NULL "
+        "RETURNING id, task_id, body, author_id, deleted_at), "
+        "a AS (INSERT INTO system_audit_log (id, actor_id, action, target, entity_type, entity_id, meta) "
+        "SELECT :audit_id, :me, 'Deleted a note', r.title, 'task', u.task_id, "
+        "jsonb_build_object('remarkId', u.id, 'text', u.body, 'writtenBy', u.author_id, 'deletedAt', u.deleted_at) FROM u JOIN r ON r.id = u.id) "
+        "SELECT r.deleted_at AS was_deleted, (SELECT count(*) FROM u) AS removed, "
+        "(CAST(:anyone AS boolean) OR r.author_id = :me OR r.candidate_owner = :me OR r.task_owner = :me) AS allowed FROM r"),
+        {"remark": remark_id, "anyone": is_admin_level(user), "me": user.id, "audit_id": str(uuid4())}).one_or_none()
+    if row is None or row.was_deleted is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Note not found")
+    if not row.removed:
+        if not row.allowed:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the person who wrote this note, the candidate's recruiter, an MD or an admin can delete it")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Note not found")
+    db.commit()
+    return {"deleted": remark_id}
+
+
+@router.post("/tasks/{task_id}/remarks/clear")
+def clear_task_remark(task_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """"Select remark" in the Remarks dropdown: the candidate's Remarks cell reads empty again (and so does the Excel's Remarks column).
+
+    The notes are NOT deleted: every not-yet-cleared remark on the candidate's tasks gets `cleared_at`, so they stay in the history, the day's
+    notes and the profile, and a remark written afterwards shows as before. An audit entry "Cleared task remark" records who and how many.
+    Same permission as adding a remark: the task's recruiter, an MD or an admin. ONE statement."""
+    row = db.execute(text(
+        "WITH t AS (SELECT id, owner_id, title, candidate_id FROM workflow_tasks WHERE id = :task), "
+        "ok AS (SELECT id, title, candidate_id FROM t WHERE CAST(:anyone AS boolean) OR owner_id = :me), "
+        "u AS (UPDATE workflow_task_remarks SET cleared_at = now() WHERE deleted_at IS NULL AND cleared_at IS NULL AND task_id IN "
+        "(SELECT x.id FROM workflow_tasks x JOIN ok ON x.id = ok.id OR (ok.candidate_id IS NOT NULL AND x.candidate_id = ok.candidate_id)) RETURNING id), "
+        "a AS (INSERT INTO system_audit_log (id, actor_id, action, target, entity_type, entity_id, meta) "
+        "SELECT :audit_id, :me, 'Cleared task remark', ok.title, 'task', ok.id, jsonb_build_object('remarks', (SELECT count(*) FROM u)) "
+        "FROM ok WHERE EXISTS (SELECT 1 FROM u)) "
+        "SELECT t.owner_id, ok.id AS ok_id, (SELECT count(*) FROM u) AS cleared FROM t LEFT JOIN ok ON true"),
+        {"task": task_id, "anyone": is_admin_level(user), "me": user.id, "audit_id": str(uuid4())}).one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found")
+    if row.ok_id is None:
+        raise HTTPException(403, "Only the assigned recruiter or a supervisor can update this task")
+    db.commit()
+    return {"cleared": int(row.cleared or 0)}
+
+
 # --------------------------------------------------------------- call outcome
 
 class CallIn(BaseModel):

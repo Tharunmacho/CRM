@@ -27,9 +27,10 @@ from sqlalchemy.orm import Session, aliased, defer, undefer
 
 from app.db.models import (Attachment, AuditEntry, Candidate, Lead, LeadActivity, LeadBatch, Notification, Role, User,
                            LEAD_STATUSES)
-from app.services import lead_followups, lead_matching, lead_parsing as lp, lead_status_templates as status_templates
+from app.services import lead_followups, lead_matching, lead_parsing as lp, lead_status_templates as status_templates, place_state
 from app.services.candidate_search import agency_midnight, literal_contains, search_terms
 from app.core.roles import is_admin_level
+from app.services.response_cache import cached, scope_of
 
 STATUS_LABELS = {
     "new": "Not contacted", "contacted": "Contacted", "interested": "Interested", "resume_requested": "Resume requested",
@@ -159,7 +160,7 @@ def geographic_experience(source: dict, scope: str) -> dict:
 
 
 def lead_dict(lead: Lead, *, owner_name=None, candidate_ref=None, matched_ref=None, matched_name=None, has_resume=False,
-              experience_source=None, candidate_care_id=None, matched_care_id=None) -> dict:
+              experience_source=None, candidate_care_id=None, matched_care_id=None, states=None) -> dict:
     source = experience_source if isinstance(experience_source, dict) else {}
     geography = {f"experience{label}{suffix}": value
                  for label, scope in (("India", "india"), ("Abroad", "abroad"))
@@ -171,7 +172,10 @@ def lead_dict(lead: Lead, *, owner_name=None, candidate_ref=None, matched_ref=No
     return {
         "id": lead.id, "externalId": lead.external_id, "batchId": lead.batch_id, "importRow": lead.import_row,
         "createdTime": iso(lead.created_time), "name": lead.name, "phone": lead.phone, "phoneCountryCode": lead.phone_country_code,
-        "email": lead.email, "whatsapp": lead.whatsapp, "whatsappSame": lead.whatsapp_same, "city": lead.city, "state": lead.state,
+        "email": lead.email, "whatsapp": lead.whatsapp, "whatsappSame": lead.whatsapp_same, "city": place_state.clean_city(lead.city), "cityRaw": lead.city,
+        # What every screen and file shows as the state: the stored one when it is a real state, else the one the place gives, else None.
+        # The stored text stays on the lead (`stateRaw`, for the edit form) and is never rewritten.
+        "state": place_state.display_state(lead.city, lead.state, states), "stateRaw": lead.state,
         "currentLocation": lead.current_location, "positionApplied": lead.position_applied, "countryInterest": lead.country_interest,
         "experienceRestaurantYears": iso(lead.experience_restaurant_years), "experienceRestaurantText": lead.experience_restaurant_text,
         "experienceTotalYears": iso(lead.experience_total_years), "experienceTotalText": lead.experience_total_text,
@@ -224,10 +228,27 @@ def _base_query():
     return query, owner, has_resume
 
 
-def _row_out(row) -> dict:
+def _row_out(row, states=None) -> dict:
     lead, owner_name, cand_ref, matched_ref, matched_name, has_resume, experience_source, cand_care, matched_care = row
     return lead_dict(lead, owner_name=owner_name, candidate_ref=cand_ref, matched_ref=matched_ref, matched_name=matched_name,
-                     has_resume=has_resume, experience_source=experience_source, candidate_care_id=cand_care, matched_care_id=matched_care)
+                     has_resume=has_resume, experience_source=experience_source, candidate_care_id=cand_care, matched_care_id=matched_care,
+                     states=states)
+
+
+# The most common valid state of each city across the leads (see place_state): ONE grouped read, kept with the leads cache and read
+# side by side with the page / detail / export it serves. Junk states (digits, single letters) are cut in SQL so an id-filled column
+# cannot make it big; the rest is validated in Python. Everyone's leads count (it is a statistic about places, not a lead).
+PLACE_STATES_SECONDS = 60
+_PLACE_STATES_SQL = text(
+    "SELECT lower(btrim(city)), lower(btrim(state)), count(*) FROM crm_leads "
+    "WHERE city IS NOT NULL AND state IS NOT NULL AND length(btrim(city)) > 1 AND length(btrim(state)) > 1 AND state !~ '[0-9]' "
+    "GROUP BY 1, 2")
+
+
+def place_states(db) -> dict[str, str]:
+    """`{city key: its usual state}` for deriving the state of a lead whose own is missing or junk."""
+    return cached(("lead-place-states", scope_of(db)), ("leads",), PLACE_STATES_SECONDS,
+                  lambda: place_state.most_common_state_by_city(db.execute(_PLACE_STATES_SQL).all()))
 
 
 # ------------------------------------------------------------------ search and filters
@@ -429,13 +450,14 @@ def search_leads(db: Session, user: User, filters: dict, page: int, page_size: i
 
     wanted = [k for k in dict.fromkeys(extra_keys or []) if k]
 
-    def fetch(at):
+    def fetch(at, session=db):
         chosen = narrow.offset(at * page_size).limit(page_size).subquery("chosen")
         full, full_owner, _ = _base_query()
         full = full.join(chosen, chosen.c.id == Lead.id).add_columns(chosen.c.total).order_by(*_order(full_owner, sort, direction))
-        return db.execute(full if wanted else full.options(defer(Lead.extra))).all()  # the answers are only read for the `extra` columns
+        return session.execute(full if wanted else full.options(defer(Lead.extra))).all()  # the answers are only read for the `extra` columns
 
-    found = fetch(page)
+    from app.services.parallel_reads import parallel_reads
+    found, states = parallel_reads(db, lambda session: fetch(page, session), place_states)  # the page and the places' usual states, side by side
     if found:
         total = found[0].total
     elif page == 0:
@@ -444,7 +466,7 @@ def search_leads(db: Session, user: User, filters: dict, page: int, page_size: i
         total = db.scalar(select(func.count()).select_from(query.with_only_columns(Lead.id).order_by(None).subquery())) or 0
         page = min(page, max(0, (total - 1) // page_size))
         found = fetch(page)
-    items = [_row_out(row[:-1]) for row in found]  # The final selected column is the total-count window.
+    items = [_row_out(row[:-1], states) for row in found]  # The final selected column is the total-count window.
     if wanted:  # the custom question answers: `*` = every answer the lead has, else just the named ones
         keys = None if "*" in wanted else wanted[:MAX_EXTRA_COLUMNS]
         for item, row in zip(items, found):
@@ -470,11 +492,11 @@ def get_lead_detail(db: Session, user: User, lead_id: str) -> dict:
         return session.scalar(select(Attachment).where(Attachment.entity_type == "lead", Attachment.entity_id == lead_id, Attachment.slot == "resume")
                               .order_by(Attachment.version.desc()).limit(1))
 
-    row, activities, resume = parallel_reads(db, read_lead, read_activities, read_resume)
+    row, activities, resume, states = parallel_reads(db, read_lead, read_activities, read_resume, place_states)
     if row is None:
         raise fail(404, "not_found", "This lead was not found.")
     lead = row[0]
-    data = _row_out(row)
+    data = _row_out(row, states)
     data["extra"], data["raw"] = lead.extra or {}, lead.raw or {}
     data["activities"] = [{"id": a.id, "kind": a.kind, "summary": a.summary, "userId": a.user_id, "userName": name,
                            "meta": a.meta, "createdAt": iso(a.created_at)} for a, name in activities]
@@ -1065,7 +1087,7 @@ EXPORT_COLUMNS = [
     ("Next follow-up", lambda l, o, e: l.next_follow_up_at), ("Notes", lambda l, o, e: l.notes),
     ("Name", lambda l, o, e: l.name), ("Age", lambda l, o, e: e["_exportAge"]),
     ("Phone", lambda l, o, e: l.phone), ("E-mail", lambda l, o, e: l.email), ("WhatsApp", lambda l, o, e: l.whatsapp),
-    ("City", lambda l, o, e: l.city), ("State", lambda l, o, e: l.state), ("Current location", lambda l, o, e: l.current_location),
+    ("City", lambda l, o, e: e["city"]), ("State", lambda l, o, e: e["state"]), ("Current location", lambda l, o, e: l.current_location),
     ("Country interest", lambda l, o, e: l.country_interest), ("Gender", lambda l, o, e: l.gender),
     ("Date of birth", lambda l, o, e: l.dob),
     ("India experience question", lambda l, o, e: e["experienceIndiaQuestion"]),
@@ -1077,8 +1099,9 @@ EXPORT_COLUMNS = [
 ]
 
 
-def export_table(found) -> tuple[list[str], list[list]]:
-    """Shared table for filtered CSV/XLSX and selected-lead Excel downloads."""
+def export_table(found, states=None) -> tuple[list[str], list[list]]:
+    """Shared table for filtered CSV/XLSX and selected-lead Excel downloads. `states`: `place_states(db)`, so the State and Location
+    columns show exactly what the screen shows."""
     from app.services.daily_work import agency_today
     today = agency_today(datetime.now(timezone.utc))
     counts: dict[str, int] = {}
@@ -1090,13 +1113,13 @@ def export_table(found) -> tuple[list[str], list[list]]:
     header = [name for name, _ in EXPORT_COLUMNS] + [pretty_header(key) or key for key in extra_keys]
     rows = []
     for row in found:
-        experience = _row_out(row)
+        experience = _row_out(row, states)
         lead = row[0]
         age = export_age(lead.dob, today)
         experience["_exportAge"] = age
         experience["_exportIdentity"] = "\n".join(str(value) for value in (
             lead.name, f"Age: {age}" if age is not None else None, lead.phone, lead.email) if value)
-        experience["_exportLocation"] = ", ".join(value for value in (lead.city, lead.state) if value) or lead.current_location
+        experience["_exportLocation"] = ", ".join(value for value in (experience["city"], experience["state"]) if value) or lead.current_location
         rows.append([fn(row[0], row[1], experience) for _, fn in EXPORT_COLUMNS] + [(row[0].extra or {}).get(key) for key in extra_keys])
     return header, rows
 
@@ -1107,7 +1130,7 @@ def export_leads(db: Session, user: User, filters: dict, fmt: str, sort: str = "
     from app.services import lead_xlsx
     query, owner, has_resume = _base_query()
     query = apply_filters(query, owner, has_resume, user, filters, db).options(undefer(Lead.extra)).order_by(*_order(owner, sort, direction)).limit(EXPORT_LIMIT)
-    header, rows = export_table(db.execute(query).all())
+    header, rows = export_table(db.execute(query).all(), place_states(db))
     if fmt == "csv":
         out = io.StringIO()
         writer = csv.writer(out, lineterminator="\r\n")

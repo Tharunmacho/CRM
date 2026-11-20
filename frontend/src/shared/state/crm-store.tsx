@@ -179,6 +179,10 @@ interface StoreValue extends Data {
   mapCandidate: (candidateId: string, orderId: string) => Promise<{ refreshed: boolean; closedInitialCall: boolean } | null>
   unmap: (applicationId: string) => Promise<void>
   addRemark: (taskId: string, body: string) => Promise<void>
+  /** Delete one note (soft delete on the server: the author, the candidate's recruiter, an Admin or an MD). Throws the server's message. */
+  deleteRemark: (remarkId: string) => Promise<void>
+  /** "Select remark": the candidate's remark cell reads empty again; the notes and the history stay. */
+  clearRemark: (taskId: string) => Promise<void>
   recordCall: (candidateId: string, interested: string, remarks: string, called?: boolean) => Promise<void>
   markNotificationRead: (id?: string) => Promise<void>
   addCandidate: (payload: Record<string, unknown>, options?: { deferRefresh?: boolean }) => Promise<{ id: string; ownerName?: string | null } | null>
@@ -698,6 +702,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       addRemark: async (taskId, body) => {
         await run(() => api.post(`/tasks/${taskId}/remarks`, { body }), 'Remark added')
+      },
+      deleteRemark: async (remarkId) => {
+        await run(() => api.del(`/remarks/${encodeURIComponent(remarkId)}`), 'Note deleted')
+      },
+      clearRemark: async (taskId) => {
+        await run(() => api.post(`/tasks/${encodeURIComponent(taskId)}/remarks/clear`))
       },
       recordCall: async (candidateId, interested, remarks, called = true) => {
         await run(
