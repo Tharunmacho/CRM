@@ -22,6 +22,12 @@ export interface MatrixRow {
   /** Leads called or updated in the period (null for the Unassigned row). */
   contacted: number | null
   pct: number | null
+  /** Of the leads contacted in the period, those whose last answer was interested (null for the Unassigned row and for an older server). */
+  interested: number | null
+  /** Interested as a share of contacted, in whole percent (null when nothing was contacted). */
+  conversion: number | null
+  /** Leads nobody has contacted for more than the aging days (null without the management reading). */
+  stale: number | null
 }
 export interface LeadMatrix {
   columns: MatrixColumn[]
@@ -32,12 +38,14 @@ export interface LeadMatrix {
 }
 export interface StatusNow { key: string; label: string; count: number; pct: number }
 
-type Source = Pick<DailyReport, 'leadSheet' | 'staff' | 'scope'>
+type Source = Pick<DailyReport, 'leadSheet' | 'staff' | 'scope'> & Partial<Pick<DailyReport, 'leadInsight'>>
 
 export function contactedShare(assigned: number | null, contacted: number | null): number | null {
   if (!assigned || assigned <= 0 || contacted == null) return null
   return Math.min(100, Math.round((contacted / assigned) * 100))
 }
+
+const conversionOf = (interested: number | null, contacted: number | null) => (interested == null || !contacted || contacted <= 0 ? null : Math.round((interested / contacted) * 100))
 
 export function matrixColumns(sheet: DailyReport['leadSheet']): MatrixColumn[] {
   if (!sheet) return []
@@ -67,7 +75,9 @@ export function leadMatrix(report: Source, staff: string, roster: StaffRow[] = [
   const rows: MatrixRow[] = [...people].sort((a, b) => a.name.localeCompare(b.name)).map(row => {
     const assigned = row.leads?.assigned ?? null
     const contacted = row.leads?.contacted ?? row.metrics?.leadsContacted ?? null
-    return { id: row.id, name: row.name, unassigned: false, idle: !!row.idle, assigned, counts: countsOf(row.id), contacted, pct: contactedShare(assigned, contacted) }
+    const interested = row.leads?.interested ?? row.leadFeedback?.interested ?? null
+    const stale = report.leadInsight ? report.leadInsight.stale.perStaff[row.id] ?? 0 : null
+    return { id: row.id, name: row.name, unassigned: false, idle: !!row.idle, assigned, counts: countsOf(row.id), contacted, pct: contactedShare(assigned, contacted), interested, conversion: conversionOf(interested, contacted), stale }
   })
   const whole = team && !staff
   // Leads held by the Administrator account have no recruiter either: they join the Unassigned row, so the Total still ties to the Lead sheet screen.
@@ -75,13 +85,15 @@ export function leadMatrix(report: Source, staff: string, roster: StaffRow[] = [
   const unowned = [UNASSIGNED_ID, ...report.staff.filter(row => !shown.has(row.id)).map(row => row.id)].filter(id => per.has(id))
   if (whole && hasCounts && unowned.length) {
     const counts = Object.fromEntries(columns.map(c => [c.key, unowned.reduce((all, id) => all + (per.get(id)?.[c.key] ?? 0), 0)]))
-    rows.push({ id: UNASSIGNED_ID, name: 'Unassigned', unassigned: true, idle: false, assigned: null, counts, contacted: null, pct: null })
+    rows.push({ id: UNASSIGNED_ID, name: 'Unassigned', unassigned: true, idle: false, assigned: null, counts, contacted: null, pct: null, interested: null, conversion: null, stale: report.leadInsight ? report.leadInsight.stale.unassigned : null })
   }
   if (!rows.length) return { columns, rows, total: null, hasCounts }
   const assigned = sumOrNull(rows.filter(r => !r.unassigned).map(r => r.assigned))
   const contacted = sumOrNull(rows.filter(r => !r.unassigned).map(r => r.contacted))
+  const interested = sumOrNull(rows.filter(r => !r.unassigned).map(r => r.interested))
   const total: MatrixRow = {
     id: 'total', name: 'Total', unassigned: false, idle: false, assigned, contacted, pct: contactedShare(assigned, contacted),
+    interested, conversion: conversionOf(interested, contacted), stale: sumOrNull(rows.map(r => r.stale)),
     counts: Object.fromEntries(columns.map(c => [c.key, sumOrNull(rows.map(r => r.counts[c.key]))])),
   }
   return { columns, rows, total, hasCounts }

@@ -432,7 +432,7 @@ export function stageProgress(report: Pick<DailyReport, 'stages' | 'stageFlow'>)
 
 /** One short word (never wrapping mid-word) over each stage number; the full name is the heading's title. */
 export const STAGE_SHORT: readonly string[] = [
-  'Prescreen', 'Forwarded', 'Interview', 'Result', 'Offer', 'Advance', 'Passport', 'Medical', 'PCC', 'Visa', 'Review', 'Stamping', 'Ticket',
+  'Screen', 'Forward', 'Schedule', 'Result', 'Offer', 'Advance', 'Passport', 'Medical', 'PCC', 'Visa', 'Review', 'Stamping', 'Ticket',
 ]
 export interface MatrixStage { no: number; short: string; name: string }
 export interface MatrixRow {
@@ -535,7 +535,8 @@ export function drillTitle(metric: string, report?: DailyReport | null): string 
     const found = report?.stages?.totals.find(item => item.no === no)
     return no === 0 ? 'Not on an order yet' : found ? `Stage ${no}: ${found.label}` : `Stage ${no}`
   }
-  const fixed: Record<string, string> = { leadsTotal: 'All leads', leadsNotContacted: 'Leads not contacted', leadsAssigned: 'Leads assigned', leadsNewInPeriod: 'New leads', leadsAssignedInPeriod: 'Leads assigned', leadsBacklog: 'Leads still to contact', tasksDone: 'Tasks done', tasksPending: 'Tasks pending', tasksOverdue: 'Tasks overdue' }
+  if (/^stuck(:\d{1,2})?$/.test(metric)) return 'Stuck: waiting more than 7 days'
+  const fixed: Record<string, string> = { leadsStale: 'Leads not contacted for more than 3 days', leadsFollowUp: 'Leads that need a follow-up now', leadsTotal: 'All leads', leadsNotContacted: 'Leads not contacted', leadsAssigned: 'Leads assigned', leadsNewInPeriod: 'New leads', leadsAssignedInPeriod: 'Leads assigned', leadsBacklog: 'Leads still to contact', tasksDone: 'Tasks done', tasksPending: 'Tasks pending', tasksOverdue: 'Tasks overdue' }
   return fixed[metric] ?? METRIC_LABELS[metric as MetricKey] ?? 'Details'
 }
 

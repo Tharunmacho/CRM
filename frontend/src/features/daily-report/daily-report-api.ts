@@ -38,18 +38,18 @@ export function saveCsv(text: string, name: string) {
   saveBlob(new Blob(['﻿', text], { type: 'text/csv;charset=utf-8' }), name)
 }
 
-/** The Excel file of the same figures and filters as the screen. */
-export async function downloadDailyExport(query: DailyQuery) {
+/** The Excel file of the same figures and filters as the screen. `view` is the tab on screen: its own workbook (Task report, Lead sheet report) as shown; no view is the whole-report workbook. */
+export async function downloadDailyExport(query: DailyQuery, view?: 'task' | 'lead') {
   const controller = new AbortController()
   const deadline = window.setTimeout(() => controller.abort(), 90_000)
   try {
-    const response = await fetch(fileHref(`/api/reports/daily-work/export?${apiQuery(query)}`), { credentials: 'include', signal: controller.signal })
+    const response = await fetch(fileHref(`/api/reports/daily-work/export${view ? `/${view}` : ''}?${apiQuery(query)}`), { credentials: 'include', signal: controller.signal })
     if (!response.ok) {
       const failure = await response.json().catch(() => null)
       throw new Error(typeof failure?.detail === 'string' ? failure.detail : 'The Excel file could not be created. Please try again.')
     }
     const named = /filename="?([^";]+)"?/i.exec(response.headers.get('content-disposition') ?? '')?.[1]
-    saveBlob(await response.blob(), named || `daily-work-report-${query.from === query.to ? query.from : `${query.from}-to-${query.to}`}.xlsx`)
+    saveBlob(await response.blob(), named || `${view === 'lead' ? 'lead-sheet-report' : view === 'task' ? 'task-report' : 'daily-work-report'}-${query.from === query.to ? query.from : `${query.from}-to-${query.to}`}.xlsx`)
   } catch (error) {
     if (controller.signal.aborted) throw new Error('The export took too long. Try a shorter period or retry.')
     throw error

@@ -1,12 +1,13 @@
 """The Tasks page as an Excel sheet: the table the recruiter sees, with every detail, one row per candidate.
 
-    S.No | DOC | Recruiter | Job | Client | Country | Candidate | Care ID | Agency | Advance | Stage | Today | Remark | Notes
+    S.No | DOC | DOT | Recruiter | Job | Client | Country | Candidate | Care ID | Agency | Advance | Stage | Today | Remark | Notes
 
 The rows are the screen's own: the daily-work rows and the follow-up rows of `/api/daily-work` and `/api/follow-up` (same scoping), merged
 and ordered exactly like `taskRows` in frontend/src/features/daily-work/daily-work-model.ts (candidates nobody touched today first, then the
 ones with a stage waiting, then the furthest along; a candidate in both lists appears once, from the daily list).
 
 * DOC: the placement's date of commencement as DD-MMM-YYYY text (blank when none).
+* DOT: the date of travel (the air-ticket stage's travel date, `travelDate` of the row) in the same format, blank until the candidate has one.
 * Agency: the recorded agency returned with the Tasks row.
 * Advance: the client tracker's Advance cell (`advance_text.advance_cell` over the stage-9 record); blank when none.
 * Stage: "Stage 10 - Visa arrival", or "Initial call" before a stage starts.
@@ -26,9 +27,9 @@ from app.domain.stages import TOTAL_STAGES, stage_by_no
 from app.services import agency_settings, daily_work, lead_xlsx
 from app.services.advance_text import advance_cell
 
-COLUMNS = ("S.No", "DOC", "Recruiter", "Job", "Client", "Country", "Candidate", "Care ID", "Agency", "Advance", "Stage", "Today", "Remark", "Notes")
+COLUMNS = ("S.No", "DOC", "DOT", "Recruiter", "Job", "Client", "Country", "Candidate", "Care ID", "Agency", "Advance", "Stage", "Today", "Remark", "Notes")
 SHEET_NAME = "Tasks"
-WIDTHS = [7, 14, 18, 24, 24, 16, 30, 12, 18, 22, 36, 20, 50, 60]
+WIDTHS = [7, 14, 14, 18, 24, 24, 16, 30, 12, 18, 22, 36, 20, 50, 60]
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
@@ -139,7 +140,7 @@ def table(db, daily: list[dict], follow: list[dict], today: str) -> list[list]:
         remark = (row.get("remark") or {}).get("body") or ""
         notes = "\n".join(note_line(note, today) for note in sorted(row.get("notes") or row.get("todayNotes") or [], key=lambda n: n["at"], reverse=True))
         out.append([cell(v) for v in (
-            number, doc_text(row.get("commencementDate")), owners.get(row.get("ownerId")) or "", row.get("position") or "",
+            number, doc_text(row.get("commencementDate")), doc_text(row.get("travelDate")), owners.get(row.get("ownerId")) or "", row.get("position") or "",
             row.get("client") or "", row.get("country") or "", row.get("candidate") or "", row.get("candidateCareId") or "",
             row.get("agency") or "", advance_cell(facts.get(row.get("applicationId")), currency) or "",
             outcome_text(row["outcome"]) if (row.get("outcome") or {}).get("kind", "current") != "current" else stage_text(row.get("stage")),

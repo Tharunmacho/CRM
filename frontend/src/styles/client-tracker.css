@@ -1,30 +1,20 @@
-/* Client tracker (Reports): the filters card, then the sheet's table in the approved Tasks table look (the table rules are the block further down). */
+/*
+ * Client tracker (Reports). The page frame, summary cards, panels, toolbar, filter row, status tabs and the by-client table are report-mgmt-tabs.css (.rm-*)
+ * plus the .cm-* rules below; the placement sheet keeps its own table block further down (the approved Tasks table look, .ct-*).
+ */
 .ct { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; max-width: 100%; }
 .ct > * { min-width: 0; }
-.ct-controls { padding: 20px; display: grid; gap: 16px; }
-.ct-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 12px; align-items: end; }
-.ct-grid > label { display: grid; gap: 4px; font-size: 12.5px; font-weight: 600; line-height: 16px; color: var(--text-muted); min-width: 0; }
-.ct-grid > label.ct-check { display: flex; align-items: center; gap: 8px; min-height: 40px; font-weight: 500; color: var(--text-main); white-space: nowrap; }
+.ct-sheet .rm-filters { border-bottom: 0; }
+.ct-check { display: flex; align-items: center; gap: 8px; min-height: 36px; color: var(--text-main); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .ct-check input { width: 16px; height: 16px; }
-.ct-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
-.ct-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-left: auto; }
-.ct-actions .ui-button { height: 36px; }
-.ct-note { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
-.ct-note.is-done { color: var(--success-ink); }
-.ct-alert { margin: 0; }
-.ct-loading { margin: 0; font-size: 12.5px; color: var(--text-muted); }
+.ct-alert { margin: 12px 16px; }
+.ct-loading { margin: 0; padding: 20px 16px; color: var(--text-muted); font-size: 13px; }
 .ct-table.is-stale { opacity: 0.6; }
 .ct-table { container: ct / inline-size; }
 .ct-scroll { position: relative; min-width: 0; max-width: 100%; }
-.ct-table footer { padding: 12px 4px 0; color: var(--text-muted); font-size: 12.5px; }
-@media (max-width: 900px) { .ct-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 700px) {
-  .ct-controls { padding: 16px; }
-  .ct-grid { grid-template-columns: minmax(0, 1fr); }
-  .ct-controls :is(.ui-input:not(textarea), .custom-select-trigger) { min-height: 44px; }
-  .ct-actions { width: 100%; justify-content: flex-start; }
-}
-:root:root .rv-card.ct-table { border-color: transparent; background: transparent; }
+.ct-sheet .ct-scroll { border: 0; border-radius: 0; }
+.ct-sheet .ct-table .ct-scroll { border: 0; }
+@media (max-width: 700px) { .ct-filters .ui-input:not(textarea), .ct-filters .custom-select-trigger { min-height: 44px; } }
 
 /*
  * The sheet itself: the approved Tasks table look, EXACTLY (tokens in theme.css). From 960px of card width it is a table: auto layout at 100% of
@@ -74,4 +64,63 @@
   :root:root:root .ct-table .ct-scroll tbody td[data-label='Name']::before { display: none; }
   :root:root:root .ct-table .ct-scroll tbody td[data-label='Remarks'] { grid-column: 1 / -1; }
   .ct-cell { display: block; overflow-wrap: break-word; }
+}
+
+/*
+ * The by-client view (features/reports/client-by-client.tsx): the report-management table with a name that opens to the client's orders.
+ * Names left, every figure centred under its heading, bright inside borders; the detail row spans the table; below 900px a row is a labelled card.
+ */
+.cm-tools { margin-left: auto; }
+:root:root:root .cm-table { table-layout: fixed; }
+:root:root:root .cm-table tbody tr > * { height: 56px; }
+:root:root:root .cm-table tbody tr.is-stalled > th:first-child { box-shadow: inset 3px 0 0 var(--warning-ink); }
+.cm-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 4px 6px 4px 0; border: 0; border-radius: 6px; background: none; color: var(--text-main); font: inherit; text-align: left; cursor: pointer; }
+.cm-toggle > svg { flex: none; color: var(--text-muted); }
+.cm-toggle:hover .rm-who, .cm-toggle:hover > svg { color: var(--primary); }
+.cm-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.cm-name { display: block; min-width: 0; }
+.cm-name .rm-who { display: block; font-weight: 700; overflow-wrap: break-word; }
+.cm-two { display: inline-grid; justify-items: center; gap: 1px; }
+.cm-two > strong { font-size: 13.5px; font-weight: 700; }
+.cm-two > small { color: var(--text-muted); font-size: 11.5px; line-height: 1.25; }
+.cm-two.is-warn > strong { color: var(--warning-ink); }
+.cm-two.is-warn > small { color: var(--warning-ink); }
+:root:root:root .cm-table td > strong { font-size: 14px; font-weight: 700; }
+.cm-rate { display: grid; justify-items: center; gap: 5px; width: 100%; }
+.cm-rate > strong { font-size: 13.5px; font-weight: 700; }
+.cm-meter { display: block; width: 100%; max-width: 96px; height: 5px; overflow: hidden; border-radius: 999px; background: var(--tint-3, color-mix(in srgb, var(--primary) 14%, var(--bg-card))); }
+.cm-meter > i { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
+
+/* the opened client: its orders, and under each order the candidates by stage */
+:root:root:root .cm-table tbody tr.cm-detail > td { height: auto; padding: 0; border-right: 0; background: var(--tint-1); text-align: left; }
+.cm-orders { padding: 12px 16px 16px 40px; }
+:root:root:root .cm-orders-table { border: 1px solid var(--rt-line); border-radius: 8px; overflow: hidden; }
+:root:root:root .cm-orders-table thead th { height: 36px; font-size: 11px; }
+:root:root:root .cm-orders-table tbody tr > * { height: 40px; }
+:root:root:root .cm-orders-table tbody tr.cm-order-row > :is(th, td) { border-bottom: 0; background: var(--bg-card); }
+:root:root:root .cm-orders-table tbody tr.cm-stage-row > td { height: auto; padding: 4px 14px 10px; border-right: 0; border-bottom: 1px solid var(--rt-line); background: var(--bg-card); text-align: left; }
+:root:root:root .cm-orders-table tbody tr:last-child > td { border-bottom: 0; }
+.cm-stages { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 0; padding: 0; list-style: none; }
+.cm-stages > li { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; max-width: 100%; padding: 4px 10px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--tint-1); font-size: 12.5px; line-height: 1.4; }
+.cm-stages > li.is-travelled { border-color: var(--success-edge); background: var(--success-fill); color: var(--success-ink); }
+.cm-stages > li > b { font-weight: 700; }
+.cm-stage-count { color: var(--text-muted); font-weight: 700; }
+.cm-stages > li.is-travelled .cm-stage-count { color: inherit; }
+.cm-stage-names { color: var(--text-main); overflow-wrap: break-word; }
+.cm-stages > li.is-travelled .cm-stage-names { color: inherit; }
+.cm-nobody { color: var(--text-muted); font-size: 12.5px; }
+
+@media (max-width: 899px) {
+  :root:root:root .cm-table.is-cards tbody tr.cm-detail { padding: 0; border-bottom: 1px solid var(--rt-line); background: var(--tint-1); }
+  :root:root:root .cm-table.is-cards tbody tr.cm-detail > td { display: block; padding: 0; border: 0; }
+  :root:root:root .cm-table.is-cards tbody tr.cm-detail > td::before { content: none; }
+  .cm-orders { padding: 10px 12px 14px; overflow-x: auto; }
+  :root:root:root .cm-orders-table { min-width: 640px; }
+  :root:root:root .cm-table.is-cards tbody tr.cm-detail .cm-orders-table, :root:root:root .cm-table.is-cards tbody tr.cm-detail .cm-orders-table :is(tbody, thead, tfoot) { display: revert; width: auto; }
+  :root:root:root .cm-table.is-cards tbody tr.cm-detail .cm-orders-table tr { display: table-row; width: auto; padding: 0; }
+  :root:root:root .cm-table.is-cards tbody tr.cm-detail .cm-orders-table :is(th, td) { display: table-cell; width: auto; padding: 6px 8px; }
+  :root:root:root .cm-table.is-cards tbody tr.cm-detail .cm-orders-table colgroup { display: table-column-group; }
+  :root:root:root .cm-table.is-cards tbody tr.cm-detail .cm-orders-table thead { display: table-header-group; }
+  :root:root:root .cm-table.is-cards tbody tr.cm-detail .cm-orders-table td::before { content: none; }
+  .cm-tools { margin-left: 0; width: 100%; }
 }

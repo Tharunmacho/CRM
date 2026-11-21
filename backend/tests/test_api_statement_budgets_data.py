@@ -225,6 +225,8 @@ def cases(ids):
         ("travelled export csv", "GET", "/api/travelled/export?format=csv", {}, 3),
         ("client tracker", "GET", "/api/reports/client-tracker", {}, 6),
         ("client tracker xlsx", "GET", "/api/reports/client-tracker?format=xlsx&country=UAE", {}, 6),
+        ("client tracker by client", "GET", "/api/reports/client-tracker/clients", {}, 6),
+        ("client tracker by client xlsx", "GET", "/api/reports/client-tracker/clients?format=xlsx&status=active", {}, 6),
         ("files list (candidate)", "GET", f"/api/files?entity_type=candidate&entity_id={ids.candidate}", {}, 4),
         ("files download", "GET", "/api/files/resume1", {}, 3),
         ("document-bundle sources", "GET", f"/api/document-bundles/candidates/{ids.uuid_candidate}/sources", {}, 4),

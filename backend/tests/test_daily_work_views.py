@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import event, text
 
 from test_daily_work import (  # noqa: F401  (desk is a fixture)
-    TUESDAY, advance, as_user, desk, ids, listing, mapped_candidates, owned_candidates, set_application, to_stage,
+    TUESDAY, advance, as_user, desk, ids, listing, mapped_candidates, owned_candidates, record_stage, set_application, to_stage,
 )
 from test_database_naming import schema_database  # noqa: F401  (fixture used by desk)
 
@@ -86,6 +86,30 @@ def test_travelled_view_lists_deployed_placements(desk):
     # The Travelled screen reads the same deployed placements.
     desk.actor.id = "asha"
     assert view(desk, "admin", "travelled")["viewCounts"]["travelled"] == 1
+
+
+def test_every_row_carries_the_date_of_travel_read_from_the_air_ticket_stage(desk):
+    apps, _other = ended_desk(desk)
+    record_stage(desk, apps["c2"], 13, attempt=1, data={"travelDate": "2001-01-01"})
+    record_stage(desk, apps["c2"], 13, attempt=2, data={"travelDate": "2026-07-09"}, at=TUESDAY + timedelta(hours=1))   # the latest attempt counts
+    travelled = view(desk, "asha", "travelled")["items"]
+    assert [(item["candidateId"], item["travelDate"]) for item in travelled] == [("c2", "2026-07-09")]
+    everything = {item["candidateId"]: item["travelDate"] for item in view(desk, "asha", "all")["items"]}
+    assert everything == {"c4": None, "c3": None, "c1": None, "c0": None, "c2": "2026-07-09"}       # nobody else has travelled: no date, never a missing key
+    # a ticket stage that was reopened (the candidate has not flown), or a date that is no calendar day, shows nothing
+    record_stage(desk, apps["c2"], 13, attempt=3, data={"travelDate": "2026-07-10"}, reopened="Ticket changed", at=TUESDAY + timedelta(hours=2))
+    assert view(desk, "asha", "travelled")["items"][0]["travelDate"] is None
+    record_stage(desk, apps["c0"], 13, data={"travelDate": "2026-02-31"})
+    assert {item["candidateId"]: item["travelDate"] for item in view(desk, "asha", "all")["items"]}["c0"] is None
+
+
+def test_the_export_has_a_DOT_column_after_DOC(desk):
+    apps, _other = ended_desk(desk)
+    record_stage(desk, apps["c2"], 13, data={"travelDate": "2026-07-09"})
+    as_user(desk, "asha")
+    texts = sheet_texts(desk.client.get("/api/daily-work/export?view=travelled").content)
+    assert texts.index("DOC") + 1 == texts.index("DOT")
+    assert "09-Jul-2026" in texts
 
 
 def test_all_view_is_today_plus_the_three_each_candidate_once(desk):

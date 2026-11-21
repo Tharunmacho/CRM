@@ -1,0 +1,89 @@
+/*
+ * Reports page, management reading (Task report, Lead sheet report; the shell is shared by every tab).
+ * The look is the Job requirements page's: the summary cards of SummaryCards, a bordered toolbar with a segmented control and labelled filters, tables with the
+ * primary-blue header band, centred figures, names left, the brighter --rt-line between rows and columns, zebra stripes (report-tables.css, .dwm-table).
+ * Everything uses the theme tokens, so the dark theme follows. Specificity: the older report sheets style these elements on their own, so the rules
+ * that must win use html:root.
+ */
+
+.rp-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* ---------------------------------------------------------------- the toolbar row */
+.rp-toolbar { min-width: 0; margin: 0 0 16px; border: var(--table-frame-width, 1px) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); background: var(--bg-card); overflow: hidden; }
+.rp-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; padding: 12px 16px; }
+.rp-toolbar-main, .rp-toolbar-end { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; min-width: 0; }
+.rp-toolbar-end { justify-content: flex-end; margin-left: auto; }
+.rp-seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--tint-1); }
+.rp-seg button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: background-color .12s, color .12s; }
+.rp-seg button:hover:not(.is-on) { color: var(--text-main); }
+.rp-seg button.is-on { background: var(--bg-card); color: var(--primary); box-shadow: 0 0 0 1px var(--border-control); }
+.rp-seg button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.rp-dates { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; }
+.rp-filter { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.rp-filter > span { color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.rp-filter .ui-select, .rp-filter select { min-width: 190px; }
+.rp-link { padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: 13px; font-weight: 600; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--primary) 40%, transparent); text-underline-offset: 3px; cursor: pointer; }
+.rp-link:hover { text-decoration-color: currentColor; }
+
+/* ---------------------------------------------------------------- the summary cards */
+.rp-cards { margin-bottom: 16px; }
+html:root .rp-cards .workspace-summary { grid-template-columns: repeat(var(--summary-columns, 5), minmax(0, 1fr)); gap: 14px; margin-bottom: 0; }
+html:root .rp-cards .summary-card-top { gap: 10px; }
+html:root .rp-cards .summary-card-top > span:first-child { font-size: 13.5px; }
+html:root .rp-cards .summary-value { font-size: 30px; }
+@media (min-width: 1100px) {
+  html:root .rp-cards .workspace-summary { grid-template-columns: repeat(var(--summary-columns, 4), minmax(0, 280px)); }
+}
+@media (max-width: 1099px) {
+  html:root .rp-cards .workspace-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html:root .rp-cards .workspace-summary > .summary-card { grid-column: auto; }
+}
+@media (max-width: 479px) { html:root .rp-cards .workspace-summary { grid-template-columns: minmax(0, 1fr); } }
+
+.rp-note { display: flex; flex-direction: column; gap: 3px; }
+.rp-note-text { display: block; overflow-wrap: break-word; }
+.rp-trend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; color: var(--text-muted); font-size: 12.5px; font-weight: 600; line-height: 1.35; }
+.rp-trend b { font-weight: 700; }
+.rp-trend > span:not(.rp-sr) { color: var(--text-muted); font-weight: 500; }
+.rp-trend.is-good, .rp-trend.is-good b { color: var(--success-ink); }
+.rp-trend.is-bad, .rp-trend.is-bad b { color: var(--error-ink); }
+
+/* ---------------------------------------------------------------- panels */
+.dwr .rp-panel { margin-bottom: 16px; }
+.dwr .rp-panel > .dw-panel-head { align-items: center; }
+.rp-empty { margin: 0; padding: 4px 20px 22px; }
+
+/* ---------------------------------------------------------------- figures and names inside the tables */
+html:root:root:root .dwr .dwm-table td.is-num > :is(.dwr-link, .dwr-plain).is-stuck { color: var(--error-ink); font-weight: 700; }
+html:root:root:root .dwr .dwm-table td.is-num > .dwr-link.is-stuck { text-decoration-color: color-mix(in srgb, var(--error-ink) 45%, transparent); }
+html:root:root:root .dwr .dwm-table td.is-num > .dwr-link.is-stuck:hover { text-decoration-color: currentColor; }
+html:root:root:root .dwr .dwm-table thead th.is-stuck { background: color-mix(in srgb, var(--error-ink) 38%, var(--primary)); }
+html:root:root:root .dwr .dwm-table.is-matrix tbody td.is-num:last-child, html:root:root:root .dwr .dwm-table.is-matrix tfoot td.is-num:last-child { background-image: linear-gradient(color-mix(in srgb, var(--error-ink) 5%, transparent), color-mix(in srgb, var(--error-ink) 5%, transparent)); }
+html:root:root:root .dwr .dwm-table .rp-conv { font-weight: 700; }
+html:root:root:root .dwr .dwm-table .rp-name-link { display: block; color: var(--primary); font-size: 13px; font-weight: 600; line-height: 1.35; overflow-wrap: break-word; text-decoration: none; }
+html:root:root:root .dwr .dwm-table .rp-name-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+html:root:root:root .dwr .dwm-table .rp-sub { display: block; margin-top: 1px; color: var(--text-muted); font-size: 11.5px; font-weight: 500; }
+html:root:root:root .dwr .dwm-table .rp-wrap { display: block; overflow-wrap: break-word; font-size: 12.5px; font-weight: 500; line-height: 1.3; }
+html:root:root:root .dwr .dwm-table .rp-muted { color: var(--text-muted); font-weight: 500; }
+html:root:root:root .dwr .dwm-table .rp-before { color: var(--text-muted); font-weight: 500; }
+html:root:root:root .dwr .dwm-table .rp-days { display: inline-block; color: var(--text-main); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+html:root:root:root .dwr .dwm-table .rp-days b { font-size: 14px; font-weight: 700; }
+html:root:root:root .dwr .dwm-table .rp-days.is-late { color: var(--warning-ink); }
+html:root:root:root .dwr .dwm-table .rp-days.is-long { color: var(--error-ink); }
+html:root:root:root .dwr .dwm-table .dwb-meter.is-lost i { background: var(--warning-ink); }
+html:root:root:root .dwr .dwm-table.is-list td.is-num .dwr-pct { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+html:root:root:root .dwr .dwm-table.is-list td.is-num .dwr-pct .dwb-meter { flex: 0 1 56px; min-width: 24px; margin: 0; }
+html:root:root:root .dwr .dwm-table.is-list td.is-num .dwr-pct b { min-width: 34px; font-size: 13px; }
+html:root:root:root .dwr .dwm-table.is-stages td.is-num .dwr-pct { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+html:root:root:root .dwr .dwm-table.is-stages td.is-num .dwr-pct .dwb-meter { flex: 0 1 52px; min-width: 20px; margin: 0; }
+html:root:root:root .dwr .dwm-table.is-stages td.is-num .dwr-pct b { min-width: 32px; font-size: 13px; }
+
+@media print {
+  .rp-toolbar-row { display: none; }
+  .rp-toolbar { border: 0; }
+}
+
+/* the matrix headings: a number or symbol over one short word, the word never cut */
+html:root:root:root .dwr .dwm-table .dwm-h-no { text-transform: none; }
+html:root:root:root .dwr .dwm-table.is-matrix:not(.dwl-table) thead th.is-num { padding-inline: 1px; }
+html:root:root:root .dwr .dwm-table.is-matrix:not(.dwl-table) .dwm-h-name { font-size: 9.5px; letter-spacing: -.01em; }

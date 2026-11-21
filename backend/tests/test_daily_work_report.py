@@ -686,6 +686,16 @@ def test_statement_budgets_with_the_real_sign_in_check(env):
         _, export = counted("get", "/export", "budget-admin", params={"from": "2026-11-05", "to": "2026-11-05"})
         assert export <= 10, seen
         deps._AUTH_CACHE.clear()
+        _, export_task = counted("get", "/export/task", "budget-admin", params={"from": "2026-11-02", "to": "2026-11-05"})
+        deps._AUTH_CACHE.clear()
+        _, export_lead = counted("get", "/export/lead", "budget-asha", params={"from": "2026-11-02", "to": "2026-11-05"})
+        assert max(export_task, export_lead) <= 10 and export_task == week, seen   # the management reading adds no statement: it rides the existing reads
+        deps._AUTH_CACHE.clear()
+        _, stuck_drill = counted("get", "/drilldown", "budget-admin", params={"metric": "stuck"})
+        deps._AUTH_CACHE.clear()
+        _, stale_drill = counted("get", "/drilldown", "budget-admin", params={"metric": "leadsStale"})
+        assert max(stuck_drill, stale_drill) <= 4, seen
+        deps._AUTH_CACHE.clear()
         _, tasks_drill = counted("get", "/drilldown", "budget-admin", params={"metric": "tasksOverdue", "from": "2026-11-05", "to": "2026-11-05"})
         deps._AUTH_CACHE.clear()
         _, stage_drill_now = counted("get", "/drilldown", "budget-admin", params={"metric": "stage:3"})
@@ -1199,3 +1209,183 @@ def test_drilldown_of_the_lead_sheet_cards_matches_total_leads_and_never_contact
     assert [(p["total"], len(p["rows"])) for p in pages] == [(11, 5), (11, 5), (11, 1), (11, 0)]
     blob = json.dumps(drill(metric="leadsTotal"))
     assert "+9180000000" not in blob and not [p for p in PHONES if p in blob]
+
+
+# ------------------------------------------------------------------ the management reading (Task report, Lead sheet report)
+
+def test_task_insight_stuck_longest_waiting_and_the_stuck_drilldown(env):
+    """A placement is stuck when its current stage has waited more than 7 days (since its latest completed, never reopened stage record). The
+    dataset's only one: c18 (ravi), at stage 3 since 20 Oct 10:00, 16 days at 14:00 on 5 Nov. The Administrator account is no row."""
+    body = report(env, **{"from": "2026-11-05", "to": "2026-11-05"})
+    insight = body["taskInsight"]
+    assert insight["stuckDays"] == 7
+    waiting = insight["waiting"]
+    assert waiting["total"] == 16 and waiting["stuck"] == 1
+    by_stage = {x["no"]: x for x in waiting["byStage"]}
+    assert [x["no"] for x in waiting["byStage"]] == list(range(1, 14))
+    assert {no: x["count"] for no, x in by_stage.items() if x["count"]} == {2: 4, 3: 6, 4: 1, 5: 2, 6: 2, 12: 1}
+    assert by_stage[3]["stuck"] == 1 and sum(x["stuck"] for x in by_stage.values()) == 1
+    assert by_stage[1] == {"no": 1, "label": "Prescreening", "count": 0, "stuck": 0, "avgDays": None}
+    assert 2 < by_stage[3]["avgDays"] < 4   # (16.2 days + five candidates waiting hours) / 6
+    assert waiting["busiest"]["no"] == 3 and waiting["busiest"]["count"] == 6
+    assert insight["stuckPerStaff"]["ravi"] == 1 and sum(insight["stuckPerStaff"].values()) == 1
+    assert "admin" not in insight["stuckPerStaff"]
+    longest = insight["longest"]
+    assert len(longest) == 10 and [x["candidateId"] for x in longest[:4]] == ["c18", "c19", "c17", "c20"]
+    assert longest[0] | {"careId": None} == {"candidateId": "c18", "careId": None, "name": "Candidate c18", "staffId": "ravi", "staffName": "Ravi", "stage": 3,
+                          "stageLabel": "Interview scheduling", "since": "2026-10-20T04:30:00+00:00", "days": 16}
+    assert [x["days"] for x in longest] == sorted((x["days"] for x in longest), reverse=True)
+    # the same figures for one recruiter only
+    ravi = report(env, staff="ravi", **{"from": "2026-11-05", "to": "2026-11-05"})["taskInsight"]
+    assert ravi["waiting"]["stuck"] == 1 and {x["staffId"] for x in ravi["longest"]} == {"ravi"}
+    asha = report(env, staff="asha", **{"from": "2026-11-05", "to": "2026-11-05"})["taskInsight"]
+    assert asha["waiting"]["stuck"] == 0 and {x["staffId"] for x in asha["longest"]} == {"asha"}
+    # a recruiter sees only their own
+    own = report(env, "ravi", **{"from": "2026-11-05", "to": "2026-11-05"})["taskInsight"]
+    assert own["waiting"]["stuck"] == 1 and set(own["stuckPerStaff"]) == {"ravi"}
+
+    page = get(env, "admin", "/drilldown", metric="stuck", **{"from": "2026-11-05", "to": "2026-11-05"}).json()
+    assert page["label"] == "Stuck: waiting more than 7 days" and page["total"] == 1
+    assert page["rows"][0]["name"] == "Candidate c18" and page["rows"][0]["staffName"] == "Ravi"
+    assert page["rows"][0]["detail"] == "Waiting 16 days at stage 3: Interview scheduling"
+    assert get(env, "admin", "/drilldown", metric="stuck:3").json()["total"] == 1
+    assert get(env, "admin", "/drilldown", metric="stuck:2").json()["total"] == 0
+    assert get(env, "admin", "/drilldown", metric="stuck", staff="asha").json()["total"] == 0
+    assert get(env, "ravi", "/drilldown", metric="stuck").json()["total"] == 1
+    get(env, "ravi", "/drilldown", expect=403, metric="stuck", staff="asha")
+
+
+def test_task_insight_completed_and_lost_against_the_previous_period_with_the_reasons(env):
+    env.clock["now"] = ist(date(2026, 11, 6), 10)   # Friday: Thursday is a finished day, compared with the whole of Wednesday
+    try:
+        insight = report(env, **{"from": "2026-11-05", "to": "2026-11-05"})["taskInsight"]
+        assert insight["completed"] == {"value": 20, "previous": 3}   # Wednesday: c15, c1, c8 (the reopened c13 record is nothing)
+        assert insight["stopped"] == {"value": 8, "previous": 0}
+        reasons = {x["label"]: x for x in insight["exitReasons"]}
+        assert set(reasons) == {"Failed prescreening", "Not forwarded to the client", "Offer declined", "Offer letter not received", "Rejected at interview",
+                                "Visa rejected", "Not travelling", "Interview not possible"}
+        assert all(x["count"] == 1 and x["previous"] == 0 for x in reasons.values()) and insight["exitOther"] == 0
+        wed = report(env, **{"from": "2026-11-04", "to": "2026-11-04"})["taskInsight"]
+        assert wed["completed"] == {"value": 3, "previous": 0} and wed["stopped"] == {"value": 0, "previous": 0} and wed["exitReasons"] == []
+        total = report(env, period="all")["taskInsight"]   # Total: nothing to compare with
+        assert total["completed"]["previous"] is None and total["stopped"]["previous"] is None
+        assert all(x["previous"] is None for x in total["exitReasons"])
+        # the existing per-stage flow still adds up to the same records
+        flow = report(env, **{"from": "2026-11-05", "to": "2026-11-05"})
+        assert sum(x["completed"] for x in flow["stageFlow"]) == 20 and sum(x["stopped"] for x in flow["stageFlow"]) == 8
+    finally:
+        env.clock["now"] = NOW
+
+
+def test_exit_reason_labels_come_from_the_stage_exits_and_the_export_cell_is_escaped():
+    assert service.exit_label(4, "Rejected") == "Rejected at interview" and service.exit_label(5, "Declined") == "Offer declined"
+    assert service.exit_label(2, "Rejected") == "Rejected" and service.exit_label(8, "Unfit") == "Medically unfit"
+    assert service.exit_label(7, "Something new") == "Something new"
+    assert service._cell("=SUM(A1)") == "'=SUM(A1)" and service._cell("+1") == "'+1" and service._cell("Asha") == "Asha" and service._cell(3) == 3
+
+
+def test_lead_insight_aging_leads_follow_up_and_the_previous_answers(env):
+    old = datetime(2026, 11, 1, 9, 0, tzinfo=IST)
+    extra = [("LX1", "asha", "new", old, 0), ("LX2", "ravi", "new", ist(WED, 12), 0), ("LX3", None, "new", ist(date(2026, 10, 25), 9), 0),
+             ("LX4", "admin", "new", ist(date(2026, 10, 20), 9), 0), ("LX5", "ravi", "new", ist(date(2026, 10, 20), 9), 1)]
+    with env.world.sessions() as db:
+        for key, owner, status, at, calls in extra:
+            db.add(Lead(id=key, name=f"Lead {key}", phone=f"+9181000000{key[2:]}", owner_id=owner, status=status, assigned_at=at if owner else None,
+                        created_time=at, created_at=at, call_count=calls, position_applied="Chef"))
+        db.flush()
+        db.add(LeadActivity(lead_id="L7", user_id="ravi", kind="call", summary="call", meta={"outcome": "interested"}, created_at=ist(WED, 10)))
+        db.add(LeadActivity(lead_id="L6", user_id="asha", kind="call", summary="call", meta={"outcome": "not_interested"}, created_at=ist(WED, 11)))
+        db.commit()
+    env.clock["now"] = ist(date(2026, 11, 6), 10)
+    try:
+        body = report(env, **{"from": "2026-11-05", "to": "2026-11-05"})
+        insight = body["leadInsight"]
+        assert insight["staleDays"] == 3
+        # never contacted (status new, no call) and waiting more than 3 days: LX1 (asha) and LX3 (nobody's); the leads handed out on 5 Nov are too recent,
+        # the Administrator's LX4 is no row, LX5 has a call, and LX2 is only 2 days old at that moment
+        assert insight["stale"]["total"] == 2 and insight["stale"]["unassigned"] == 1
+        assert insight["stale"]["perStaff"]["asha"] == 1 and insight["stale"]["perStaff"]["ravi"] == 0 and "admin" not in insight["stale"]["perStaff"]
+        assert [(x["leadId"], x["staffName"], x["days"]) for x in insight["aging"]] == [("LX3", "Unassigned", 12), ("LX1", "Asha", 5)]
+        assert insight["aging"][0]["since"] == "2026-10-25" and insight["aging"][0]["staffId"] is None
+        assert insight["previous"] == {"interested": 1, "notInterested": 1}   # Wednesday's last answers: L7 interested (ravi), L6 not interested (asha)
+        assert person(body, "ravi")["leads"]["interested"] == 1   # Thursday: the last answer on L8 (L7 ended on no answer)
+        assert report(env, period="all")["leadInsight"]["previous"] is None
+        one = report(env, staff="asha", **{"from": "2026-11-05", "to": "2026-11-05"})["leadInsight"]
+        assert one["stale"]["total"] == 1 and one["stale"]["unassigned"] == 0 and [x["leadId"] for x in one["aging"]] == ["LX1"]
+        assert report(env, "asha", **{"from": "2026-11-05", "to": "2026-11-05"})["leadInsight"]["stale"]["total"] == 1
+        # the lists behind the cards
+        stale = get(env, "admin", "/drilldown", metric="leadsStale", page_size=100, **{"from": "2026-11-05", "to": "2026-11-05"}).json()
+        assert stale["total"] == 2 and {r["leadId"] for r in stale["rows"]} == {"LX1", "LX3"}
+        assert get(env, "admin", "/drilldown", metric="leadsStale", staff="asha").json()["total"] == 1
+        follow = get(env, "admin", "/drilldown", metric="leadsFollowUp").json()
+        assert follow["total"] == 2 and {r["leadId"] for r in follow["rows"]} == {"L6", "L9"}   # L6 was due 6 Nov 10:00, L9 on Wednesday
+        assert body["leadFeedback"]["callbacksDue"] == follow["total"] == 2   # the card and its list agree
+    finally:
+        env.clock["now"] = NOW
+        with env.world.sessions() as db:
+            db.execute(text("DELETE FROM crm_lead_activities WHERE lead_id IN ('LX1','LX2','LX3','LX4','LX5') OR (lead_id IN ('L7','L6') AND created_at = ANY(:t))"),
+                       {"t": [ist(WED, 10), ist(WED, 11)]})
+            db.execute(text("DELETE FROM crm_leads WHERE id IN ('LX1','LX2','LX3','LX4','LX5')"))
+            db.commit()
+
+
+def lead_sheets_of(payload):
+    """The lead_xlsx writer (the Travelled export's): numbers carry no type attribute, text is an inline string."""
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    with ZipFile(BytesIO(payload)) as archive:
+        names = [s.get("name") for s in ET.fromstring(archive.read("xl/workbook.xml")).iter(ns + "sheet")]
+        out = {}
+        for number, name in enumerate(names, 1):
+            rows = []
+            for row in ET.fromstring(archive.read(f"xl/worksheets/sheet{number}.xml")).iter(ns + "row"):
+                cells = []
+                for c in row.findall(ns + "c"):
+                    if c.get("t") == "inlineStr":
+                        cells.append("".join(t.text or "" for t in c.iter(ns + "t")))
+                    elif c.find(ns + "v") is not None:
+                        value = float(c.find(ns + "v").text)
+                        cells.append(int(value) if value.is_integer() else value)
+                    else:
+                        cells.append("")
+                rows.append(cells)
+            out[name] = rows
+    return out, b""
+
+
+def test_the_task_and_lead_exports_are_the_tabs_as_shown_and_cannot_run_a_formula(env):
+    task = get(env, "admin", "/export/task", **{"from": "2026-11-02", "to": "2026-11-05"})
+    assert task.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    assert 'filename="task-report_2026-11-02_2026-11-05.xlsx"' in task.headers["content-disposition"] and task.headers["cache-control"] == "private, no-store"
+    sheets, raw = lead_sheets_of(task.content)
+    assert list(sheets) == ["Task report", "Stage by stage", "Where candidates are lost", "Longest waiting", "Summary"]
+    matrix = sheets["Task report"]
+    assert matrix[0][0] == "Recruiter" and matrix[0][-1] == "Stuck (> 7 days)" and matrix[0][1] == "No job" and matrix[0][2] == "1. Prescreening"
+    names = [row[0] for row in matrix[1:]]
+    assert "Admin" not in names and names[-1] == "Total" and names[:-1] == sorted(names[:-1], key=str.casefold)
+    total = matrix[-1]
+    assert total[-1] == 1 and total[-2] == sum(row[-2] for row in matrix[1:-1])
+    assert sheets["Longest waiting"][1][0] == "Candidate c18" and sheets["Longest waiting"][1][2] == "Ravi" and sheets["Longest waiting"][1][4] == 16
+    assert [row[0] for row in sheets["Stage by stage"][1:3]] == ["1. Prescreening", "2. Forwarded to client"]
+
+    lead = get(env, "ravi", "/export/lead", **{"from": "2026-11-05", "to": "2026-11-05"})
+    sheets, _ = lead_sheets_of(lead.content)
+    assert list(sheets) == ["Leads by status", "Aging leads", "Summary"]
+    assert [row[0] for row in sheets["Leads by status"][1:]] == ["Ravi", "Total"]   # a recruiter: their own row only, no Unassigned
+    head = sheets["Leads by status"][0]
+    assert head[:2] == ["Recruiter", "Assigned"] and head[-3:-1] == ["Interested", "Conversion to interested (%)"]
+    admin_lead = lead_sheets_of(get(env, "admin", "/export/lead", **{"from": "2026-11-05", "to": "2026-11-05"}).content)[0]["Leads by status"]
+    assert [row[0] for row in admin_lead[1:]][-2:] == ["Unassigned", "Total"] and "Admin" not in [row[0] for row in admin_lead]
+    get(env, "ravi", "/export/task", expect=403, staff="asha")
+    get(env, "admin", "/export/other", expect=422)
+
+    # a name that would run as a formula in a spreadsheet is written as text
+    with env.world.sessions() as db:
+        db.execute(text("UPDATE crm_candidates SET name = '=HYPERLINK(1)' WHERE id = 'c18'"))
+        db.commit()
+    try:
+        longest = lead_sheets_of(get(env, "admin", "/export/task").content)[0]["Longest waiting"]
+        assert longest[1][0] == "'=HYPERLINK(1)"
+    finally:
+        with env.world.sessions() as db:
+            db.execute(text("UPDATE crm_candidates SET name = 'Candidate c18' WHERE id = 'c18'"))
+            db.commit()

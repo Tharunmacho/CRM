@@ -72,8 +72,8 @@ test('touch screens: one rule makes buttons, selects, inputs and chips 44 px on 
 })
 
 test('the Client tracker table: sticky 44 px header, 56 px centred rows, right-aligned tabular numbers, ellipsis cells with the full text in the title', async () => {
-  const view = await src('features/reports/client-tracker.tsx')
+  const view = await src('features/reports/client-placement-sheet.tsx')
   assert.match(view, /<span className="ct-cell" title=\{cellText\(row, column\.key\) \|\| undefined\}>/)
   assert.match(view, /<colgroup>/)
-  assert.match(view, /<div className="ct-bar">/)
+  assert.match(view, /className="rm-filters ct-filters"/)
 })

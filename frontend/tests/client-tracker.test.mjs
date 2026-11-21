@@ -65,7 +65,7 @@ test('the file name carries the day, and the summary counts in progress and trav
 test('the Reports screen has a Client tracker entry with an Export Excel button and the client, country and referral filters', async () => {
   const screen = await readFile(new URL('../src/screens/reports/reports.tsx', import.meta.url), 'utf8')
   assert.match(screen, /ClientTrackerReport/)
-  const view = await readFile(new URL('../src/features/reports/client-tracker.tsx', import.meta.url), 'utf8')
+  const view = await readFile(new URL('../src/features/reports/client-placement-sheet.tsx', import.meta.url), 'utf8')
   assert.match(view, /Export Excel/)
   for (const label of ['"Client"', '"Country"', '"Referral agency"']) assert.ok(view.includes(`aria-label=${label}`), label)
   const api = await readFile(new URL('../src/features/reports/client-tracker-api.ts', import.meta.url), 'utf8')
@@ -84,6 +84,6 @@ test('the sheet is the Tasks look: names wrap at spaces, only Remarks stops at t
   assert.match(css, /tbody td \{[^}]*height: 56px;[^}]*padding: 8px;[^}]*vertical-align: middle;/)
   assert.match(css, /overflow: auto; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--table-frame-radius, 6px\)/)
   assert.ok(!/min-width: 1060px/.test(css))
-  const view = await readFile(new URL('../src/features/reports/client-tracker.tsx', import.meta.url), 'utf8')
+  const view = await readFile(new URL('../src/features/reports/client-placement-sheet.tsx', import.meta.url), 'utf8')
   assert.match(view, /next\.delete\('stage'\)/)   // Reset / another stage must not leave a stale ?stage= in the address
 })

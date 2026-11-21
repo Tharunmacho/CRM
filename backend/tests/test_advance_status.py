@@ -167,13 +167,13 @@ def test_payment_fields_keep_the_old_keys_and_add_the_new_ones():
     ])
     one = payment_fields(SimpleNamespace(id="a1", current_stage=6), facts)
     assert one == {"advanceAmount": 10000.0, "advanceCurrency": "INR", "googleReview": None,
-                   "advanceStatus": "collected", "advanceExpected": None, "serviceChargeTotal": 50000.0}
+                   "advanceStatus": "collected", "advanceExpected": None, "serviceChargeTotal": 50000.0, "travelDate": None}
     two = payment_fields(SimpleNamespace(id="a2", current_stage=6), facts)
     assert two["advanceAmount"] is None and two["advanceStatus"] == "pending" and two["advanceExpected"] == 10000.0
     assert two["advanceCurrency"] == "AED"
     none = payment_fields(SimpleNamespace(id="zz", current_stage=3), facts)
     assert none == {"advanceAmount": None, "advanceCurrency": None, "googleReview": None,
-                    "advanceStatus": None, "advanceExpected": None, "serviceChargeTotal": None}
+                    "advanceStatus": None, "advanceExpected": None, "serviceChargeTotal": None, "travelDate": None}
 
 
 def test_the_sheet_cell_is_written_from_a_fact_entry():

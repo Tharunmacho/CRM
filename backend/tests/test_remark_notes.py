@@ -129,7 +129,7 @@ def test_a_deleted_note_leaves_the_row_the_count_the_export_and_follow_up(desk):
     assert row["remark"] is None and row["todayNotes"] == [] and row["notes"] == []
     with desk.sessions() as db:
         sheet = tasks_export.table(db, listing(desk, "asha")["items"], [], TODAY)
-    assert sheet[1][12] == "" and sheet[1][13] == ""        # Remark and Notes columns of the Excel
+    assert sheet[1][13] == "" and sheet[1][14] == ""        # Remark and Notes columns of the Excel
 
     # Follow-up (stage 3 placement): the last update falls back when the only note is deleted, the remark is gone.
     with desk.sessions() as db:
@@ -218,8 +218,8 @@ def test_clearing_empties_the_cell_and_the_excel_remark_but_keeps_every_note_in_
     assert [n["id"] for n in row["notes"]] == [typed]                         # a typed note is untouched by clearing the remark
     with desk.sessions() as db:
         sheet = tasks_export.table(db, listing(desk, "asha")["items"], [], TODAY)
-        assert sheet[1][12] == ""                                              # the Excel's Remark column is empty
-        assert "Typed in the NOTES column" in sheet[1][13]                     # ...and Notes still lists the note
+        assert sheet[1][13] == ""                                              # the Excel's Remark column is empty
+        assert "Typed in the NOTES column" in sheet[1][14]                     # ...and Notes still lists the note
         assert {r["id"] for r in desk_snapshot.read_snapshot(db, "asha")["remarks"]} == {older, newer, typed}   # the profile history is intact
         assert [r["remarks"] for r in client_tracker._read_rows(db, db.get(User, "manager"))] == [""]
     assert stored(desk, older).cleared_at is not None and stored(desk, older).deleted_at is None and stored(desk, typed).cleared_at is None

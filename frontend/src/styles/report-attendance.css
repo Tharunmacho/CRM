@@ -1,132 +1,84 @@
-/* Reports > Report > Attendance monitor (features/daily-report/report-attendance.tsx). Table geometry comes from report-tables.css; only the extras are here. */
-.dwa .dwa-tools { gap: 8px 16px; }
-.dwa .dwa-tools .dwr-textlink { display: inline-flex; align-items: center; gap: 4px; }
-.dwa-strip { padding: 0 0 4px; }
-.dwa-strip .dwb-stats { margin-bottom: 12px; }
-.dwa-strip .dwb-stat-text { text-align: center; }
-.dwa-strip .dwb-stat-figure { justify-content: center; }
-.dwa .dw-state { display: grid; justify-items: center; gap: 6px; text-align: center; }
+/*
+ * Reports > Attendance (features/daily-report/report-attendance-tab.tsx, attendance-grid.tsx, report-attendance.tsx). The page frame, cards,
+ * panels, filter row, pills and the base table are report-mgmt-tabs.css (.rm-*); only what is special to attendance is here (.am-*):
+ * the live dot, the sessions drop-down, the month grid and its marks, and the day-by-day drawer.
+ */
+.am-filterpanel { overflow: visible; }
+.am-filterpanel .rm-filters { border-bottom: 0; border-radius: var(--radius-xl, 10px); }
 
-.dwa-pill { display: inline-flex; align-items: center; justify-content: center; max-width: 100%; padding: 3px 10px; border: 1px solid transparent; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.35; text-align: center; }
-.dwa-pill.tone-green { background: var(--success-fill); border-color: var(--success-edge); color: var(--success-ink); }
-.dwa-pill.tone-amber { background: var(--warning-fill); border-color: var(--warning-edge); color: var(--warning-ink); }
-.dwa-pill.tone-red { background: var(--error-fill); border-color: var(--error-edge); color: var(--error-ink); }
-.dwa-pill.tone-blue { background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); border-color: color-mix(in srgb, var(--primary) 30%, var(--bg-card)); color: var(--primary); }
-.dwa-pill.tone-neutral { background: var(--tint-1, var(--bg-card)); border-color: var(--border-control); color: var(--text-muted); }
+/* the live board: a table that fills the panel; the numbers are centred under their headings, the recruiter is left */
+:root:root:root .am-board { table-layout: fixed; }
+.am-status { display: inline-grid; justify-items: center; gap: 3px; max-width: 100%; }
+.am-now { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; line-height: 1.2; color: var(--text-muted); }
+.am-now.is-live { color: var(--success-ink); font-weight: 600; }
+.am-now > i { width: 7px; height: 7px; border-radius: 50%; background: var(--success-ink); }
+.am-live { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--success-ink); }
+.am-live > i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--success-ink); animation: am-pulse 1.8s ease-in-out infinite; }
+@keyframes am-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success-ink) 45%, transparent); } 60% { box-shadow: 0 0 0 5px transparent; } }
+@media (prefers-reduced-motion: reduce) { .am-live > i { animation: none; } }
 
-.dwa-warn { color: var(--warning-ink); font-weight: 600; }
-.dwa-live { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--success-ink); }
-.dwa-live > i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--success-ink); animation: dwa-pulse 1.8s ease-in-out infinite; }
-@keyframes dwa-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success-ink) 45%, transparent); } 60% { box-shadow: 0 0 0 5px transparent; } }
-@media (prefers-reduced-motion: reduce) { .dwa-live > i { animation: none; } }
+.am-sessions { display: inline-block; text-align: center; }
+.am-sessions > summary { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; padding: 2px 8px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--primary); cursor: pointer; list-style: none; }
+.am-sessions > summary::-webkit-details-marker { display: none; }
+.am-sessions > summary::after { content: '\25BE'; font-size: 10px; }
+.am-sessions[open] > summary::after { content: '\25B4'; }
+.am-sessions > summary:hover { text-decoration: underline; text-underline-offset: 3px; }
+.am-sessions > ol { display: grid; gap: 4px; margin: 6px 0 2px; padding: 0; list-style: none; font-size: 12.5px; color: var(--text-main); text-align: center; }
+.am-sessions > ol > li { display: grid; gap: 1px; }
+.am-sessions > ol small { font-size: 11.5px; color: var(--text-muted); }
 
-.dwa-sessions { display: inline-block; text-align: center; }
-.dwa-sessions > summary { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; padding: 2px 8px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--primary); cursor: pointer; list-style: none; }
-.dwa-sessions > summary::-webkit-details-marker { display: none; }
-.dwa-sessions > summary::after { content: '\25BE'; font-size: 10px; }
-.dwa-sessions[open] > summary::after { content: '\25B4'; }
-.dwa-sessions > summary:hover { text-decoration: underline; text-underline-offset: 3px; }
-.dwa-sessions > ol { display: grid; gap: 4px; margin: 6px 0 2px; padding: 0; list-style: none; font-size: 12.5px; color: var(--text-main); }
-.dwa-sessions > ol > li { display: grid; gap: 1px; }
-.dwa-sessions > ol small { font-size: 11.5px; color: var(--text-muted); }
+/* the month grid: a name, one narrow column per day, then four total columns. At laptop widths it fits the panel; a narrower panel scrolls it sideways with the name column kept in view */
+:root:root:root .am-gridbox { overflow-x: auto; }
+:root:root:root .am-grid { min-width: 1000px; table-layout: fixed; }
+:root:root:root .am-grid .am-col-name { width: 156px; }
+:root:root:root .am-grid .am-col-day { width: auto; }
+:root:root:root .am-grid .am-col-total { width: 54px; }
+:root:root:root .am-grid :is(th, td) { padding-inline: 2px; }
+:root:root:root .am-grid thead th { height: 46px; padding: 3px 1px; letter-spacing: .02em; font-size: 11px; }
+:root:root:root .am-grid thead th.is-left { padding-left: 14px; letter-spacing: .04em; }
+:root:root:root .am-grid thead th.am-dayhead { display: table-cell; text-transform: none; }
+.am-dayhead > span { display: block; font-size: 12px; font-weight: 700; line-height: 1.15; }
+.am-dayhead > small { display: block; font-size: 9.5px; font-weight: 600; line-height: 1.2; opacity: .8; }
+:root:root:root .am-grid thead th.is-weekend { background: color-mix(in srgb, var(--on-primary) 10%, var(--primary)); }
+:root:root:root .am-grid :is(th.is-left, td:first-child) { position: sticky; left: 0; z-index: 1; }
+:root:root:root .am-grid tbody th.is-left, :root:root:root .am-grid tfoot th.is-left { z-index: 1; background: var(--bg-card); }
+:root:root:root .am-grid tbody tr.is-alt > th.is-left { background: var(--rt-stripe); }
+:root:root:root .am-grid tbody tr:hover > th.is-left { background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
+:root:root:root .am-grid thead th.is-left { z-index: 2; background: var(--primary); }
+:root:root:root .am-grid tfoot th.is-left { background: var(--tint-2); }
+:root:root:root .am-grid tbody tr > * { height: 42px; }
+:root:root:root .am-grid .rm-person { gap: 8px; }
+:root:root:root .am-grid .rm-person .record-avatar { width: 26px; height: 26px; font-size: 10px; }
+:root:root:root .am-grid .rm-who { font-size: 13px; }
+:root:root:root .am-grid .am-day { padding: 0; font-size: 11px; font-weight: 700; letter-spacing: 0; cursor: default; }
+:root:root:root .am-grid .am-day.m-P { color: var(--success-ink); background: var(--success-fill); }
+:root:root:root .am-grid .am-day.m-LT, :root:root:root .am-grid .am-day.m-M { color: var(--warning-ink); background: var(--warning-fill); }
+:root:root:root .am-grid .am-day.m-A { color: var(--error-ink); background: var(--error-fill); }
+:root:root:root .am-grid .am-day.m-L { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); }
+:root:root:root .am-grid .am-day.m-WO, :root:root:root .am-grid .am-day.m-H { color: var(--text-muted); background: var(--tint-2); font-weight: 600; }
+:root:root:root .am-grid .am-day.is-weekend:not([class*='m-']) { background: var(--tint-1); }
+:root:root:root .am-grid .am-day.is-future { background: var(--bg-card); }
+:root:root:root .am-grid tbody tr:hover > .am-day { filter: brightness(.97); }
+:root:root:root .am-grid .am-total { font-size: 13px; font-weight: 600; }
+:root:root:root .am-grid .am-total strong { font-weight: 700; }
+:root:root:root .am-grid tfoot .am-total { font-weight: 700; }
 
+/* the key under the grid */
 
-
-/* ---- Reports > Attendance tab (features/daily-report/report-attendance-tab.tsx) ---- */
-.dwa-tab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
-.dwa-tab > .dw-panel { margin: 0; }
-
-/* filter row */
-.dwa-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 20px; padding: 14px 20px; }
-.dwa-field { display: grid; gap: 4px; min-width: 0; }
-.dwa-field-label { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--text-muted); }
-.dwa-stepper { display: flex; align-items: center; gap: 6px; }
-.dwa-monthbox { height: 36px; width: 164px; padding: 0 10px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 14px; }
-.dwa-field-select { min-width: 220px; }
-.dwa-filter-end { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-.dwa-updated { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
-
-/* the month section */
-.dwa-month .dwa-count { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
-.dwa-note { margin: 0; padding: 12px 0 16px; font-size: 12.5px; color: var(--text-muted); }
-.dwa-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.dwa-who { display: grid; gap: 1px; min-width: 0; }
-.dwa-who > small { font-size: 12px; font-weight: 400; line-height: 1.35; color: var(--text-muted); }
-.dwa-muted { font-size: 12.5px; color: var(--text-muted); }
-.dwa-rate { display: grid; justify-items: center; gap: 6px; width: 100%; }
-.dwa-rate > strong { font-size: 15px; font-weight: 700; line-height: 1.2; color: var(--text-main); }
-.dwa-meter { display: block; width: 100%; max-width: 120px; height: 5px; overflow: hidden; border-radius: 999px; background: var(--tint-3, color-mix(in srgb, var(--primary) 14%, var(--bg-card))); }
-.dwa-meter > i { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
-.dwa-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
-.dwa-chip { display: inline-flex; align-items: center; height: 24px; padding: 0 7px; border: 1px solid var(--border-control); border-radius: 6px; font-size: 12px; line-height: 1; white-space: nowrap; background: var(--bg-card); color: var(--text-muted); }
-.dwa-chip.tone-red { background: var(--error-fill); border-color: var(--error-edge); color: var(--error-ink); }
-.dwa-chip.tone-amber { background: var(--warning-fill); border-color: var(--warning-edge); color: var(--warning-ink); }
-.dwa-chip.tone-blue { background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); border-color: color-mix(in srgb, var(--primary) 30%, var(--bg-card)); color: var(--primary); }
-.dwa-two { display: grid; justify-items: center; gap: 1px; }
-.dwa-two > strong { font-size: 14px; font-weight: 700; color: var(--text-main); }
-.dwa-two > strong.dwa-warn { color: var(--warning-ink); }
-.dwa-two > small { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
-.dwa-view { display: inline-flex; align-items: center; justify-content: center; gap: 2px; height: 30px; padding: 0 10px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--primary); font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; }
-.dwa-view:hover { background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); border-color: var(--primary); }
-
-/* the status cell of the live board: the pill and, under it, where the person is right now */
-.dwa-status { display: inline-grid; justify-items: center; gap: 3px; }
-.dwa-now { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; line-height: 1.2; color: var(--text-muted); white-space: nowrap; }
-.dwa-now.is-live { color: var(--success-ink); font-weight: 600; }
-.dwa-now > i { width: 7px; height: 7px; border-radius: 50%; background: var(--success-ink); }
-
-/* the daily record drawer */
-.dwa-rec { display: grid; gap: 14px; padding: 16px 20px 20px; font-size: 13.5px; color: var(--text-main); }
-.dwa-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 0; }
-.dwa-facts > div { display: grid; justify-items: center; gap: 2px; padding: 10px 8px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); text-align: center; }
-.dwa-facts dt { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
-.dwa-facts dd { margin: 0; font-size: 17px; font-weight: 700; }
-.dwa-rec-scroll { overflow-x: auto; border: 1px solid var(--rt-line, var(--border-control)); border-radius: 10px; }
-.dwa-rec table { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: auto; }
-.dwa-rec thead th { padding: 9px 10px; background: var(--primary); color: var(--on-primary, #fff); font-size: 12.5px; font-weight: 600; text-align: center; white-space: nowrap; }
-.dwa-rec thead th:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--on-primary, #fff) 28%, var(--primary)); }
-.dwa-rec :is(tbody, tfoot) :is(td, th) { padding: 7px 10px; border-bottom: 1px solid var(--rt-line, var(--border-control)); text-align: center; vertical-align: middle; white-space: nowrap; font-weight: 400; }
-.dwa-rec :is(tbody, tfoot) :is(td, th):not(:last-child) { border-right: 1px solid var(--rt-line, var(--border-control)); }
-.dwa-rec :is(thead th, tbody th, tfoot th).is-left { padding-left: 14px; text-align: left; }
-.dwa-rec tbody tr:nth-child(even) > * { background: color-mix(in srgb, var(--primary) 3.5%, var(--bg-card)); }
-.dwa-rec tbody tr.is-off > * { background: var(--tint-1, color-mix(in srgb, var(--text-muted) 8%, var(--bg-card))); color: var(--text-muted); }
-.dwa-rec tbody tr.is-leave > * { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
-.dwa-rec tfoot :is(td, th) { background: color-mix(in srgb, var(--primary) 7%, var(--bg-card)); font-weight: 700; border-bottom: 0; }
-.dwa-rec .dwa-draft { display: block; margin-top: 2px; font-size: 11px; color: var(--warning-ink); }
-.dwa-rec .dwa-note { padding: 0; }
-.dwa-rec .dw-state { display: grid; justify-items: center; gap: 6px; padding: 28px 12px; text-align: center; }
-
-@media (max-width: 720px) {
-  .dwa-filters { padding: 12px; }
-  .dwa-filter-end { margin-left: 0; width: 100%; justify-content: space-between; }
-}
-
-/* The attendance tables: always a table (it scrolls sideways when the panel is narrow), blue header band, inside borders, names left,
-   figures centred under centred headings. Own rules, so the stacked-card mode of the other Reports tables never applies here. */
-.dwa-grid { --g-line: color-mix(in srgb, var(--border-control) 78%, var(--bg-card)); width: 100%; min-width: 1000px; table-layout: fixed; border-collapse: collapse; font-size: 13px; line-height: 1.4; color: var(--text-main); }
-.dwa-grid.dwa-over { min-width: 960px; }
-.dwa-grid thead th { height: 46px; padding: 0 10px; background: var(--primary); color: var(--on-primary, #fff); font-size: 11px; font-weight: 700; letter-spacing: .04em; line-height: 1.3; text-transform: uppercase; text-align: center; vertical-align: middle; white-space: normal; overflow-wrap: normal; word-break: keep-all; text-wrap: balance; }
-.dwa-grid thead th:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--on-primary, #fff) 28%, var(--primary)); }
-.dwa-grid thead th.is-left { padding-left: 16px; text-align: left; }
-.dwa-grid tbody :is(td, th) { padding: 9px 10px; border-bottom: 1px solid var(--g-line); text-align: center; vertical-align: middle; font-weight: 400; overflow-wrap: anywhere; }
-.dwa-grid tbody :is(td, th):not(:last-child) { border-right: 1px solid var(--g-line); }
-.dwa-grid tbody th.is-left { padding-left: 16px; text-align: left; font-weight: 600; }
-.dwa-grid tbody tr.is-alt > :is(td, th) { background: color-mix(in srgb, var(--primary) 3.5%, var(--bg-card)); }
-.dwa-grid tbody tr:hover > :is(td, th) { background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
-.dwa-grid tbody tr.is-active > :is(td, th) { background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); }
-.dwa-grid td .dwr-plain, .dwa-grid td .dw-none { display: block; text-align: center; }
-.dwa-grid .dwr-person { gap: 10px; }
-.dwa-grid .dwr-who { font-size: 13.5px; }
-.dwa-grid .dwa-sessions { display: inline-block; }
-
-.dwa-grid td .tnum, .dwa-grid .dwa-pill, .dwa-grid .dwa-live, .dwa-grid .dwa-now, .dwa-grid .dwa-two > small { white-space: nowrap; }
-.dwa-strip .dwb-stats, .dwa-strip .dwb-stats[class*='has-'] { grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 12px; }
-.dwa-strip .dwb-stats > li { min-width: 0; }
-.dwa-strip .dwb-stat-label, .dwa-strip .dwb-stat-detail { text-wrap: balance; }
-:root:root:root .dwa-grid thead th { white-space: normal; text-wrap: balance; overflow-wrap: normal; word-break: keep-all; }
-:root:root:root .dwa-grid thead th.is-left, :root:root:root .dwa-grid tbody th.is-left { text-align: left; }
-.dwa-who > small { white-space: nowrap; }
-.dwa-strip .dwb-stat-figure strong { font-size: 24px; white-space: nowrap; }
-.dwa .dw-scroll > .tk-table-wrap { box-sizing: border-box; overflow-x: auto; border: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); border-radius: 6px; }
-.dwa-over td[data-label='Exceptions'] { padding-inline: 4px; }
-.dwa-over td[data-label='Record'] { padding-inline: 6px; }
+/* the drawer: one person's month */
+.am-rec { display: grid; gap: 14px; padding: 16px 20px 20px; font-size: 13.5px; color: var(--text-main); }
+.am-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 0; }
+.am-facts > div { display: grid; justify-items: center; gap: 2px; padding: 10px 8px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); text-align: center; }
+.am-facts dt { font-size: 12px; color: var(--text-muted); }
+.am-facts dd { margin: 0; font-size: 17px; font-weight: 700; }
+.am-rec-scroll { border: 1px solid var(--rt-line); border-radius: 10px; }
+:root:root:root .am-rec .rm-table { --rt-line: color-mix(in srgb, var(--text-muted) 42%, var(--bg-card)); --rt-stripe: color-mix(in srgb, var(--primary) 3.5%, var(--bg-card)); table-layout: auto; min-width: 740px; }
+:root:root:root .am-rec .rm-table :is(th, td) { white-space: nowrap; overflow-wrap: normal; }
+:root:root:root .am-rec .rm-table thead th { height: 40px; white-space: normal; }
+:root:root:root .am-rec .rm-table tbody tr > * { height: 40px; }
+:root:root:root .am-rec .rm-table tbody tr:nth-child(even) > * { background: var(--rt-stripe); }
+:root:root:root .am-rec .rm-table tbody tr.is-off > * { background: var(--tint-1); color: var(--text-muted); }
+:root:root:root .am-rec .rm-table tbody tr.is-leave > * { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+:root:root:root .am-rec .rm-table tbody tr:last-child > * { border-bottom: 0; }
+.am-draft { display: block; margin-top: 2px; font-size: 11px; color: var(--warning-ink); }
+.am-rec .rm-state { padding: 28px 12px; }

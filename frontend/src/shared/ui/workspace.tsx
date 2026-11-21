@@ -8,7 +8,7 @@ type KpiTone = 'blue' | 'green' | 'amber' | 'violet' | 'red'
 interface SummaryItem {
   label: string
   value: ReactNode
-  detail: string
+  detail: ReactNode
   icon: LucideIcon
   /** Only changes the ink of the icon (green, amber, red carry meaning); blue and violet stay neutral. */
   tone?: KpiTone

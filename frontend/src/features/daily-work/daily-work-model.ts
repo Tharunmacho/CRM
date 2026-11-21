@@ -62,6 +62,8 @@ export interface DailyItem {
   remark: { body: string; at: string; by: string; count: number } | null
   /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form (an older server sends nothing). */
   commencementDate?: string | null
+  /** Date of travel (DOT): the air-ticket stage's travel date, ISO "YYYY-MM-DD"; null until the placement has one (an older server sends nothing). Read-only, filled automatically. */
+  travelDate?: string | null
   /** How the placement ended (Declined, Rejected, Travelled); an older server sends nothing, which reads as a current row. */
   outcome?: DailyOutcome | null
   /** The stage's name where a closed placement ended, when the server sends it (else the screen looks it up from `stage`). */
@@ -159,6 +161,8 @@ export interface FollowUpItem {
   remark: { body: string; at: string; by: string; count: number } | null
   /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form. */
   commencementDate?: string | null
+  /** Date of travel (DOT), ISO "YYYY-MM-DD", from the air-ticket stage; null until there is one. */
+  travelDate?: string | null
 }
 
 export interface FollowUpResponse {
@@ -517,13 +521,13 @@ export interface TodayWork { called: boolean; moved: boolean; remarked: boolean;
 
 export interface TaskRow extends DailyItem { today: TodayWork }
 
-export interface TaskColumn { key: string; title: string; width: number; left?: boolean; supervisor?: boolean; quiet?: boolean; /** Only a column of a roomy panel: below it the same content sits inside another cell (see TASK_LIST_COLUMNS). */ roomy?: boolean }
+export interface TaskColumn { key: string; title: string; width: number; /** The header's tooltip (the title is a short code). */ tip?: string; left?: boolean; supervisor?: boolean; quiet?: boolean; /** Only a column of a roomy panel: below it the same content sits inside another cell (see TASK_LIST_COLUMNS). */ roomy?: boolean }
 
 /** A panel narrower than this shows every candidate as a labelled card instead of a table row (daily-work.css, tasks-table.css). */
 export const TASK_CARD_BREAKPOINT = 1080
 
 /**
- * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), CLIENT (the name, and under it the country in
+ * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), DOT (date of travel, read-only), CLIENT (the name, and under it the country in
  * a smaller muted line), JOB, CANDIDATE, Recruiter (supervisors only), AGENCY, STAGE, TODAY, REMARKS, NOTES and the untitled actions cell. Every
  * header is one short word so it never wraps. The table never scrolls sideways: its columns are these widths as percentages of the panel
  * (columnLayout), so it fills the panel at any width from 1080px (below that the Tasks list is a stack of cards). Every column is centred (header and
@@ -533,15 +537,16 @@ export const TASK_CARD_BREAKPOINT = 1080
  * sizes: CLIENT "International" (86px at 13px / 600), CANDIDATE "EMAYAVARAMBAN" (121px), JOB "SUPERVISOR" (78px), AGENCY "LAVOROTECH" (86px), Recruiter
  * "Srivathsala" (74px), STAGE "Prescreening" (77px in its 16px chip), TODAY the whole "Moved 10:45" chip (75px + 16px chip padding), and the headers S NO (29px),
  * CANDIDATE (70px) and RECRUITER (65px). DOC and REMARKS are the two with give: the empty "dd/mm/yyyy" hint may lose its last pixels and the remark
- * dropdown clips a long remark to two lines (its full text is the tooltip). NOTES gets 140px: the newest note, up to three lines, and its trash button.
+ * dropdown clips a long remark to two lines (its full text is the tooltip). DOT (date of travel, read-only) is 60px: "09 Jul 2026" breaks at its space into "09 Jul" over "2026", so a whole new column costs 60px, not 90; REMARKS and NOTES gave it the room (82px and 100px: they are the two columns that take the spare width of a wider panel, up to REMARKS_MAX / NOTES_MAX, and their text wraps and scrolls inside the cell).
  *
- * NOTES is a column of every table. TODAY is a column only when the panel has room for the whole plan (`taskPlanWidth(supervisor, true)`: 1212px for a
- * supervisor, 1125px for a recruiter); a narrower table needs only `taskPlanWidth(supervisor, false)` (1108px / 1021px: a 1440px window gives the
- * table 1111px) and shows the TODAY chip inside the STAGE cell, under the stage chip and its dashes. A phone card has a TODAY row of its own.
+ * NOTES is a column of every table. TODAY is a column only when the panel has room for the whole plan (`taskPlanWidth(supervisor, true)`: 1221px for a
+ * supervisor, 1134px for a recruiter); a narrower table needs only `taskPlanWidth(supervisor, false)` (1117px / 1030px: a 1440px window gives the
+ * table 1111px, the columns share the 0.5% they lack) and shows the TODAY chip inside the STAGE cell, under the stage chip and its dashes. A phone card has a TODAY row of its own.
  */
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
-  { key: 'no', title: 'S NO', width: 48 },
+  { key: 'no', title: 'S NO', width: 44 },
   { key: 'doc', title: 'DOC', width: 90 },
+  { key: 'dot', title: 'DOT', width: 60, tip: 'Date of travel' },
   { key: 'client', title: 'CLIENT', width: 99 },
   { key: 'position', title: 'JOB', width: 92 },
   { key: 'candidate', title: 'CANDIDATE', width: 134 },
@@ -549,8 +554,8 @@ export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
   { key: 'agency', title: 'AGENCY', width: 99 },
   { key: 'stage', title: 'STAGE', width: 106 },
   { key: 'today', title: 'TODAY', width: 104, roomy: true },
-  { key: 'remarks', title: 'REMARKS', width: 98 },
-  { key: 'notes', title: 'NOTES', width: 134 },
+  { key: 'remarks', title: 'REMARKS', width: 82 },
+  { key: 'notes', title: 'NOTES', width: 100 },
   { key: 'actions', title: 'Actions', width: 124, quiet: true },
 ]
 

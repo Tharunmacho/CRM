@@ -58,6 +58,15 @@ previousUntil are null, period.partial false, period.allTime true), series by we
     "Daily report submitted" (entity_type "user", entity_id = the person).
     GET /api/reports/daily-work/mine?date=YYYY-MM-DD (default today) -> {"date", ...the caller's staff row of the report...}
 
+(5) GET /api/reports/daily-work/export/task and /export/lead ?from=&to=&staff= (or period=all) -> the Excel file of that tab as shown: Task report
+    (matrix, stage by stage, where candidates are lost, longest waiting, summary) or Lead sheet report (matrix, aging leads, summary).
+
+MANAGEMENT READING (additive keys of (1), team view): "taskInsight" {stuckDays, waiting {total, stuck, byStage [{no,label,count,stuck,avgDays}], busiest},
+    stuckPerStaff {id: n}, longest [{candidateId,careId,name,staffId,staffName,stage,stageLabel,since,days}] (10), completed / stopped {value, previous},
+    exitReasons [{label,count,previous}], exitOther} and "leadInsight" {staleDays, stale {total, unassigned, perStaff}, aging [{leadId,name,staffId,staffName,
+    since,days}] (10), previous {interested, notInterested}}. Administrator-owned figures are left out. Drill-down metrics: stuck, stuck:<1-13>,
+    leadsStale, leadsFollowUp.
+
 (4) GET /api/reports/daily-work/export?from=&to=&staff=&client= -> daily-work-report_<from>_<to>.xlsx with the sheets
     Summary, By staff, By day, Lead feedback. Same scoping as (1).
 """
@@ -132,6 +141,21 @@ def daily_work_export(from_: date | None = Query(default=None, alias="from"), to
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="daily-work-report_{period["from"]}_{period["to"]}.xlsx"',
                              "Cache-Control": "private, no-store"})
+
+
+@router.get("/export/{view}")
+def daily_work_export_view(view: Literal["task", "lead"], from_: date | None = Query(default=None, alias="from"), to: date | None = None,
+                           staff: str | None = None, period: Literal["all"] | None = None, user: User = Depends(current_user),
+                           db: Session = Depends(get_db)):
+    """The Excel file of one tab as the screen shows it (Task report or Lead sheet report): the same period and recruiter filter."""
+    zone, now = get_settings().agency_timezone, _now()
+    data = report_service.build_report(db, user, from_, to, staff, None, zone, now, all_time=period == "all")
+    whole = staff in (None, "", "all") and data["scope"] == "team"
+    body = report_service.task_report_workbook(data) if view == "task" else report_service.lead_report_workbook(data, whole)
+    shown = data["period"]
+    name = {"task": "task-report", "lead": "lead-sheet-report"}[view]
+    return Response(body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}_{shown["from"]}_{shown["to"]}.xlsx"', "Cache-Control": "private, no-store"})
 
 
 @router.post("/submit")

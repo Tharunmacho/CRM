@@ -1,8 +1,8 @@
 import { useSearchParams } from 'react-router-dom'
 import { useStore } from '@/shared/state/crm-store'
-import { PageHeader } from '@/shared/ui/display'
 import { Tabs } from '@/shared/ui/overlay'
 import DailyReportPage, { type ReportView } from '@/features/daily-report/daily-report-page'
+import { ReportsHeader } from '@/features/daily-report/reports-header'
 import { AttendanceReportTab } from '@/features/daily-report/report-attendance-tab'
 import { pageTabFromParams, pageTabs, paramsForPageTab, type PageTab } from '@/features/reports/report-tabs'
 import { ClientTrackerReport } from '@/features/reports/client-tracker'
@@ -29,7 +29,7 @@ export default function ReportsPage() {
   const view: ReportView | null = tab === 'daily' || tab === 'lead' ? tab : null
   if (view) return <DailyReportPage view={view} tabs={tabs} />
   return <div className="tk dw">
-    <PageHeader title={tab === 'attendance' ? 'Attendance' : tab === 'tracker' ? 'Client tracker' : 'Reports'} />
+    <ReportsHeader />
     {tabs}
     {tab === 'attendance' ? <AttendanceReportTab /> : tab === 'tracker' ? <ClientTrackerReport /> : <OtherReports embedded />}
   </div>

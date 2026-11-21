@@ -2,6 +2,7 @@
 from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -11,6 +12,7 @@ from app.core.deps import current_user
 from app.db.models import User
 from app.db.session import get_db
 from app.services import attendance_hr as hr
+from app.services import attendance_month_export
 from app.services.attendance_policy_types import AttendanceStatus, Shift
 
 router = APIRouter(prefix="/attendance", tags=["attendance-policy"])
@@ -114,6 +116,15 @@ def month(response: Response, year: int, month: int, staffId: str | None = None,
           db: Session = Depends(get_db), user: User = Depends(current_user)):
     response.headers["Cache-Control"] = "no-store"
     return hr.month_report(db, user, year, month, staffId)
+
+
+@router.get("/month/export")
+def month_export(year: int, month: int, staffId: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """The month of Reports > Attendance as an Excel file (the people and days `/month` shows the caller, Administrators never)."""
+    report = hr.month_report(db, user, year, month, staffId)
+    today = datetime.now(ZoneInfo(report["timezone"])).date()
+    return Response(attendance_month_export.xlsx_bytes(report, today), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{attendance_month_export.export_name(year, month)}"', "Cache-Control": "private, no-store"})
 
 
 @router.get("/requests")

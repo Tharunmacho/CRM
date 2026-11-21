@@ -150,7 +150,7 @@ TRAVELLED_SECONDS = 30
 
 
 def read_rows(db: Session, user: User) -> list[dict]:
-    """Every travelled placement the user may see, newest travel first.
+    """Every travelled placement the user may see, old to new (traveller number CI 01 first; see `order_key`).
 
     The list is the same for every request of the same person until a placement, candidate, document or order changes, so it is kept
     for a short while (see services/response_cache.py): opening the screen again, changing a filter and exporting cost no statement.
@@ -160,7 +160,7 @@ def read_rows(db: Session, user: User) -> list[dict]:
 
 
 def _read_rows(db: Session, user: User) -> list[dict]:
-    """Every travelled placement the user may see, newest travel first. The placements and the documents of their candidates are two
+    """Every travelled placement the user may see, old to new (traveller number CI 01 first; see `order_key`). The placements and the documents of their candidates are two
     independent reads, so they run side by side: one round trip."""
     ranked = select(
         ApplicationStage.application_id.label("application_id"), ApplicationStage.data.label("data"),
@@ -207,9 +207,18 @@ def _read_rows(db: Session, user: User) -> list[dict]:
             "status": getattr(status, "value", status),
         })
     _add_documents(rows, stored_rows, user)
-    rows.sort(key=lambda r: (r["name"] or "").lower())
-    rows.sort(key=lambda r: r["travelDate"] or "", reverse=True)   # stable: newest first, then by name; undated last
+    rows.sort(key=order_key)
     return rows
+
+
+_SERIAL = re.compile(r"^CI (\d+)$")
+
+
+def order_key(row: dict) -> tuple:
+    """Old to new: traveller number ascending (CI 01, CI 02 ... CI 99, CI 100: by the NUMBER, not the text), oldest traveller first. A candidate without
+    a number comes after all numbered ones, oldest travel date first (undated last), then by name."""
+    match = _SERIAL.match(row["travellerId"] or "")
+    return (match is None, int(match.group(1)) if match else 0, row["travelDate"] is None, row["travelDate"] or "", (row["name"] or "").lower())
 
 
 def _stored_documents_statement(user: User):

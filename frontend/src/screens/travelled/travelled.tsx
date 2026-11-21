@@ -293,7 +293,7 @@ function Breakdown({ title, items, selected, onPick, empty }: { title: string; i
 function TravelTable({ rows, total, page, pageSize, filtered, onPage, onPageSize }: { rows: TravelledRow[]; total: number; page: number; pageSize: number; filtered: boolean; onPage: (page: number) => void; onPageSize: (size: number) => void }) {
   const wrap = useRef<HTMLDivElement>(null)
   const shown = pageRows(rows, page, pageSize)
-  const go = (next: number) => { onPage(next); wrap.current?.scrollTo({ top: 0 }) }
+  const go = (next: number) => { onPage(next); wrap.current?.scrollIntoView({ block: 'start' }) }   // the page scrolls (no inner box): back to the top of the table
   return <section className="tv-card tv-table-card" aria-label="Travelled candidates">
     <div ref={wrap} className="tv-table-wrap">
       <table className="tv-table">

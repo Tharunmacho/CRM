@@ -3,29 +3,29 @@ import { AlertCircle, FileSpreadsheet, Loader2, Printer, RefreshCw } from 'lucid
 import { useSearchParams } from 'react-router-dom'
 import { useStore } from '@/shared/state/crm-store'
 import { Button } from '@/shared/ui/primitives'
-import { PageHeader } from '@/shared/ui/display'
 import { downloadDailyExport } from './daily-report-api'
 import { DrilldownDrawer } from './drilldown-drawer'
 import { MyDayCard } from './my-day-card'
-import { PeriodRow } from './daily-report-toolbar'
+import { ReportToolbar } from './daily-report-toolbar'
+import { ReportsHeader } from './reports-header'
 import { HistoryDrawer, SubmissionPanel } from './submission-panels'
 import { LiveBadge } from './report-parts'
 import { LeadReportView } from './report-lead'
 import { TaskReportView } from './report-task'
 import { useDailyReport } from './use-daily-report'
 import {
-  AGENCY_TIMEZONE, apiQuery, asksAllTime, choiceFromParams, DEFAULT_CHOICE, dayInZone, drillTitle, isOutdatedServer, parseChoice, resolveRange, serialiseChoice, type RangeChoice,
+  AGENCY_TIMEZONE, apiQuery, asksAllTime, choiceFromParams, DEFAULT_CHOICE, dayInZone, drillTitle, isOutdatedServer, parseChoice, reportPeople, resolveRange, serialiseChoice, type RangeChoice,
 } from './daily-report-view'
 import type { DailyReport, StaffRow } from './daily-report-types'
 import '@/styles/tasks-page.css'
 import '@/styles/daily-work.css'
 import '@/styles/daily-work-board.css'
 import '@/styles/daily-report.css'
+import '@/styles/report-management.css'
 
 /** 'daily' is the Task report (the default tab), 'lead' the Lead sheet report. */
 export type ReportView = 'daily' | 'lead'
 const STORAGE_KEY = 'crm.daily-report.range'
-const TITLES: Record<ReportView, string> = { daily: 'Task report', lead: 'Lead sheet report' }
 
 function readChoice(): RangeChoice {
   try { return parseChoice(window.localStorage.getItem(STORAGE_KEY)) } catch { return DEFAULT_CHOICE }
@@ -53,7 +53,6 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
   // An older link ("View staff report", /staff-report) names a person and dates in the address.
   const [choice, setChoice] = useState<RangeChoice>(() => choiceFromParams(params.get('from'), params.get('to'), today) ?? readChoice())
   const [staff, setStaff] = useState(() => (supervisor ? params.get('staff') || 'all' : 'all'))
-  const [client, setClient] = useState('all')
   const [drill, setDrill] = useState<{ metric: string; staff: string | null; client: string | null } | null>(null)
   const [submissionOf, setSubmissionOf] = useState<string | null>(null)
   const [history, setHistory] = useState(false)
@@ -64,9 +63,9 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
   const [allOk, setAllOk] = useState(true)
   const range = useMemo(() => resolveRange(choice, today, allOk), [choice, today, allOk])
   const allTime = asksAllTime(choice, allOk)
-  // The Task report counts what is waiting now: neither the period nor the client changes it, so its row hides both and the client is not applied there.
-  const periodMatters = view !== 'daily'
-  const query = { from: range.from, to: range.to, staff: supervisor ? staff : 'all', client: periodMatters ? client : 'all', all: allTime }
+  // Both reports follow the period: the Task report counts what waits now, and what was completed and lost in the period; the Lead sheet report counts the period's leads.
+  // A lead has no client, and the stage figures are read for the whole agency: the report takes no client filter.
+  const query = { from: range.from, to: range.to, staff: supervisor ? staff : 'all', client: 'all', all: allTime }
   const state = useDailyReport(query, store.me.id)
   const { data, error } = state
   const scope: DailyReport['scope'] = data?.scope ?? (supervisor ? 'team' : 'self')
@@ -86,13 +85,11 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
   const rosterRead = useDailyReport({ ...query, staff: 'all', client: 'all' }, store.me.id, supervisor && query.staff !== 'all' && everyone.current.length === 0)
   if (rosterRead.data && rosterRead.current && rosterRead.data.scope === 'team' && everyone.current.length === 0) everyone.current = rosterRead.data.staff
   const roster = everyone.current.length ? everyone.current : data?.staff ?? []
-  const clients = useRef(new Map<string, string>())
-  if (data) for (const row of data.clients) clients.current.set(row.id, row.name)
-  const clientOptions = [...clients.current].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  const people = reportPeople(roster).map(row => ({ id: row.id, name: row.name })).sort((a, b) => a.name.localeCompare(b.name))
 
   async function exportFile() {
     setExporting(true); setExportError('')
-    try { await downloadDailyExport(query); store.notify('Excel file downloaded.') }
+    try { await downloadDailyExport(query, view === 'daily' ? 'task' : 'lead'); store.notify('Excel file downloaded.') }
     catch (failure) { setExportError(failure instanceof Error ? failure.message : 'The Excel file could not be created.') }
     finally { setExporting(false) }
   }
@@ -101,17 +98,18 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
   const blocking = !data && !!error && !outdated
   const stale = !!data && !state.current
   const scopeKey = `${view}|${apiQuery(query)}`
-  const common = data ? { report: data, allTime, roster, today, timeZone, scope: scopeKey, staff: staff === 'all' ? '' : staff, onPickStaff: (id: string) => setStaff(id || 'all'), clientFilter: client, onDrill: (metric: string, id: string | null) => setDrill({ metric, staff: id, client: null }),
+  const common = data ? { report: data, allTime, roster, today, timeZone, scope: scopeKey, staff: staff === 'all' ? '' : staff, onPickStaff: (id: string) => setStaff(id || 'all'), clientFilter: 'all', onDrill: (metric: string, id: string | null) => setDrill({ metric, staff: id, client: null }),
     onDrillClient: (metric: string, id: string) => setDrill({ metric, staff: null, client: id }), onSubmission: (id: string) => setSubmissionOf(id), onHistory: () => setHistory(true) } : null
 
   return <div className="tk dw dwb dwr">
-    <PageHeader title={TITLES[view]} actions={<>
+    <ReportsHeader actions={<>
       <Button onClick={() => void exportFile()} disabled={exporting}>{exporting ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <FileSpreadsheet size={15} aria-hidden="true" />}{exporting ? 'Preparing…' : 'Export Excel'}</Button>
       <Button onClick={() => window.print()}><Printer size={15} aria-hidden="true" />Print</Button>
       <Button onClick={state.refresh} disabled={state.loading && !!data}><RefreshCw size={15} className={state.loading && data ? 'animate-spin' : undefined} aria-hidden="true" />Refresh</Button>
     </>} />
     {tabs}
-    <PeriodRow filters={periodMatters} choice={choice} onChoice={setChoice} client={client} clients={clientOptions} onClient={setClient}
+    <ReportToolbar choice={choice} onChoice={setChoice} range={range} today={today}      people={people} staff={staff === 'all' ? '' : staff} onPickStaff={id => setStaff(id || 'all')} team={scope === 'team'}
+      onHistory={view === 'daily' && scope === 'team' ? () => setHistory(true) : undefined}
       live={<LiveBadge updatedAt={state.updatedAt} busy={state.loading && !!data} />} />
 
     <div className="dw-alerts">

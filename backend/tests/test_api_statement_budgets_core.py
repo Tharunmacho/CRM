@@ -314,6 +314,7 @@ SPEC: list[tuple] = [
     ("GET", "/api/attendance", None, {A: 4, MG: 4, ST: 4}, None),
     ("GET", "/api/attendance?staffId=budget-staff-0", None, {A: 4, MG: 5}, None),
     ("GET", f"/api/attendance/month?{month}", None, {A: 10, MG: 10, ST: 10}, None),
+    ("GET", f"/api/attendance/month/export?{month}", None, {A: 10, MG: 10, ST: 10}, None),
     ("GET", f"/api/attendance/requests?{month}", None, {A: 4, MG: 4, ST: 4}, None),
     ("GET", f"/api/attendance/settings?{month}", None, {A: 6, MG: 7, ST: 7}, None),
     ("GET", f"/api/attendance/adjustments?{month}", None, {A: 3, MG: 3, ST: 3}, None),

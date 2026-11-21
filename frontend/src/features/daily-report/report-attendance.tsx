@@ -1,27 +1,89 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Activity, CalendarOff, Clock3, ExternalLink, TriangleAlert, UserCheck, UserX } from 'lucide-react'
-import { api } from '@/shared/api/client'
-import { liveInterval } from '@/shared/state/live'
+import { useMemo, useState } from 'react'
+import { Clock3, TriangleAlert } from 'lucide-react'
 import { agencyDay } from '@/shared/lib/task-time'
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
 import { DatePicker } from '@/shared/ui/date-picker'
-import { ScrollEdges } from '@/screens/tasks/daily-table'
-import { StatStrip, type StatTileData } from '@/screens/tasks/daily-stat-strip'
-import { clockTime, dayLabel, weekdayLabel } from '../attendance/format'
-import { durationLabel, type AttendanceResponse } from '../attendance/model'
-import type { MonthlyAttendance } from '../attendance/policy-model'
-import { attendanceCounts, buildAttendanceRows, presenceLabel, punctualityText, type AttendanceRow } from './attendance-rows'
+import { clockTime } from '../attendance/format'
+import { durationLabel } from '../attendance/model'
+import { buildAttendanceRows, presenceLabel, punctualityText, type AttendanceRow } from './attendance-rows'
+import { useDayAttendance } from './use-attendance-data'
+import '@/styles/report-mgmt-tabs.css'
 import '@/styles/report-attendance.css'
 
 const hueOf = (name: string) => [...name].reduce((total, character) => total + character.charCodeAt(0), 0) % 6
-const DASH = <span className="dw-none" aria-label="not available">{'–'}</span>
+const DASH = <span className="rm-dash" aria-label="not available">{'–'}</span>
 
 /**
- * Reports > Report: who logged in and out on one day, how long they worked and how they did against their shift. Reads the attendance
- * screen's own data (check-ins and CRM use for the day, and the month's policy record for the status, shift and late/early minutes).
- * Without the policy record (the viewer cannot see it, or it failed) the status comes from the check-ins alone.
+ * The live board: who logged in and out on one day, how long they have worked and how they did against their shift. A recruiter's name is a
+ * button that opens that person's month (the page's drawer); the board itself reads nothing: the page gives it the rows.
+ */
+export function AttendanceBoard({ rows, zone, staff, onOpen, empty }: { rows: AttendanceRow[]; zone: string; staff: string; onOpen?: (id: string) => void; empty?: string }) {
+  const showPresence = rows.some((row) => row.tracked)
+  if (!rows.length) return <div className="rm-state" role="status"><p className="rm-state-title">No attendance to show</p><p>{empty ?? 'Nobody matches this view for the day.'}</p></div>
+  const widths = [118, 112, 84, 118, 96, 104, ...(showPresence ? [124] : []), 76]
+  return <div className="rm-scroll is-cards" role="region" aria-label="Login and logout for the day, scroll sideways for more columns" tabIndex={0}>
+    <table className="rm-table is-cards am-board" aria-label="Login and logout for the day">
+      <colgroup><col />{widths.map((width, i) => <col key={i} style={{ width: width + 'px' }} />)}</colgroup>
+      <thead><tr>
+        <th scope="col" className="is-left">Recruiter</th>
+        <th scope="col">Status</th>
+        <th scope="col">Shift</th>
+        <th scope="col">First login</th>
+        <th scope="col">Last logout</th>
+        <th scope="col">Hours worked</th>
+        <th scope="col" title="Minutes after the shift start (late) or before the shift end (early)">Late / early by</th>
+        {showPresence && <th scope="col" title="CRM open and in use (online) and open but not in use (idle) while checked in">Online / idle</th>}
+        <th scope="col">Sessions</th>
+      </tr></thead>
+      <tbody>
+        {rows.map((row, index) => <tr key={row.id} className={cn(index % 2 === 1 && 'is-alt', row.id === staff && 'is-picked')}>
+          <th scope="row" className="is-left">
+            <span className="rm-person">
+              <span className={cn('record-avatar', `avatar-hue-${hueOf(row.name)}`)} aria-hidden="true">{initials(row.name)}</span>
+              {onOpen
+                ? <button type="button" className="rm-who" onClick={() => onOpen(row.id)} title={`Open ${row.name}'s month, day by day`}>{row.name}</button>
+                : <span className="rm-who">{row.name}</span>}
+            </span>
+          </th>
+          <td data-label="Status"><StatusCell row={row} /></td>
+          <td data-label="Shift" className="tnum">{row.shift || DASH}</td>
+          <td data-label="First login" className="tnum">{row.firstIn ? clockTime(row.firstIn, zone) : DASH}</td>
+          <td data-label="Last logout" className="tnum">{row.stillIn
+            ? <span className="am-live"><i aria-hidden="true" />Still logged in</span>
+            : row.lastOut ? clockTime(row.lastOut, zone) : DASH}</td>
+          <td data-label="Hours worked" className="tnum">{row.sessions.length || row.workedSeconds > 0 ? durationLabel(row.workedSeconds) : DASH}</td>
+          <td data-label="Late / early by" className={cn('tnum', punctualityText(row) && 'rm-warn')}>{punctualityText(row) || DASH}</td>
+          {showPresence && <td data-label="Online / idle" className="tnum">{row.tracked ? `${durationLabel(row.activeSeconds)} / ${durationLabel(row.idleSeconds)}` : DASH}</td>}
+          <td data-label="Sessions"><Sessions row={row} zone={zone} /></td>
+        </tr>)}
+      </tbody>
+    </table>
+  </div>
+}
+
+function StatusCell({ row }: { row: AttendanceRow }) {
+  const now = presenceLabel(row)
+  return <span className="am-status">
+    <span className={cn('rm-pill', `tone-${row.tone}`)}>{row.label}</span>
+    {now.label && <small className={cn('am-now', now.live && 'is-live')}>{now.live && <i aria-hidden="true" />}{now.label}</small>}
+  </span>
+}
+
+function Sessions({ row, zone }: { row: AttendanceRow; zone: string }) {
+  if (!row.sessions.length) return DASH
+  return <details className="am-sessions">
+    <summary title="Show each login and logout"><span className="tnum">{row.sessions.length}</span></summary>
+    <ol>{row.sessions.map((session, index) => <li key={session.checkedInAt + index} className="tnum">
+      {clockTime(session.checkedInAt, zone)} {'–'} {session.checkedOutAt ? clockTime(session.checkedOutAt, zone) : 'now'}
+      <small>{durationLabel(session.seconds)}</small>
+    </li>)}</ol>
+  </details>
+}
+
+/**
+ * The board on its own, with its own reading of the day (a date picker and the check-ins). The Reports Attendance tab does not use it (it
+ * reads the day once, for its summary cards, and draws an AttendanceBoard); it stays for screens that want the board alone.
  */
 export function AttendancePanel({ day, staff, team, timeZone, onPickStaff, reload = 0, title = 'Attendance' }: {
   day: string
@@ -34,145 +96,21 @@ export function AttendancePanel({ day, staff, team, timeZone, onPickStaff, reloa
   title?: string
 }) {
   const today = agencyDay(new Date(), timeZone)
-  const [date, setDate] = useState(day)
-  useEffect(() => { setDate(day) }, [day])
-  const [attendance, setAttendance] = useState<AttendanceResponse | null>(null)
-  const [month, setMonth] = useState<MonthlyAttendance | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const monthBlocked = useRef('')
-
-  useEffect(() => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return
-    const controller = new AbortController()
-    let running = false
-    let again = false // a change arrived while a read was running: that read may predate it
-    const load = async (initial = false) => {
-      if (running) return
-      running = true
-      if (initial) { setAttendance(null); setMonth(null); setLoading(true); setError('') }
-      const [year, monthNumber] = date.split('-')
-      const monthKey = `${year}-${monthNumber}|${staff}`
-      const sessionsQuery = new URLSearchParams({ date, ...(staff ? { staffId: staff } : {}) })
-      const monthQuery = new URLSearchParams({ year, month: String(Number(monthNumber)), ...(staff ? { staffId: staff } : {}) })
-      try {
-        const [sessions, policy] = await Promise.all([
-          api.get<AttendanceResponse>('/attendance?' + sessionsQuery, { signal: controller.signal }),
-          // The policy record is a bonus: a viewer who may not see it, or a failed read, leaves the sessions part standing
-          monthBlocked.current === monthKey ? Promise.resolve(null) : api.get<MonthlyAttendance>('/attendance/month?' + monthQuery, { signal: controller.signal }).catch(() => {
-            if (!controller.signal.aborted) monthBlocked.current = monthKey
-            return null
-          }),
-        ])
-        if (!controller.signal.aborted) { setAttendance(sessions); setMonth(policy); setError('') }
-      } catch (err) {
-        if (!controller.signal.aborted) setError(err instanceof Error ? err.message : 'We could not load attendance.')
-      } finally {
-        running = false
-        if (!controller.signal.aborted) setLoading(false)
-        if (again && !controller.signal.aborted) { again = false; void load() }
-      }
-    }
-    void load(true)
-    const stop = liveInterval(() => { if (document.visibilityState === 'visible') void load() }, 30_000, ['attendance', 'users'], {
-      onChange: () => { if (running) again = true; else void load() },
-    })
-    return () => { controller.abort(); stop() }
-  }, [date, staff, reload])
-
-  const rows = useMemo(() => buildAttendanceRows({ day: date, today, staff, attendance, month }), [date, today, staff, attendance, month])
-  const counts = useMemo(() => attendanceCounts(rows), [rows])
-  const zone = attendance?.timezone || timeZone
-  const showPresence = rows.some((row) => row.tracked)
-  const subtitle = `${weekdayLabel(date)}, ${dayLabel(date)}${date === today ? ' (today)' : ''}`
-
-  const tiles: StatTileData[] = [
-    { key: 'present', label: 'Present', value: counts.present, detail: 'Logged in', icon: UserCheck, tone: 'green' },
-    { key: 'late', label: 'Late', value: counts.late, detail: 'After shift start', icon: Clock3, tone: counts.late ? 'amber' : 'blue' },
-    { key: 'absent', label: 'Absent', value: counts.absent, detail: 'No check-in', icon: UserX, tone: counts.absent ? 'red' : 'blue' },
-    { key: 'leave', label: 'On leave', value: counts.leave, detail: 'Approved leave', icon: CalendarOff, tone: 'blue' },
-    { key: 'still', label: 'Still logged in', value: counts.stillIn, detail: 'Not checked out', icon: Activity, tone: 'green' },
-  ]
-
-  const head = <div className="dw-panel-head">
-    <div><h2><Clock3 size={16} aria-hidden="true" /> {title}</h2><p>{subtitle}</p></div>
-    <div className="dwr-head-tools dwa-tools">
-      <DatePicker value={date} onChange={(value) => { if (value) setDate(value) }} max={today} required compact aria-label="Attendance date" />
-      <Link to="/attendance" className="dwr-textlink">Open attendance <ExternalLink size={12} aria-hidden="true" /></Link>
+  const [picked, setPicked] = useState<{ from: string; date: string }>({ from: day, date: day })
+  const date = picked.from === day ? picked.date : day
+  const state = useDayAttendance(date, staff, reload, '', null)
+  const zone = state.attendance?.timezone || timeZone
+  const rows = useMemo(() => buildAttendanceRows({ day: date, today, staff, attendance: state.attendance, month: state.month, zone }), [date, today, staff, state.attendance, state.month, zone])
+  const head = <div className="rm-head">
+    <div><h2><Clock3 size={16} aria-hidden="true" /> {title}</h2></div>
+    <div className="rm-tools">
+      <DatePicker value={date} onChange={(value) => { if (value) setPicked({ from: day, date: value }) }} max={today} required compact aria-label="Attendance date" />
     </div>
   </div>
-
-  if (loading) return <section className="dw-panel dwa" aria-label="Attendance" aria-busy="true">{head}<div className="dw-state"><p role="status">Loading attendance…</p></div></section>
-  if (error && !attendance) return <section className="dw-panel dwa" aria-label="Attendance">{head}<div className="dw-state"><TriangleAlert size={22} aria-hidden="true" /><p role="alert" className="dwr-empty-title">{error}</p><p>We could not load attendance. It will try again by itself.</p></div></section>
-
-  return <section className="dw-panel dwa" aria-label="Attendance">
+  return <section className="rm-panel" aria-label="Attendance" aria-busy={state.loading || undefined}>
     {head}
-    {rows.length === 0
-      ? <div className="dw-state" role="status"><p className="dwr-empty-title">No attendance to show</p><p>{staff ? 'This person has no attendance record for the day.' : 'Nobody has a record for this day.'}</p></div>
-      : <>
-        <div className="dwa-strip"><StatStrip tiles={tiles} label="Attendance counts" /></div>
-        <AttendanceTable rows={rows} zone={zone} showPresence={showPresence} staff={staff} onPick={team ? onPickStaff : undefined} />
-      </>}
+    {state.loading ? <div className="rm-state"><p role="status">Loading attendance…</p></div>
+      : state.error && !state.attendance ? <div className="rm-state"><TriangleAlert size={22} aria-hidden="true" /><p role="alert" className="rm-state-title">{state.error}</p><p>It will try again by itself.</p></div>
+        : <AttendanceBoard rows={rows} zone={zone} staff={staff} onOpen={team ? onPickStaff : undefined} empty={staff ? 'This person has no attendance record for the day.' : 'Nobody has a record for this day.'} />}
   </section>
-}
-
-function AttendanceTable({ rows, zone, showPresence, staff, onPick }: { rows: AttendanceRow[]; zone: string; showPresence: boolean; staff: string; onPick?: (id: string) => void }) {
-  const widths = [150, 112, 80, 124, 80, 100, ...(showPresence ? [120] : []), 86]
-  return <ScrollEdges label="Attendance for the day, scroll sideways for more columns">
-    <table className="dwa-grid" aria-label="Attendance for the day">
-      <colgroup><col style={{ width: 'auto' }} />{widths.map((width, i) => <col key={i} style={{ width: width + 'px' }} />)}</colgroup>
-      <thead><tr>
-        <th scope="col" className="is-left">Recruiter</th>
-        <th scope="col" className="is-num">Status</th>
-        <th scope="col" className="is-num">Shift</th>
-        <th scope="col" className="is-num">First login</th>
-        <th scope="col" className="is-num">Last logout</th>
-        <th scope="col" className="is-num">Hours worked</th>
-        <th scope="col" className="is-num" title="Minutes after the shift start (late) or before the shift end (early)">Late / early by</th>
-        {showPresence && <th scope="col" className="is-num" title="CRM open and in use (online) and open but not in use (idle) while checked in">Online / idle</th>}
-        <th scope="col" className="is-num">Sessions</th>
-      </tr></thead>
-      <tbody>
-        {rows.map((row, index) => <tr key={row.id} className={cn(index % 2 === 1 && 'is-alt', row.id === staff && 'is-active')}>
-          <th scope="row" className="is-left">
-            <span className="dwr-person">
-              <span className={cn('record-avatar', `avatar-hue-${hueOf(row.name)}`)} aria-hidden="true">{initials(row.name)}</span>
-              {onPick
-                ? <button type="button" className="dwr-who" onClick={() => onPick(row.id === staff ? '' : row.id)} aria-pressed={row.id === staff} title={row.id === staff ? 'Show all recruiters' : `Show only ${row.name}`}>{row.name}</button>
-                : <span className="dwr-who">{row.name}</span>}
-            </span>
-          </th>
-          <td className="is-num" data-label="Status"><StatusCell row={row} /></td>
-          <td className="is-num" data-label="Shift">{row.shift ? <span className="dwr-plain tnum">{row.shift}</span> : DASH}</td>
-          <td className="is-num" data-label="First login">{row.firstIn ? <span className="dwr-plain tnum">{clockTime(row.firstIn, zone)}</span> : DASH}</td>
-          <td className="is-num" data-label="Last logout">{row.stillIn
-            ? <span className="dwa-live"><i aria-hidden="true" />Still logged in</span>
-            : row.lastOut ? <span className="dwr-plain tnum">{clockTime(row.lastOut, zone)}</span> : DASH}</td>
-          <td className="is-num" data-label="Hours worked">{row.sessions.length || row.workedSeconds > 0 ? <span className="dwr-plain tnum">{durationLabel(row.workedSeconds)}</span> : DASH}</td>
-          <td className="is-num" data-label="Late / early by">{punctualityText(row) ? <span className="dwr-plain dwa-warn tnum">{punctualityText(row)}</span> : DASH}</td>
-          {showPresence && <td className="is-num" data-label="Online / idle">{row.tracked ? <span className="dwr-plain tnum">{durationLabel(row.activeSeconds)} / {durationLabel(row.idleSeconds)}</span> : DASH}</td>}
-          <td className="is-num" data-label="Sessions"><Sessions row={row} zone={zone} /></td>
-        </tr>)}
-      </tbody>
-    </table>
-  </ScrollEdges>
-}
-
-function StatusCell({ row }: { row: AttendanceRow }) {
-  const now = presenceLabel(row)
-  return <span className="dwa-status">
-    <span className={cn('dwa-pill', `tone-${row.tone}`)}>{row.label}</span>
-    {now.label && <small className={cn('dwa-now', now.live && 'is-live')}>{now.live && <i aria-hidden="true" />}{now.label}</small>}
-  </span>
-}
-
-function Sessions({ row, zone }: { row: AttendanceRow; zone: string }) {
-  if (!row.sessions.length) return DASH
-  return <details className="dwa-sessions">
-    <summary title="Show each login and logout"><span className="tnum">{row.sessions.length}</span></summary>
-    <ol>{row.sessions.map((session, index) => <li key={session.checkedInAt + index} className="tnum">
-      {clockTime(session.checkedInAt, zone)} {'–'} {session.checkedOutAt ? clockTime(session.checkedOutAt, zone) : 'now'}
-      <small>{durationLabel(session.seconds)}</small>
-    </li>)}</ol>
-  </details>
 }

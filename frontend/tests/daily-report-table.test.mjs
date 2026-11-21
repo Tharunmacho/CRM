@@ -172,8 +172,7 @@ test('without the additive keys the views say so in one short sentence', () => {
 
 test('the page: titles, the Tasks-style header with no subtitle, tabs and period row, and the Tasks CSS reused', async () => {
   const page = await readFile(new URL('../src/features/daily-report/daily-report-page.tsx', import.meta.url), 'utf8')
-  assert.match(page, /daily: 'Task report', lead: 'Lead sheet report'/)
-  assert.ok(page.indexOf('<PageHeader') < page.indexOf('{tabs}') && page.indexOf('{tabs}') < page.indexOf('<PeriodRow'))
+  assert.ok(page.indexOf('<ReportsHeader') < page.indexOf('{tabs}') && page.indexOf('{tabs}') < page.indexOf('<ReportToolbar'))
   assert.ok(!/subtitle|dwr-when|description=/.test(page), 'no subtitle under the title')
   assert.match(page, /Export Excel/)
   assert.match(page, /Refresh/)

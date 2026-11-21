@@ -1,5 +1,11 @@
 import type { TrackerRow } from './client-tracker-model'
 
+/** The short name of every stage of a placement (1 to 13), as the Client tracker's by-client view groups the candidates. */
+export const STAGE_NAMES: Readonly<Record<number, string>> = {
+  1: 'Prescreening', 2: 'CV to client', 3: 'Interview to schedule', 4: 'Interview result', 5: 'Offer', 6: 'Advance', 7: 'Passport',
+  8: 'Medical', 9: 'PCC', 10: 'Visa', 11: 'Review', 12: 'Stamp', 13: 'Air ticket',
+}
+
 /** The stages a recruiter waits on, as the Dashboard card names them (stage numbers are those of the Client tracker, 1 to 13). */
 export const WAITING_STAGES: readonly { no: number; label: string }[] = [
   { no: 5, label: 'Offer' }, { no: 6, label: 'Advance' }, { no: 7, label: 'Passport' }, { no: 8, label: 'Medical' }, { no: 9, label: 'PCC' },

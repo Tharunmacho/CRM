@@ -80,13 +80,13 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import HTTPException
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Date, String, and_, case, cast, exists, func, literal, or_, select, text, union_all, update
+from sqlalchemy import Date, DateTime, String, and_, case, cast, exists, extract, func, literal, or_, select, text, union_all, update
 from sqlalchemy.orm import aliased
 
 from app.core.roles import ROLE_LABELS
 from app.db import models as m
 from app.db.models import LEAD_STATUSES
-from app.domain.stages import MEDICAL_STAGE, STAGES, STOP_OUTCOMES, TICKET_STAGE, TOTAL_STAGES, VISA_STAGE
+from app.domain.stages import MEDICAL_STAGE, STAGES, STOP_EXITS, STOP_OUTCOMES, TICKET_STAGE, TOTAL_STAGES, VISA_STAGE
 from app.services import change_feed
 from app.services.daily_work import WORKABLE, _parked, agency_today, day_bounds
 from app.services.parallel_reads import parallel_reads
@@ -100,6 +100,10 @@ NOTE_MAX = 500
 ROLE_NAMES = ROLE_LABELS   # what the export shows in its Role column: Admin, MD, Recruiter
 BY_CLIENT_MAX = 50              # clients listed in `byClient`; the rest are rolled up as "Other clients"
 HISTORY_EXPORT_MAX = 5000
+STUCK_DAYS = 7                  # a candidate whose current stage has waited longer than this is "stuck" (Task report)
+STALE_LEAD_DAYS = 3             # a lead nobody has contacted for longer than this is "aging" (Lead sheet report)
+INSIGHT_LIST = 10               # rows of the "Longest waiting" and "Aging" lists
+REASONS_MAX = 8                 # exit reasons listed, the rest are rolled up
 # The figures a day-close snapshot holds (and the history shows).
 SNAPSHOT_KEYS = ("forwarded", "prescreened", "shortlisted", "interviews", "interviewsOnline", "offers", "visas", "travelled",
                  "leadsContacted")
@@ -314,19 +318,23 @@ def read_stages(session, p: Period, zone: str, staff_id: str | None, client_id: 
 
 
 def read_stage_flow(session, p: Period, staff_id: str | None, client_id: str | None) -> list:
-    """(stage, credited person, completed, stopped) per stage and person: the stage records completed in the period (never reopened, with a person to credit,
-    filtered like the figures), and how many of them ended the placement (the stage's own stopping outcomes). The complete stage-by-stage
-    progress of the Daily report: how many were prescreened, forwarded ... up to the air ticket."""
+    """(stage, credited person, stop outcome or None, in the period?, records) per stage, person and kind: the stage records completed in the period
+    and in the previous one (never reopened, with a person to credit, filtered like the figures), the stopping ones carrying their outcome (the stage's own
+    stopping outcomes, which end the placement). One statement: the progress of the Daily report (how many were prescreened, forwarded ... up to the air
+    ticket), the exits and why, and the same for the previous period (a running period is compared up to the same elapsed time)."""
     AS = m.ApplicationStage
     who = func.coalesce(AS.completed_by, AS.owner_id)
-    conditions = [AS.completed_at >= p.start, AS.completed_at < p.end, _clean(AS), who.is_not(None), AS.outcome != "Unfit: reapplying"]
+    conditions = [AS.completed_at >= p.prev_start, AS.completed_at < p.end, _clean(AS), who.is_not(None), AS.outcome != "Unfit: reapplying"]
+    if p.prev_until < p.start:   # a running period: the previous one only up to the same elapsed time
+        conditions.append(or_(AS.completed_at < p.prev_until, AS.completed_at >= p.start))
     if staff_id:
         conditions.append(who == staff_id)
     if client_id:
         conditions.append(AS.application_id.in_(
             select(m.Application.id).join(m.Order, m.Order.id == m.Application.order_id).where(m.Order.company_id == client_id)))
-    stopped = case(*[(and_(AS.stage == no, AS.outcome.in_(sorted(outcomes))), 1) for no, outcomes in STOPPED_OUTCOMES.items() if outcomes], else_=0)
-    return session.execute(select(AS.stage, who, func.count(), func.coalesce(func.sum(stopped), 0)).where(*conditions).group_by(AS.stage, who)).all()
+    stopped = case(*[(and_(AS.stage == no, AS.outcome.in_(sorted(outcomes))), AS.outcome) for no, outcomes in STOPPED_OUTCOMES.items() if outcomes])
+    cur = AS.completed_at >= p.start
+    return session.execute(select(AS.stage, who, stopped, cur, func.count()).where(*conditions).group_by(AS.stage, who, stopped, cur)).all()
 
 
 _ACTIVITY = f"""
@@ -431,12 +439,36 @@ SELECT 'new_p', CAST(NULL AS varchar), CAST(NULL AS date), CAST(NULL AS text), l
  WHERE (CAST(:staff AS varchar) IS NULL OR l.owner_id = CAST(:staff AS varchar))
    AND ((l.created_at >= :cur_start AND l.created_at < :end) OR (l.created_at >= :prev_start AND l.created_at < :prev_until))
  GROUP BY 5
+UNION ALL
+SELECT 'final_prev', f.uid, CAST(NULL AS date), f.raw, CAST(NULL AS boolean), count(*) FROM (
+  SELECT DISTINCT ON (a.uid, a.lead_id) a.uid,
+         CASE WHEN a.kind = 'call' THEN a.meta ->> 'outcome' WHEN a.meta ->> 'attempt' = 'true' THEN 'no_answer' ELSE a.meta ->> 'to' END AS raw
+    FROM act a
+   WHERE a.created_at < :cur_start
+   ORDER BY a.uid, a.lead_id, a.created_at DESC, a.id DESC) f
+  GROUP BY 2, 4
+UNION ALL
+SELECT 'stale', l.owner_id, CAST(NULL AS date), CAST(NULL AS text), CAST(NULL AS boolean), count(*)
+  FROM crm_leads l
+ WHERE l.status = 'new' AND l.call_count = 0 AND {AT} < :stale_before
+   AND (CAST(:staff AS varchar) IS NULL OR l.owner_id = CAST(:staff AS varchar))
+ GROUP BY 2
+UNION ALL
+(SELECT 'aging', l.owner_id, CAST(timezone(CAST(:tz AS text), {AT}) AS date), l.id || chr(31) || COALESCE(l.name, ''), CAST(NULL AS boolean),
+        CAST(floor(extract(epoch FROM (CAST(:now AS timestamptz) - {AT})) / 86400) AS bigint)
+   FROM crm_leads l
+  WHERE l.status = 'new' AND l.call_count = 0 AND {AT} < :stale_before
+    AND (CAST(:staff AS varchar) IS NULL OR l.owner_id = CAST(:staff AS varchar))
+    AND NOT EXISTS (SELECT 1 FROM auth_users ad WHERE ad.id = l.owner_id AND ad.role = 'admin')
+  ORDER BY {AT} ASC, l.id
+  LIMIT {INSIGHT_LIST})
 """)
 
 
 def read_leads(session, p: Period, zone: str, staff_id: str | None, now: datetime) -> list:
     return session.execute(_LEADS_SQL, {"staff": staff_id, "unit": p.unit, "tz": zone, "prev_start": p.prev_start, "cur_start": p.start,
-                                        "prev_until": p.prev_until, "end": p.end, "now": now}).all()
+                                        "prev_until": p.prev_until, "end": p.end, "now": now,
+                                        "stale_before": now - timedelta(days=STALE_LEAD_DAYS)}).all()
 
 
 _TEMPLATE_FIRST = ("ringing", "no incoming calls", "not eligible")   # the built-in status templates, in the Lead sheet's order
@@ -481,26 +513,48 @@ def read_tasks(session, p: Period, staff_id: str | None, now: datetime) -> list:
     return session.execute(query).all()
 
 
-def stage_now_union(staff_id: str | None):
-    """(owner, stage, candidates) for every candidate CURRENTLY at a stage, as one UNION query. Stage 1-13: the current stage of each
-    ACTIVE application. Stage 0 ('Not on an order yet'): workable candidates (new / in process / needs review, the Daily work list's
-    WORKABLE) with no active application that are not parked after their own decline (daily_work._parked). The owner is the
-    candidate's recruiter (Daily work's definition: Candidate.owner_id), else the application's own recorded recruiter."""
+def _entered_stage():
+    """When the placement reached the stage it is at: its latest completed (never reopened) stage record, else the day it was mapped."""
+    AS = aliased(m.ApplicationStage)
+    last = select(func.max(AS.completed_at)).where(AS.application_id == m.Application.id, _clean(AS)).correlate(m.Application).scalar_subquery()
+    return func.coalesce(last, m.Application.created_at)
+
+
+def stage_now_union(staff_id: str | None, now: datetime):
+    """Rows for every candidate CURRENTLY at a stage, as one UNION query, in ONE shape (kind, owner, stage, n, stuck, days, candidate, name, care id, since):
+    'agg' = (owner, stage) groups with the candidates there, those waiting longer than STUCK_DAYS and the days they have waited together; 'top' = the
+    INSIGHT_LIST candidates who have waited longest (Administrator-owned ones left out). Stage 1-13: the current stage of each ACTIVE application.
+    Stage 0 ('Not on an order yet'): workable candidates (new / in process / needs review, the Daily work list's WORKABLE) with no active application that
+    are not parked after their own decline (daily_work._parked): no waiting time is kept for them. The owner is the candidate's recruiter (Daily work's
+    definition: Candidate.owner_id), else the application's own recorded recruiter."""
     A, C = m.Application, m.Candidate
     owner = func.coalesce(C.owner_id, A.owner_id)
-    placed = (select(owner.label("owner"), A.current_stage.label("stage"), func.count().label("n")).select_from(A)
-              .join(C, C.id == A.candidate_id).where(A.status == m.ApplicationStatus.active).group_by(owner, A.current_stage))
-    unmapped = (select(C.owner_id.label("owner"), literal(0).label("stage"), func.count().label("n"))
+    since = _entered_stage()
+    days = extract("epoch", literal(now, DateTime(timezone=True)) - since) / 86400.0
+    none_text = lambda name: cast(None, String).label(name)   # noqa: E731
+    placed = (select(literal("agg").label("kind"), owner.label("owner"), A.current_stage.label("stage"), func.count().label("n"),
+                     func.count().filter(days > STUCK_DAYS).label("stuck"), func.coalesce(func.sum(days), 0.0).label("days"),
+                     none_text("cid"), none_text("cname"), none_text("care"), cast(None, DateTime(timezone=True)).label("since"))
+              .select_from(A).join(C, C.id == A.candidate_id).where(A.status == m.ApplicationStatus.active).group_by(owner, A.current_stage))
+    unmapped = (select(literal("agg"), C.owner_id, literal(0), func.count(), literal(0), literal(0.0), none_text("cid"), none_text("cname"),
+                       none_text("care"), cast(None, DateTime(timezone=True)))
                 .where(C.owner_id.is_not(None), C.status.in_(WORKABLE),
                        ~exists().where(A.candidate_id == C.id, A.status == m.ApplicationStatus.active).correlate(C), ~_parked())
                 .group_by(C.owner_id))
     if staff_id:
         placed, unmapped = placed.where(owner == staff_id), unmapped.where(C.owner_id == staff_id)
-    return union_all(placed, unmapped)
+    admins = select(m.User.id).where(m.User.role == m.Role.admin)
+    longest = (select(literal("top").label("kind"), owner.label("owner"), A.current_stage.label("stage"), literal(1).label("n"), literal(0).label("stuck"),
+                      days.label("days"), C.id.label("cid"), C.name.label("cname"), C.care_id.label("care"), since.label("since"))
+               .select_from(A).join(C, C.id == A.candidate_id).where(A.status == m.ApplicationStatus.active, or_(owner.is_(None), owner.not_in(admins))))
+    if staff_id:
+        longest = longest.where(owner == staff_id)
+    longest = longest.order_by(since.asc(), A.id).limit(INSIGHT_LIST).subquery("top")
+    return union_all(placed, unmapped, select(*longest.c))
 
 
-def read_stage_now(session, staff_id: str | None) -> list:
-    return session.execute(stage_now_union(staff_id)).all()
+def read_stage_now(session, staff_id: str | None, now: datetime) -> list:
+    return session.execute(stage_now_union(staff_id, now)).all()
 
 
 def read_users(session) -> list:
@@ -544,6 +598,19 @@ def classify(raw: str | None, follow_up: bool) -> str:
     if follow_up:
         return "callback"
     return "noAnswer" if raw == "no_answer" else "answered"
+
+
+# The stage's own stopping exits give the reason its words ("Rejected at interview", "Offer declined"); the older negative answers have these.
+LEGACY_EXIT_LABELS = {"Not forwarded": "Not forwarded to the client", "Not received": "Offer letter not received", "Unfit": "Medically unfit"}
+HIDDEN_ROLES = frozenset({"admin"})   # the Administrator account runs the system: it is no row of a management report
+
+
+def exit_label(no: int, outcome: str) -> str:
+    """Why a placement ended, for the 'Where candidates are lost' list: the stopping exit's label at that stage, else the outcome in words."""
+    for _reason, label, written in STOP_EXITS.get(no, {}).values():
+        if written == outcome:
+            return label
+    return LEGACY_EXIT_LABELS.get(outcome, outcome)
 
 
 def _initials(name: str) -> str:
@@ -594,7 +661,7 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
     if not force_self:
         reads["clients"] = lambda s: read_clients(s, p, staff_id)
         reads["tasks"] = lambda s: read_tasks(s, p, staff_id, now)
-        reads["stage_now"] = lambda s: read_stage_now(s, staff_id)
+        reads["stage_now"] = lambda s: read_stage_now(s, staff_id, now)
     if not force_self:   # the day-close submit path asks for the person's own figures only: no stage-by-stage read for it
         reads["stage_flow"] = lambda s: read_stage_flow(s, p, staff_id, client)
     if single:
@@ -629,6 +696,9 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
     unowned: dict[str, int] = {"total": 0, "never": 0, "new": 0}
     status_by: dict[str | None, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     status_names: dict[str, str] = {}
+    prev_feedback: dict[str | None, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    stale_by: dict[str | None, int] = defaultdict(int)
+    aging: list[tuple] = []
     for part, uid, day, key, flag, n in raw["leads"]:
         if part == "series":
             series["leadsContacted"][day] += n
@@ -669,13 +739,24 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
                 new_in += n
             else:
                 prev_new += n
+        elif part == "final_prev":
+            prev_feedback[uid][classify(key, False)] += int(n)
+        elif part == "stale":
+            stale_by[uid] += int(n)
+        elif part == "aging":
+            aging.append((uid, day, key, int(n)))
 
     # ---- tasks and the pipeline right now
     task_rows = {uid: (int(done), int(pending), int(overdue)) for uid, done, pending, overdue in raw.get("tasks", [])}
     stage_counts: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
-    for uid, stage_no, n in raw.get("stage_now", []):
-        if uid is not None:
+    waiting_rows: dict[tuple, tuple[int, int, float]] = {}
+    longest_rows: list[tuple] = []
+    for kind, uid, stage_no, n, stuck, days, cid, cname, care, since in raw.get("stage_now", []):
+        if kind == "top":
+            longest_rows.append((uid, int(stage_no), cid, cname, care, since, float(days or 0)))
+        elif uid is not None:
             stage_counts[uid][int(stage_no)] += int(n)
+            waiting_rows[(uid, int(stage_no))] = (int(n), int(stuck), float(days or 0))
 
     # ---- who is listed
     if self_only:
@@ -821,19 +902,73 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
         stages = {"totals": [{"no": no, "key": STAGE_NOW_KEYS[no][0], "label": STAGE_NOW_KEYS[no][1],
                               "count": sum(x["counts"][str(no)] for x in per_staff)} for no in range(0, TOTAL_STAGES + 1)],
                   "perStaff": per_staff}
+    flow_reasons: dict[str, tuple[list, list]] = defaultdict(lambda: ([], []))
     flow: dict[int, tuple[int, int]] = {}
     flow_staff: dict[str, dict[str, dict[str, int]]] = {}
-    for no, who, done, ended in raw.get("stage_flow", []):
+    flow_cur, flow_prev = {"done": defaultdict(int), "ended": defaultdict(int)}, {"done": defaultdict(int), "ended": defaultdict(int)}
+    for no, who, outcome, in_period, n in raw.get("stage_flow", []):
+        ended = n if outcome is not None else 0
+        (flow_cur if in_period else flow_prev)["done"][who] += int(n)
+        (flow_cur if in_period else flow_prev)["ended"][who] += int(ended)
+        if outcome is not None:
+            label = exit_label(no, outcome)
+            flow_reasons[label][0 if in_period else 1].append((who, int(n)))
+        if not in_period:
+            continue
         total_done, total_ended = flow.get(no, (0, 0))
-        flow[no] = (total_done + int(done), total_ended + int(ended))
+        flow[no] = (total_done + int(n), total_ended + int(ended))
         person = flow_staff.setdefault(who, {"completed": {}, "stopped": {}})
-        person["completed"][str(no)] = int(done)
-        person["stopped"][str(no)] = int(ended)
+        person["completed"][str(no)] = person["completed"].get(str(no), 0) + int(n)
+        person["stopped"][str(no)] = person["stopped"].get(str(no), 0) + int(ended)
     stage_flow_staff = [{"id": uid, "completed": {str(no): person["completed"].get(str(no), 0) for no in range(1, TOTAL_STAGES + 1)},
                          "stopped": {str(no): person["stopped"].get(str(no), 0) for no in range(1, TOTAL_STAGES + 1)}}
                         for uid, person in sorted(flow_staff.items())]
     stage_flow = [{"no": definition.no, "key": definition.key, "label": definition.title,
                    "completed": flow.get(definition.no, (0, 0))[0], "stopped": flow.get(definition.no, (0, 0))[1]} for definition in STAGES]
+    # ---- the management reading (additive): everything below counts the people a report lists (the Administrator account is no row)
+    names = {pid: pname for pid, pname, *_ in people}
+    shown = {r["id"] for r in rows if r["role"] not in HIDDEN_ROLES}
+    task_insight = None
+    if "stage_now" in raw:
+        by_stage = []
+        for no in range(1, TOTAL_STAGES + 1):
+            count = stuck = 0
+            days = 0.0
+            for uid in shown:
+                n_, s_, d_ = waiting_rows.get((uid, no), (0, 0, 0.0))
+                count, stuck, days = count + n_, stuck + s_, days + d_
+            by_stage.append({"no": no, "label": STAGE_NOW_KEYS[no][1], "count": count, "stuck": stuck, "avgDays": round(days / count, 1) if count else None})
+        busiest = max((x for x in by_stage if x["count"]), key=lambda x: (x["count"], x["avgDays"] or 0, -x["no"]), default=None)
+        reasons = []
+        for label, (cur_list, prev_list) in flow_reasons.items():
+            count = sum(n_ for uid, n_ in cur_list if uid in shown)
+            before = sum(n_ for uid, n_ in prev_list if uid in shown)
+            if count or before:
+                reasons.append({"label": label, "count": count, "previous": None if p.all_time else before})
+        reasons.sort(key=lambda x: (-x["count"], x["label"]))
+        reasons = [x for x in reasons if x["count"]]
+        completed = sum(flow_cur["done"].get(uid, 0) for uid in shown)
+        stopped = sum(flow_cur["ended"].get(uid, 0) for uid in shown)
+        task_insight = {
+            "stuckDays": STUCK_DAYS,
+            "waiting": {"total": sum(x["count"] for x in by_stage), "stuck": sum(x["stuck"] for x in by_stage), "byStage": by_stage, "busiest": busiest},
+            "stuckPerStaff": {uid: sum(waiting_rows.get((uid, no), (0, 0, 0.0))[1] for no in range(1, TOTAL_STAGES + 1)) for uid in sorted(shown)},
+            "longest": [{"candidateId": cid, "careId": care, "name": cname or "No name", "staffId": uid, "staffName": names.get(uid) or "Unassigned",
+                         "stage": no, "stageLabel": STAGE_NOW_KEYS[no][1], "since": since.isoformat() if since else None, "days": int(days)}
+                        for uid, no, cid, cname, care, since, days in longest_rows],
+            "completed": {"value": completed, "previous": None if p.all_time else sum(flow_prev["done"].get(uid, 0) for uid in shown)},
+            "stopped": {"value": stopped, "previous": None if p.all_time else sum(flow_prev["ended"].get(uid, 0) for uid in shown)},
+            "exitReasons": reasons[:REASONS_MAX], "exitOther": sum(x["count"] for x in reasons[REASONS_MAX:]),
+        }
+    lead_insight = {
+        "staleDays": STALE_LEAD_DAYS,
+        "stale": {"total": sum(stale_by.get(uid, 0) for uid in shown) + (0 if staff_id else stale_by.get(None, 0)),
+                  "unassigned": 0 if staff_id else stale_by.get(None, 0), "perStaff": {uid: stale_by.get(uid, 0) for uid in sorted(shown)}},
+        "aging": [{"leadId": key.partition("")[0], "name": key.partition("")[2] or "No name", "staffId": uid, "staffName": names.get(uid) or "Unassigned",
+                   "since": day.isoformat() if day else None, "days": days} for uid, day, key, days in aging],
+        "previous": None if p.all_time else {"interested": sum(prev_feedback.get(uid, {}).get("interested", 0) for uid in shown),
+                                              "notInterested": sum(prev_feedback.get(uid, {}).get("notInterested", 0) for uid in shown)},
+    }
     for r in rows:   # the working counters are not part of the answer
         for hidden in [k for k in r if k.startswith("_")]:
             del r[hidden]
@@ -849,8 +984,10 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
         "funnel": [{"key": key, "label": LABELS[key], "value": totals[key]} for key in FUNNEL_ORDER],
         "staff": rows, "compliance": compliance, "clients": clients, "leadSheet": lead_sheet, "byClient": by_client,
         "stageFlow": stage_flow,
-        "stageFlowStaff": stage_flow_staff,
+        "stageFlowStaff": stage_flow_staff, "leadInsight": lead_insight,
     }
+    if task_insight is not None:
+        report["taskInsight"] = task_insight
     if team_tasks is not None:
         report["tasks"] = team_tasks
     if stages is not None:
@@ -1024,6 +1161,8 @@ def metric_label(metric: str) -> str | None:
         return EXTRA_LABELS[metric]
     if metric in LEAD_LIST_METRICS:
         return LEAD_LIST_METRICS[metric][0]
+    if re.fullmatch(r"stuck(:\d{1,2})?", metric):
+        return f"Stuck: waiting more than {STUCK_DAYS} days"
     found = re.fullmatch(r"stage:(\d{1,2})", metric)
     if found and int(found.group(1)) in STAGE_NOW_KEYS:
         return STAGE_NOW_KEYS[int(found.group(1))][1]
@@ -1038,6 +1177,8 @@ LEAD_LIST_METRICS = {
     # The Lead sheet screen's own cards, whoever holds the lead (unowned ones show as "Unassigned"): all leads, and status new with no call.
     "leadsTotal": ("Leads on the sheet", "Lead"),
     "leadsNotContacted": ("Never contacted (Lead sheet)", "Never contacted"),
+    "leadsStale": (f"Not contacted for more than {STALE_LEAD_DAYS} days", "Waiting"),
+    "leadsFollowUp": ("Leads that need a follow-up now", "Follow-up due"),
 }
 _LEAD_LIST_WHERE = {
     "leadsAssignedInPeriod": (AT, f"l.owner_id IS NOT NULL AND {AT} >= :cur_start AND {AT} < :end"),
@@ -1048,16 +1189,19 @@ _LEAD_LIST_WHERE = {
     "leadsBacklog": (AT, "l.owner_id IS NOT NULL AND l.status = 'new' AND l.call_count = 0"),
     "leadsTotal": ("l.created_at", "TRUE"),
     "leadsNotContacted": ("l.created_at", "l.status = 'new' AND l.call_count = 0"),
+    "leadsStale": (AT, f"l.status = 'new' AND l.call_count = 0 AND {AT} < :stale_before AND NOT EXISTS (SELECT 1 FROM auth_users ad WHERE ad.id = l.owner_id AND ad.role = 'admin')"),
+    "leadsFollowUp": ("l.next_follow_up_at", f"l.owner_id IS NOT NULL AND l.next_follow_up_at <= :now AND l.status NOT IN {CLOSED}"),
 }
 
 
-def _lead_list_rows(session, metric, p, staff_id, offset, limit):
+def _lead_list_rows(session, metric, p, staff_id, offset, limit, now):
     """The leads behind the period-aware lead numbers (same conditions as the report's SQL), newest first."""
     at, where = _LEAD_LIST_WHERE[metric]
     sql = text(f"SELECT {at} AS at, u.name AS owner_name, l.id, l.name, l.position_applied, l.status, l.status_label, count(*) OVER () AS total "
                f"FROM crm_leads l LEFT JOIN auth_users u ON u.id = l.owner_id WHERE {where} "
                f"AND (CAST(:staff AS varchar) IS NULL OR l.owner_id = CAST(:staff AS varchar)) ORDER BY 1 DESC, l.id LIMIT :limit OFFSET :offset")
-    rows = session.execute(sql, {"staff": staff_id, "cur_start": p.start, "end": p.end, "offset": offset, "limit": limit}).all()
+    rows = session.execute(sql, {"staff": staff_id, "cur_start": p.start, "end": p.end, "offset": offset, "limit": limit, "now": now,
+                                 "stale_before": now - timedelta(days=STALE_LEAD_DAYS)}).all()
     verb = LEAD_LIST_METRICS[metric][1]
     return [{"at": r.at.isoformat(), "staffName": r.owner_name or "Unassigned", "kind": "lead", "candidateId": None, "leadId": r.id,
              "careId": None, "name": r.name or "No name", "client": None, "job": r.position_applied,
@@ -1126,6 +1270,27 @@ def _stage_now_rows(session, number, staff_id, offset, limit):
         (int(rows[0][7]) if rows else 0)
 
 
+def _stuck_rows(session, number, staff_id, now, offset, limit):
+    """The candidates whose current stage has waited longer than STUCK_DAYS (at one stage when `number`), the longest waiting first."""
+    A, C, O = m.Application, m.Candidate, m.Order
+    owner = func.coalesce(C.owner_id, A.owner_id)
+    since = _entered_stage()
+    days = extract("epoch", literal(now, DateTime(timezone=True)) - since) / 86400.0
+    admins = select(m.User.id).where(m.User.role == m.Role.admin)
+    query = (select(since, m.User.name, C.id, C.name, C.care_id, m.Company.name, m.Designation.title, A.current_stage, days, func.count().over())
+             .select_from(A).join(C, C.id == A.candidate_id).join(O, O.id == A.order_id).join(m.Company, m.Company.id == O.company_id)
+             .join(m.Designation, m.Designation.id == O.designation_id).outerjoin(m.User, m.User.id == owner)
+             .where(A.status == m.ApplicationStatus.active, days > STUCK_DAYS, or_(owner.is_(None), owner.not_in(admins))))
+    if number:
+        query = query.where(A.current_stage == number)
+    if staff_id:
+        query = query.where(owner == staff_id)
+    rows = session.execute(query.order_by(since.asc(), A.id).offset(offset).limit(limit)).all()
+    return [{"at": r[0].isoformat(), "staffName": r[1] or "Unknown user", "kind": "candidate", "candidateId": r[2], "leadId": None, "careId": r[4],
+             "name": r[3], "client": r[5], "job": r[6],
+             "detail": f"Waiting {int(r[8])} days at stage {r[7]}: {STAGE_NOW_KEYS[r[7]][1]}"} for r in rows], (int(rows[0][9]) if rows else 0)
+
+
 def drilldown(db, viewer, metric: str, from_date, to_date, staff, client, page: int, page_size: int, zone: str, now: datetime,
               *, all_time: bool = False) -> dict:
     """The rows behind one number, newest first, in the same scope as the report. One statement (plus one only for a page past the end)."""
@@ -1147,11 +1312,13 @@ def drilldown(db, viewer, metric: str, from_date, to_date, staff, client, page: 
         if metric == "leadsAssigned":
             return _owned_lead_rows(db, staff, offset, limit)
         if metric in LEAD_LIST_METRICS:
-            return _lead_list_rows(db, metric, p, staff, offset, limit)
+            return _lead_list_rows(db, metric, p, staff, offset, limit, now)
         if metric in ("tasksDone", "tasksPending", "tasksOverdue"):
             return _task_rows(db, metric, p, staff, now, offset, limit)
         if metric.startswith("stage:"):
             return _stage_now_rows(db, int(metric[6:]), staff, offset, limit)
+        if metric.startswith("stuck"):
+            return _stuck_rows(db, int(metric[6:] or 0) if metric != "stuck" else 0, staff, now, offset, limit)
         return _stage_rows(db, metric, p, staff, client, offset, limit)
 
     rows, total = fetch(page * page_size, page_size)
@@ -1241,3 +1408,129 @@ def export_workbook(report: dict, history_rows: list[dict] | None = None) -> byt
                   for r in (history_rows or [])]
     sheets.append(("Submitted reports", submitted))
     return xlsx_rows(sheets)
+
+
+# ------------------------------------------------------------------ Excel export of one report tab (Task report / Lead sheet report)
+
+def _cell(value):
+    """Keep a spreadsheet from running text that starts like a formula (the Travelled export's rule)."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
+def _pct(part, whole):
+    return round(part / whole * 100, 1) if whole else None
+
+
+def _sheet(name: str, rows: list[list]) -> dict:
+    from app.services import lead_xlsx
+    safe = [[_cell(v) for v in row] for row in rows]
+    return {"name": name, "rows": safe, "widths": lead_xlsx.fit_widths(safe), "header": True, "freeze": True, "filter": False}
+
+
+def _period_lines(report: dict) -> list[list]:
+    period = report["period"]
+    return [["Period", "All time" if period.get("allTime") else f'{period["from"]} to {period["to"]}'],
+            ["Compared with", f'{period["previousFrom"]} to {period["previousTo"]}' if period.get("previousFrom") else "nothing (all time)"],
+            ["Generated at", report["generatedAt"]]]
+
+
+def task_report_workbook(report: dict) -> bytes:
+    """The Task report as the screen shows it: the recruiter x stage matrix with its Stuck column and Total row, stage by stage, where candidates are
+    lost, the longest waiting, and a Summary sheet. Recruiters and the MD only (the Administrator account is no row)."""
+    from app.services import lead_xlsx
+
+    insight = report.get("taskInsight") or {}
+    people = sorted((r for r in report["staff"] if r["role"] not in HIDDEN_ROLES), key=lambda r: r["name"].casefold())
+    per = {x["id"]: x for x in (report.get("stages") or {}).get("perStaff", [])}
+    stuck = insight.get("stuckPerStaff", {})
+    head = ["Recruiter", "No job"] + [f"{s.no}. {s.title}" for s in STAGES] + ["Total waiting", f"Stuck (> {STUCK_DAYS} days)"]
+    matrix, sums = [head], [0] * (len(head) - 1)
+    for r in people:
+        counts = per.get(r["id"], {}).get("counts", {})
+        line = [counts.get(str(no), 0) for no in range(0, TOTAL_STAGES + 1)]
+        line += [sum(line), stuck.get(r["id"], 0)]
+        sums = [a + b for a, b in zip(sums, line)]
+        matrix.append([r["name"]] + line)
+    matrix.append(["Total"] + sums)
+
+    by_stage = {x["no"]: x for x in (insight.get("waiting") or {}).get("byStage", [])}
+    flow = {x["no"]: x for x in report.get("stageFlow", [])}
+    total_wait = sum(x["count"] for x in by_stage.values())
+    stages = [["Stage", "Waiting now", "Share (%)", "Average days waiting", f"Stuck (> {STUCK_DAYS} days)", "Completed in the period", "Stopped in the period"]]
+    for s in STAGES:
+        w = by_stage.get(s.no, {})
+        stages.append([f"{s.no}. {s.title}", w.get("count", 0), _pct(w.get("count", 0), total_wait), w.get("avgDays"), w.get("stuck", 0),
+                       flow.get(s.no, {}).get("completed", 0), flow.get(s.no, {}).get("stopped", 0)])
+
+    reasons = [["Why candidates were lost", "Candidates", "Previous period"]]
+    reasons += [[x["label"], x["count"], x["previous"]] for x in insight.get("exitReasons", [])]
+    if insight.get("exitOther"):
+        reasons.append(["Other reasons", insight["exitOther"], None])
+    longest = [["Candidate", "Candidate ID", "Recruiter", "Stage", "Days waiting", "Waiting since"]]
+    longest += [[x["name"], x["careId"] or "", x["staffName"], f'{x["stage"]}. {x["stageLabel"]}', x["days"], (x["since"] or "")[:10]]
+                for x in insight.get("longest", [])]
+
+    done, lost, waiting = insight.get("completed") or {}, insight.get("stopped") or {}, insight.get("waiting") or {}
+    busiest = waiting.get("busiest") or {}
+    summary = [["Figure", "Value", "Previous period"],
+               ["Candidates waiting now", waiting.get("total", 0), None],
+               ["Stages completed in the period", done.get("value", 0), done.get("previous")],
+               ["Stopped or lost in the period", lost.get("value", 0), lost.get("previous")],
+               [f"Stuck: waiting more than {STUCK_DAYS} days", waiting.get("stuck", 0), None],
+               ["Busiest stage", f'{busiest["no"]}. {busiest["label"]}' if busiest else "", None],
+               ["Average days waiting there", busiest.get("avgDays"), None], []] + _period_lines(report)
+    return lead_xlsx.build_workbook([_sheet("Task report", matrix), _sheet("Stage by stage", stages), _sheet("Where candidates are lost", reasons),
+                                     _sheet("Longest waiting", longest), _sheet("Summary", summary)])
+
+
+def lead_report_workbook(report: dict, whole_team: bool = True) -> bytes:
+    """The Lead sheet report as the screen shows it: the recruiter x lead status matrix with Interested, Conversion % and the aging count, the leads nobody
+    has contacted for STALE_LEAD_DAYS days, and a Summary sheet."""
+    from app.services import lead_xlsx
+
+    sheet, insight = report["leadSheet"], report.get("leadInsight") or {}
+    columns = sheet["statusColumns"]
+    per = {x["id"]: x["counts"] for x in sheet["byStatusPerStaff"]}
+    stale = (insight.get("stale") or {}).get("perStaff", {})
+    head = ["Recruiter", "Assigned"] + [c["label"] for c in columns] + ["Contacted in the period", "Interested", "Conversion to interested (%)",
+                                                                           f"Not contacted for > {STALE_LEAD_DAYS} days"]
+    people = sorted((r for r in report["staff"] if r["role"] not in HIDDEN_ROLES), key=lambda r: r["name"].casefold())
+    matrix, tot = [head], {"assigned": 0, "contacted": 0, "interested": 0, "stale": 0, **{c["key"]: 0 for c in columns}}
+    for r in people:
+        leads, counts = r["leads"], per.get(r["id"], {})
+        matrix.append([r["name"], leads["assigned"]] + [counts.get(c["key"], 0) for c in columns]
+                      + [leads["contacted"], leads["interested"], _pct(leads["interested"], leads["contacted"]), stale.get(r["id"], 0)])
+        tot["assigned"] += leads["assigned"]
+        tot["contacted"] += leads["contacted"]
+        tot["interested"] += leads["interested"]
+        tot["stale"] += stale.get(r["id"], 0)
+        for c in columns:
+            tot[c["key"]] += counts.get(c["key"], 0)
+    if "unassigned" in per and whole_team:
+        counts = per["unassigned"]
+        unowned = (insight.get("stale") or {}).get("unassigned", 0)
+        matrix.append(["Unassigned", None] + [counts.get(c["key"], 0) for c in columns] + [None, None, None, unowned])
+        for c in columns:
+            tot[c["key"]] += counts.get(c["key"], 0)
+        tot["stale"] += unowned
+    matrix.append(["Total", tot["assigned"]] + [tot[c["key"]] for c in columns]
+                  + [tot["contacted"], tot["interested"], _pct(tot["interested"], tot["contacted"]), tot["stale"]])
+
+    aging = [["Lead", "Recruiter", "Waiting since", "Days waiting"]]
+    aging += [[x["name"], x["staffName"], x["since"] or "", x["days"]] for x in insight.get("aging", [])]
+
+    prev, before = sheet.get("previous") or {}, insight.get("previous") or {}
+    notint = {x["key"]: x["count"] for x in report["leadFeedback"]["byOutcome"]}.get("notInterested", 0)
+    contacted, interested = report["leadFeedback"]["contacted"], report["leadFeedback"]["interested"]
+    summary = [["Figure", "Value", "Previous period"],
+               ["New leads in the period", sheet["newInPeriod"], prev.get("newInPeriod")],
+               ["Contacted", contacted, prev.get("contacted")],
+               ["Interested", interested, before.get("interested")],
+               ["Not interested", notint, before.get("notInterested")],
+               ["Needs a follow-up now", report["leadFeedback"]["callbacksDue"], None],
+               ["Conversion, contacted to interested (%)", _pct(interested, contacted),
+                _pct(before.get("interested", 0), prev.get("contacted", 0)) if before and prev.get("contacted") else None],
+               [f"Not contacted for more than {STALE_LEAD_DAYS} days", (insight.get("stale") or {}).get("total", 0), None], []] + _period_lines(report)
+    return lead_xlsx.build_workbook([_sheet("Leads by status", matrix), _sheet("Aging leads", aging), _sheet("Summary", summary)])

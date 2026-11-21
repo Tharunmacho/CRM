@@ -15,7 +15,7 @@ from app.services.encoded_response import Encoded
 from app.services.response_cache import cached, scope_of
 from app.services.reporting import Filters, dashboard_data, read_dashboard_data, read_reporting_data, report_data
 from app.services.report_exports import REPORTS, pdf, xlsx
-from app.services import client_tracker, lead_metrics, staff_weekly, staff_weekly_export
+from app.services import client_tracker, client_tracker_clients, lead_metrics, staff_weekly, staff_weekly_export
 from app.services.parallel_reads import parallel_reads
 
 # Report and dashboard numbers are derived from nearly every business table; the change feed adds the "reports" topic to
@@ -91,6 +91,20 @@ def client_tracker_report(format: Literal["xlsx", "csv"] | None = None, wanted: 
     today = datetime.now(ZoneInfo(get_settings().agency_timezone)).date()
     return Response(payload, media_type=mime, headers={
         "Content-Disposition": f'attachment; filename="client-tracker-{today}.{format}"', "Cache-Control": "private, no-store"})
+
+
+# The same tracker for management: one line per client (openings, in process, placed, fill rate, last activity) with its orders and the
+# candidates in each. With format=xlsx it is the file of the clients the screen shows (status tab and search).
+@router.get("/client-tracker/clients")
+def client_tracker_clients_report(format: Literal["xlsx"] | None = None, status: Literal["all", "active", "stalled"] = "all", q: str = "",
+                                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+    body = client_tracker_clients.read_clients(db, user)
+    if format is None:
+        return body
+    payload = client_tracker_clients.xlsx_bytes(client_tracker_clients.wanted_clients(body, status, q))
+    today = datetime.now(ZoneInfo(get_settings().agency_timezone)).date()
+    return Response(payload, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={
+        "Content-Disposition": f'attachment; filename="client-tracker-clients-{today}.xlsx"', "Cache-Control": "private, no-store"})
 
 
 @router.get("")

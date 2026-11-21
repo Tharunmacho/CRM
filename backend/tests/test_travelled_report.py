@@ -102,10 +102,10 @@ def names(body):
     return [row["name"] for row in body["rows"]]
 
 
-def test_every_travelled_placement_is_listed_newest_first_with_its_client_and_agency(env):
+def test_every_travelled_placement_is_listed_old_to_new_with_its_client_and_agency(env):
     body = get(env)
     # in-progress Shijo (no date, not deployed) is not travelled; the deployed one without a date is listed, last
-    assert names(body) == ["Sivakumar K", "Selvam Balraj", "=Formula Name", "Arun Kumar", "Akash Murugesan", "Gladwin Gnanaraj", "Visakh Kumar"]
+    assert names(body) == ["Akash Murugesan", "Gladwin Gnanaraj", "=Formula Name", "Arun Kumar", "Selvam Balraj", "Sivakumar K", "Visakh Kumar"]
     assert body["total"] == 7
     akash = next(row for row in body["rows"] if row["name"] == "Akash Murugesan")
     assert akash == {
@@ -275,7 +275,7 @@ def test_a_month_needs_a_year_and_a_day_needs_a_month(env):
 
 
 def test_from_and_to_are_inclusive(env):
-    assert names(get(env, **{"from": "2026-05-12", "to": "2026-05-19"})) == ["Selvam Balraj", "=Formula Name", "Arun Kumar"]
+    assert names(get(env, **{"from": "2026-05-12", "to": "2026-05-19"})) == ["=Formula Name", "Arun Kumar", "Selvam Balraj"]
     assert names(get(env, **{"from": "2026-06-01"})) == ["Sivakumar K"]
     assert names(get(env, to="2025-12-30")) == ["Gladwin Gnanaraj"]
 
@@ -293,7 +293,7 @@ def test_filter_by_client_agency_country_and_search(env):
     assert set(names(get(env, country="Kuwait"))) == {"Sivakumar K"}
     assert names(get(env, q="cnd-00002")) == ["Arun Kumar"]
     assert names(get(env, q="fglzxe")) == ["Sivakumar K"]
-    assert names(get(env, country="UAE", agency="Star Agency", year=2026)) == ["Arun Kumar", "Akash Murugesan"]
+    assert names(get(env, country="UAE", agency="Star Agency", year=2026)) == ["Akash Murugesan", "Arun Kumar"]
     assert get(env, client="Nobody")["total"] == 0
 
 
@@ -415,3 +415,20 @@ def test_the_invoice_is_a_required_document_for_admin_and_md_but_not_for_recruit
         assert rows and all(row["documents"]["required"] == 10 and "Invoice" not in row["documents"]["missing"] for row in rows)
         text = env.client.get("/api/travelled/export", params={"format": "csv"}).content.decode("utf-8-sig")
         assert "Invoice" not in text
+
+
+def test_the_list_runs_old_to_new_by_traveller_number(env):
+    """CI 01 first; the numbers compare as numbers (CI 9 before CI 10 before CI 100); nobody without a number comes before a numbered traveller."""
+    with env.sessions() as db:
+        for candidate_id, number in (("c3", "CI 100"), ("c2", "CI 10"), ("c4", "CI 09")):
+            db.get(Candidate, candidate_id).traveller_id = number
+        db.commit()
+    body = get(env)
+    assert names(body)[:4] == ["Akash Murugesan", "Sivakumar K", "Arun Kumar", "Selvam Balraj"]        # CI 01, CI 09, CI 10, CI 100
+    unnumbered = [row for row in body["rows"] if row["travellerId"] is None]
+    assert names(body)[4:] == [row["name"] for row in unnumbered]
+    # unnumbered travellers: oldest travel date first, the undated last, ties by name
+    assert [row["travelDate"] for row in unnumbered] == ["2025-12-30", "2026-05-12", None]
+    assert [row["travelDate"] for row in body["rows"][:4]] == ["2026-05-09", "2026-06-01", "2026-05-12", "2026-05-19"]
+    exported = list(csv.reader(StringIO(env.client.get("/api/travelled/export", params={"format": "csv"}).content.decode("utf-8-sig"))))
+    assert [row[0] for row in exported[1:5]] == ["CI 01", "CI 09", "CI 10", "CI 100"]            # the file keeps the screen's order

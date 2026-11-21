@@ -92,10 +92,10 @@ def test_a_note_is_never_the_current_remark_and_a_remark_is_never_a_note(desk):
     assert again["remark"] is None and bodies(again["notes"]) == ["Only a note"]
     with desk.sessions() as db:   # the Excel: Remark empty, Notes filled
         sheet = tasks_export.table(db, listing(desk, "asha")["items"], [], TODAY)
-    line = next(r for r in sheet[1:] if r[6] == "Candidate 5")
-    assert line[12] == "" and "Only a note" in line[13]
-    other = next(r for r in sheet[1:] if r[6] == "Candidate 0")
-    assert other[12] == "Documents received" and "Documents received" not in other[13] and "Typed note" in other[13]
+    line = next(r for r in sheet[1:] if r[7] == "Candidate 5")
+    assert line[13] == "" and "Only a note" in line[14]
+    other = next(r for r in sheet[1:] if r[7] == "Candidate 0")
+    assert other[13] == "Documents received" and "Documents received" not in other[14] and "Typed note" in other[14]
 
 
 def test_the_notes_are_all_of_them_newest_first_every_day_and_every_task_of_the_candidate(desk):
@@ -110,7 +110,7 @@ def test_the_notes_are_all_of_them_newest_first_every_day_and_every_task_of_the_
     assert [n["id"] for n in row["notes"]] == [newest, middle, older]
     assert [n["id"] for n in row["todayNotes"]] == [newest]              # the TODAY chip and the Excel's Today cell read today's only
     with desk.sessions() as db:
-        cell = tasks_export.table(db, listing(desk, "asha")["items"], [], TODAY)[1][13]
+        cell = tasks_export.table(db, listing(desk, "asha")["items"], [], TODAY)[1][14]
     assert cell.splitlines() == ["08:35 Asha - Just now", "02 Nov 08:30 Asha - Yesterday", "27 Oct 08:30 Asha - Last week"]
 
 

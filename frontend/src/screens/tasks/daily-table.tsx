@@ -385,6 +385,13 @@ export function DocCell({ item, canAdd, onSave }: { item: Pick<DailyItem, 'comme
   return <span className="dw-none" title={item.applicationId ? 'No date of commencement yet' : 'Choose a job first, then add the date of commencement'}>—</span>
 }
 
+/** DOT: the date the candidate travelled ("9 Jul 2026"), read from the air-ticket stage; read-only, never typed. A dash until the placement has one. */
+export function DotCell({ item }: { item: Pick<DailyItem, 'travelDate'> }) {
+  const label = docLabel(item.travelDate)
+  if (label) return <time className="dw-doc dw-dot tnum" dateTime={item.travelDate ?? undefined} title="Date of travel">{label}</time>
+  return <span className="dw-none" title="No date of travel yet">—</span>
+}
+
 export interface MenuEntry { label: string; icon: typeof ArrowRight | typeof ExternalLink; onSelect: () => void }
 
 /** The three-dot menu, drawn on the page body so the scrolling table never clips it. */

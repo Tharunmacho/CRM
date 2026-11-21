@@ -103,11 +103,11 @@ test('Reports is Task report | Lead sheet report | Attendance | Client tracker; 
   assert.match(other, /: ACCOUNT_TABS/)
 })
 
-test('the Task report is built from the Tasks screen parts: header, tabs, period row, summary tiles, matrix table, stage-by-stage table', async () => {
+test('the Task report is built from the shared parts: header, tabs, toolbar, summary cards, matrix table, stage-by-stage table, longest waiting', async () => {
   const shell = await read('features/daily-report/daily-report-page.tsx')
-  assert.ok(shell.indexOf('<PageHeader') < shell.indexOf('{tabs}') && shell.indexOf('{tabs}') < shell.indexOf('<PeriodRow') && shell.indexOf('<PeriodRow') < shell.indexOf('<TaskReportView'))
+  assert.ok(shell.indexOf('<ReportsHeader') < shell.indexOf('{tabs}') && shell.indexOf('{tabs}') < shell.indexOf('<ReportToolbar') && shell.indexOf('<ReportToolbar') < shell.indexOf('<TaskReportView'))
   const task = await read('features/daily-report/report-task.tsx')
-  assert.ok(task.indexOf('<Tiles') > -1 && task.indexOf('<Tiles') < task.indexOf('dwm-table') && task.indexOf('dwm-table') < task.indexOf('is-flow'))
+  assert.ok(task.indexOf('<SummaryCards') > -1 && task.indexOf('<SummaryCards') < task.indexOf('dwm-table') && task.indexOf('dwm-table') < task.indexOf('is-flow') && task.indexOf('is-flow') < task.indexOf('<LongestWaitingPanel'))
   assert.match(task, /from '@\/screens\/tasks\/daily-table'/) // the Tasks table's scroll edges
   assert.match(task, /onDrill\(`stage:\$\{no\}`/) // a waiting number opens its list
   assert.doesNotMatch(task, /leadSheet|LEAD_COLS|Daily report|Candidate monitoring|Lead sheet monitoring/)
@@ -116,8 +116,8 @@ test('the Task report is built from the Tasks screen parts: header, tabs, period
 })
 
 test('a recruiter sees only their own row (no recruiter filter) and a small My day card under it', async () => {
-  const task = await read('features/daily-report/report-task.tsx')
-  assert.ok(task.includes('{team && <Select'))
+  const bar = await read('features/daily-report/daily-report-toolbar.tsx')
+  assert.ok(bar.includes('{props.team && props.people.length > 0 && <label className="rp-filter">'))
   const shell = await read('features/daily-report/daily-report-page.tsx')
   assert.ok(shell.includes("view === 'daily' && data.scope === 'self' && <MyDayCard"))
 })

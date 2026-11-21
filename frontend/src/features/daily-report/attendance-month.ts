@@ -1,34 +1,11 @@
 /**
- * The pure part of Reports > Attendance (monthly staff overview and the daily record behind it): turns the month's policy record
- * (GET /attendance/month) and the month's requests (GET /attendance/requests) into the overview rows, the exception chips, the
- * summary tiles, the daily-record rows and the CSV. No React, so it can be tested on its own.
+ * The pure part of Reports > Attendance, the monthly view: turns the month's policy record (GET /attendance/month) into the recruiter x day
+ * grid (a mark per day, the totals per person and for everyone) and the daily-record rows of one person. The reading of a day is the one of the
+ * Excel file (backend app/services/attendance_month_export.py: day_mark, late_minutes, summarize), kept the same on purpose.
+ * No React, so it can be tested on its own.
  */
-import type { AttendanceCode, AttendanceRequest, EmployeeMonth, MonthlyAttendance, PolicyDay } from '../attendance/policy-model'
-import { NO_OWN_ATTENDANCE, minutesText, punctualityText, shiftLabel, type PillTone } from './attendance-rows'
-
-export type ChipKey = 'absent' | 'late' | 'incomplete' | 'requests'
-export interface ExceptionChip { key: ChipKey; count: number; label: string; tone: PillTone }
-export interface OverviewRow {
-  userId: string
-  name: string
-  role: string
-  active: boolean
-  /** "Tracked from 1 Nov 2026" (or "No records yet"). */
-  tracked: string
-  /** null when the person has no scheduled working day yet. */
-  percentage: number | null
-  percentText: string
-  /** 0 to 100, for the thin bar. */
-  bar: number
-  attendedDays: number
-  scheduledDays: number
-  daysText: string
-  chips: ExceptionChip[]
-  unpaidMinutes: number
-  unpaidText: string
-  requests: number
-}
-export interface MonthTiles { percentage: number | null; presentDays: number; late: number; absent: number; incomplete: number; pendingRequests: number; unpaidMinutes: number; people: number }
+import type { AttendanceCode, EmployeeMonth, MonthlyAttendance, PolicyDay } from '../attendance/policy-model'
+import { NO_OWN_ATTENDANCE, arrivalLateness, minutesText, punctualityText, shiftLabel, type PillTone } from './attendance-rows'
 
 /** 100 -> "100%", 83.33 -> "83.3%", 90 -> "90%", null -> "–". */
 export function percentText(value: number | null | undefined) {
@@ -36,85 +13,128 @@ export function percentText(value: number | null | undefined) {
   return `${Math.round(value * 10) / 10}%`
 }
 
-const longDay = (date: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(date + 'T12:00:00Z'))
 const shortDay = (date: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(date + 'T12:00:00Z'))
 const weekday = (date: string) => new Intl.DateTimeFormat('en-GB', { weekday: 'short', timeZone: 'UTC' }).format(new Date(date + 'T12:00:00Z'))
 
-/** "Tracked from 1 Nov 2026"; the person's tracking start, else the first day of the record. */
-export function trackedFromText(employee: Pick<EmployeeMonth, 'trackingStart' | 'days'>) {
-  const first = employee.days[0]?.date || employee.trackingStart
-  return first ? `Tracked from ${longDay(first.slice(0, 10))}` : 'No records yet'
+// ------------------------------------------------------------------------------------------------ the month grid
+
+/** P present, LT late, M missed check-out, A absent, L leave, WO weekly off, H holiday, N nothing to say yet (today before the first login). */
+export type DayMark = 'P' | 'LT' | 'M' | 'A' | 'L' | 'WO' | 'H' | 'N'
+const PRESENT_CODES = new Set(['P', 'LT', 'EE', 'PP', 'OD', 'WFH'])
+
+/** Minutes the first login came after the shift start (whole minutes, in the agency's zone; without a zone only the policy's own late minutes are known); working away on duty has no arrival time. */
+export function dayLateMinutes(day: Pick<PolicyDay, 'status' | 'checkIn' | 'shift' | 'lateMinutes'>, zone: string | undefined): number {
+  if (!day.checkIn || day.status === 'OD' || day.status === 'WFH') return 0
+  return arrivalLateness(day.checkIn, day.shift?.start, zone, day.lateMinutes)
 }
 
-/** The four chips of a row: "0 absent", "3 late", "1 incomplete", "2 requests". A count above zero carries a tone, zero stays quiet. */
-export function exceptionChips(employee: Pick<EmployeeMonth, 'summary'>, requests: number): ExceptionChip[] {
-  const s = employee.summary
-  const absent = s.absenceDays ?? s.absentDays ?? 0
-  return [
-    { key: 'absent', count: absent, label: `${absent} absent`, tone: absent > 0 ? 'red' : 'neutral' },
-    { key: 'late', count: s.lateDays ?? 0, label: `${s.lateDays ?? 0} late`, tone: (s.lateDays ?? 0) > 0 ? 'amber' : 'neutral' },
-    { key: 'incomplete', count: s.incompleteDays ?? 0, label: `${s.incompleteDays ?? 0} incomplete`, tone: (s.incompleteDays ?? 0) > 0 ? 'amber' : 'neutral' },
-    { key: 'requests', count: requests, label: `${requests} ${requests === 1 ? 'request' : 'requests'}`, tone: requests > 0 ? 'blue' : 'neutral' },
-  ]
-}
-
-/** Requests of the month per person (rejected ones are not counted: they changed nothing). */
-export function requestCounts(requests: Pick<AttendanceRequest, 'userId' | 'status'>[]) {
-  const counts = new Map<string, number>()
-  for (const request of requests) if (request.status !== 'rejected') counts.set(request.userId, (counts.get(request.userId) ?? 0) + 1)
-  return counts
-}
-const PENDING = new Set(['pending', 'awaiting_cover'])
-export const pendingRequests = (requests: Pick<AttendanceRequest, 'status'>[]) => requests.filter((request) => PENDING.has(request.status)).length
-
-/** One row per person: administrators do not clock in and are left out; ordered by name. */
-export function buildOverviewRows(month: MonthlyAttendance | null | undefined, requests: AttendanceRequest[] = []): OverviewRow[] {
-  const counts = requestCounts(requests)
-  return (month?.staff ?? [])
-    .filter((person) => !NO_OWN_ATTENDANCE.has(person.role))
-    .map((person) => {
-      const s = person.summary
-      const percentage = s.attendancePercentage ?? null
-      const asked = counts.get(person.userId) ?? 0
-      return {
-        userId: person.userId,
-        name: person.name,
-        role: person.role,
-        active: person.active,
-        tracked: trackedFromText(person),
-        percentage,
-        percentText: percentText(percentage),
-        bar: percentage == null ? 0 : Math.min(100, Math.max(0, percentage)),
-        attendedDays: s.attendedDays ?? 0,
-        scheduledDays: s.scheduledDays ?? 0,
-        daysText: `${s.attendedDays ?? 0} of ${s.scheduledDays ?? 0}`,
-        chips: exceptionChips(person, asked),
-        unpaidMinutes: s.unpaidMinutes ?? 0,
-        unpaidText: minutesText(s.unpaidMinutes ?? 0),
-        requests: asked,
-      }
-    })
-    .sort((a, b) => a.name.localeCompare(b.name))
-}
-
-/** The tiles above the table. The percentage is the days attended over the days scheduled across everyone shown (not an average of averages). */
-export function monthTiles(month: MonthlyAttendance | null | undefined, requests: AttendanceRequest[] = [], only = ''): MonthTiles {
-  const people = (month?.staff ?? []).filter((person) => !NO_OWN_ATTENDANCE.has(person.role) && (!only || person.userId === only))
-  let attended = 0, scheduled = 0, present = 0, late = 0, absent = 0, incomplete = 0, unpaid = 0
-  for (const person of people) {
-    const s = person.summary
-    attended += s.attendedDays ?? 0; scheduled += s.scheduledDays ?? 0; present += s.presentDays ?? 0
-    late += s.lateDays ?? 0; absent += s.absenceDays ?? s.absentDays ?? 0; incomplete += s.incompleteDays ?? 0; unpaid += s.unpaidMinutes ?? 0
+export function dayMark(day: Pick<PolicyDay, 'date' | 'status' | 'checkIn' | 'checkOut' | 'shift' | 'lateMinutes'>, today: string, zone: string | undefined): DayMark {
+  const status = day.status as string
+  const date = day.date.slice(0, 10)
+  if (status === 'WO' || status === 'H') return status
+  if (status === 'PL' || status === 'UL') return 'L'
+  // The policy turns a half-punched day into "absent" once its fix-up window has closed; the person was there, so it stays a missed check-out
+  if (status === 'A') return day.checkIn && !day.checkOut ? 'M' : 'A'
+  if (status === 'MP') {
+    if (!day.checkIn) return date < today ? 'A' : 'N'
+    return date >= today && !day.checkOut ? 'P' : 'M'
   }
-  const ids = new Set(people.map((person) => person.userId))
-  return {
-    percentage: scheduled > 0 ? Math.round((attended / scheduled) * 1000) / 10 : null,
-    presentDays: present, late, absent, incomplete,
-    pendingRequests: pendingRequests(requests.filter((request) => ids.has(request.userId))),
-    unpaidMinutes: unpaid,
-    people: people.length,
-  }
+  if (status === 'LT' || (PRESENT_CODES.has(status) && dayLateMinutes(day, zone) > 0)) return 'LT'
+  return PRESENT_CODES.has(status) ? 'P' : 'N'
 }
+
+export const MARK_WORDS: Record<DayMark, string> = { P: 'Present', LT: 'Late', M: 'Missed check-out', A: 'Absent', L: 'On leave', WO: 'Weekly off', H: 'Holiday', N: 'Not yet' }
+export const MARK_TONE: Record<DayMark, PillTone> = { P: 'green', LT: 'amber', M: 'amber', A: 'red', L: 'blue', WO: 'neutral', H: 'neutral', N: 'neutral' }
+
+export interface GridCell { date: string; mark: DayMark | ''; workedMinutes: number; lateMinutes: number; checkIn: string | null; checkOut: string | null }
+export interface GridPerson {
+  userId: string
+  name: string
+  role: string
+  active: boolean
+  cells: GridCell[]
+  present: number
+  late: number
+  absent: number
+  leave: number
+  missed: number
+  workedDays: number
+  totalMinutes: number
+  averageMinutes: number
+  /** The policy's attendance percentage (days attended over days scheduled), null before any scheduled day. */
+  percentage: number | null
+}
+export interface GridDate { date: string; day: number; weekday: string; weekend: boolean; future: boolean }
+export interface GridTotals { present: number; late: number; absent: number; leave: number; missed: number; workedDays: number; totalMinutes: number; averageMinutes: number }
+export interface MonthGrid { dates: GridDate[]; people: GridPerson[]; totals: GridTotals }
+
+const daysIn = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate()
+
+/** Every date of the month, with the day number and weekday letter for the grid's heading. Days after `today` are marked future. */
+export function monthDates(year: number, month: number, today: string): GridDate[] {
+  return Array.from({ length: daysIn(year, month) }, (_, index) => {
+    const date = `${year}-${String(month).padStart(2, '0')}-${String(index + 1).padStart(2, '0')}`
+    const weekdayIndex = new Date(date + 'T12:00:00Z').getUTCDay()
+    return { date, day: index + 1, weekday: ['S', 'M', 'T', 'W', 'T', 'F', 'S'][weekdayIndex], weekend: weekdayIndex === 0 || weekdayIndex === 6, future: date > today }
+  })
+}
+
+const average = (total: number, days: number) => (days ? Math.round(total / days) : 0)
+
+/** The grid of a month: one row per person (the Administrator account is never a row; ordered by name), one cell per date, totals per person and overall. */
+export function buildMonthGrid(month: MonthlyAttendance | null | undefined, today: string, zone: string, only = ''): MonthGrid {
+  const dates = month ? monthDates(month.year, month.month, today) : []
+  const totals: GridTotals = { present: 0, late: 0, absent: 0, leave: 0, missed: 0, workedDays: 0, totalMinutes: 0, averageMinutes: 0 }
+  const people = (month?.staff ?? []).filter((person) => !NO_OWN_ATTENDANCE.has(person.role) && (!only || person.userId === only)).map((person): GridPerson => {
+    const byDate = new Map(person.days.map((day) => [day.date.slice(0, 10), day]))
+    const row: GridPerson = { userId: person.userId, name: person.name, role: person.role, active: person.active, cells: [], present: 0, late: 0, absent: 0, leave: 0, missed: 0, workedDays: 0, totalMinutes: 0, averageMinutes: 0, percentage: person.summary.attendancePercentage ?? null }
+    for (const date of dates) {
+      const day = byDate.get(date.date)
+      if (!day) { row.cells.push({ date: date.date, mark: '', workedMinutes: 0, lateMinutes: 0, checkIn: null, checkOut: null }); continue }
+      const mark = dayMark(day, today, zone)
+      const worked = Math.max(0, Math.round(day.workedMinutes || 0))
+      row.cells.push({ date: date.date, mark, workedMinutes: worked, lateMinutes: dayLateMinutes(day, zone), checkIn: day.checkIn, checkOut: day.checkOut })
+      if (mark === 'P' || mark === 'LT' || mark === 'M') row.present += 1
+      if (mark === 'LT') row.late += 1
+      if (mark === 'A') row.absent += 1
+      if (mark === 'L') row.leave += 1
+      if (mark === 'M') row.missed += 1
+      if (worked > 0) { row.workedDays += 1; row.totalMinutes += worked }
+    }
+    row.averageMinutes = average(row.totalMinutes, row.workedDays)
+    for (const key of ['present', 'late', 'absent', 'leave', 'missed', 'workedDays', 'totalMinutes'] as const) totals[key] += row[key]
+    return row
+  }).sort((a, b) => a.name.localeCompare(b.name))
+  totals.averageMinutes = average(totals.totalMinutes, totals.workedDays)
+  return { dates, people, totals }
+}
+
+/** 450 minutes as "7.5": hours with at most one decimal, for the narrow Avg and Total columns (the cards and the drawer say "7h 30m"). */
+export function hoursFigure(minutes: number) {
+  if (!minutes) return '–'
+  return String(Math.round((minutes / 60) * 10) / 10)
+}
+
+/** "Asha, Mon 3 Nov: Late, late 25m, 10:25 to 19:05, 8h 00m" for the hover text and the screen-reader name of a grid cell. */
+export function cellTitle(name: string, date: GridDate, cell: GridCell, clock: (stamp: string) => string): string {
+  const label = `${name}, ${new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(date.date + 'T12:00:00Z'))}`
+  if (!cell.mark) return label
+  const parts = [MARK_WORDS[cell.mark]]
+  if (cell.lateMinutes > 0 && cell.mark !== 'A') parts.push(`late ${minutesText(cell.lateMinutes)}`)
+  if (cell.checkIn) parts.push(`${clock(cell.checkIn)} to ${cell.checkOut ? clock(cell.checkOut) : 'now'}`)
+  if (cell.workedMinutes > 0) parts.push(minutesText(cell.workedMinutes))
+  return `${label}: ${parts.join(', ')}`
+}
+
+/** The server-built Excel file of the month (API path without /api) and its file name. */
+export function monthExportPath(month: string, staff: string): string {
+  const [year, monthNumber] = month.split('-')
+  const query = new URLSearchParams({ year, month: String(Number(monthNumber)), ...(staff ? { staffId: staff } : {}) })
+  return `/attendance/month/export?${query}`
+}
+export const monthExportName = (month: string) => `attendance-${month}.xlsx`
+
+// ------------------------------------------------------------------------------------------------ the daily record of one person
 
 export type DayTone = PillTone
 const DAY_TONE: Record<AttendanceCode, PillTone> = { P: 'green', LT: 'amber', EE: 'amber', MP: 'amber', A: 'red', PL: 'blue', UL: 'blue', PP: 'blue', OD: 'blue', WFH: 'blue', WO: 'neutral', H: 'neutral' }
@@ -126,6 +146,8 @@ export interface DailyRecordRow {
   weekday: string
   status: string
   tone: PillTone
+  /** The grid's reading of the day (late arrival, missed check-out...), the words the pill shows. */
+  mark: DayMark
   /** A weekly off or a holiday: shown quietly. */
   off: boolean
   leave: boolean
@@ -146,16 +168,19 @@ export interface DailyRecordRow {
 }
 export interface DailyRecordTotals { daysWorked: number; workedMinutes: number; lateMinutes: number; earlyMinutes: number; unpaidMinutes: number; weeklyOffs: number; holidays: number; leaves: number }
 
-export function dailyRecordRows(employee: Pick<EmployeeMonth, 'days'>): DailyRecordRow[] {
+/** The days of one person, oldest first. `today` and `zone` (the agency's) give each day its mark and the late minutes of an arrival after the shift start. */
+export function dailyRecordRows(employee: Pick<EmployeeMonth, 'days'>, today = '9999-12-31', zone?: string): DailyRecordRow[] {
   return [...employee.days].sort((a, b) => a.date.localeCompare(b.date)).map((day: PolicyDay) => {
     const off = day.status === 'WO' || day.status === 'H'
     const worked = Math.max(0, Math.round(day.workedMinutes || 0))
+    const lateMinutes = dayLateMinutes(day, zone)
     return {
       date: day.date,
       dayLabel: shortDay(day.date),
       weekday: weekday(day.date),
       status: day.status,
       tone: dayTone(day.status),
+      mark: dayMark(day, today, zone),
       off,
       leave: day.status === 'PL' || day.status === 'UL',
       shift: off ? '' : shiftLabel(day.shift),
@@ -164,8 +189,8 @@ export function dailyRecordRows(employee: Pick<EmployeeMonth, 'days'>): DailyRec
       stillIn: !!day.checkIn && !day.checkOut,
       workedMinutes: worked,
       workedText: day.checkIn || worked > 0 ? minutesText(worked) : '',
-      punctuality: punctualityText({ lateMinutes: Math.max(0, Math.round(day.lateMinutes || 0)), earlyMinutes: Math.max(0, Math.round(day.earlyMinutes || 0)) }),
-      lateMinutes: Math.max(0, Math.round(day.lateMinutes || 0)),
+      punctuality: punctualityText({ lateMinutes, earlyMinutes: Math.max(0, Math.round(day.earlyMinutes || 0)) }),
+      lateMinutes,
       earlyMinutes: Math.max(0, Math.round(day.earlyMinutes || 0)),
       unpaidMinutes: Math.max(0, Math.round(day.unpaidMinutes || 0)),
       provisional: !!day.provisional,
@@ -184,12 +209,3 @@ export function dailyRecordTotals(rows: DailyRecordRow[]): DailyRecordTotals {
   }
   return totals
 }
-
-const quote = (value: string | number) => { const text = String(value); return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text }
-/** The month overview as CSV (opens in Excel): one line per person. */
-export function overviewCsv(rows: OverviewRow[]) {
-  const head = ['Employee', 'Tracked from', 'Attendance %', 'Days attended', 'Working days', 'Absent', 'Late', 'Incomplete', 'Requests', 'Unpaid time']
-  const lines = rows.map((row) => [row.name, row.tracked.replace('Tracked from ', ''), row.percentage ?? '', row.attendedDays, row.scheduledDays, ...row.chips.map((chip) => chip.count), row.unpaidText])
-  return [head, ...lines].map((line) => line.map(quote).join(',')).join('\r\n')
-}
-export const overviewCsvName = (month: string) => `attendance-overview-${month}.csv`

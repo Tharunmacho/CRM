@@ -549,7 +549,7 @@ test('the matrix has one row per recruiter (alphabetical), the 13 stage columns,
   const waiting = v.buildStageMatrix(taskReport)
   assert.equal(waiting.stages.length, 13)
   assert.deepEqual(waiting.stages.map(s => s.no), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
-  assert.deepEqual(waiting.stages.map(s => s.short), ['Prescreen', 'Forwarded', 'Interview', 'Result', 'Offer', 'Advance', 'Passport', 'Medical', 'PCC', 'Visa', 'Review', 'Stamping', 'Ticket'])
+  assert.deepEqual(waiting.stages.map(s => s.short), ['Screen', 'Forward', 'Schedule', 'Result', 'Offer', 'Advance', 'Passport', 'Medical', 'PCC', 'Visa', 'Review', 'Stamping', 'Ticket'])
   assert.deepEqual(waiting.rows.map(r => r.name), ['asha', 'Meena', 'Ravi', 'Other']) // people no longer on the staff list are one "Other" row
   const asha = waiting.rows[0].cells
   assert.deepEqual([asha['0'], asha['1'], asha['13'], asha.total], [2, 3, 1, 6])

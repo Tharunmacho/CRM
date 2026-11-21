@@ -110,7 +110,7 @@ test('the screen: header totals, ONE toolbar row, chips only while a filter is o
   assert.equal([...source.matchAll(/useTravelled\(/g)].length, 1, 'one read')
 })
 
-test('the toolbar and the table sit above the fold: slim header, 40px controls, one row that wraps, a sticky table box sized to the screen', async () => {
+test('the toolbar and the table sit above the fold: slim header, 40px controls, one row that wraps, the whole table with a header that sticks while the page scrolls', async () => {
   const css = await read('styles/travelled.css')
   assert.match(css, /\.tv-toolbar \{[^}]*display: flex; flex-wrap: wrap;[^}]*\}/)
   assert.match(css, /\.tv-search \{[^}]*height: 40px;/)
@@ -118,8 +118,9 @@ test('the toolbar and the table sit above the fold: slim header, 40px controls, 
   assert.match(css, /\.tv-more-toggle \{[^}]*height: 40px;/)
   assert.match(css, /\.tv-meta \{[^}]*min-height: 32px;/)
   assert.match(css, /\.tv-more-panel \{ position: absolute;/, 'More filters opens over the list, it never pushes the table down')
-  assert.match(css, /\.tv-table-wrap \{ position: relative; max-height: max\(360px, calc\(100dvh - 380px\)\);/, 'the table box fits the screen and contains its screen-reader texts (no page stretching)')
-  assert.match(css, /\.tv-table th \{ position: sticky; top: 0;/)
+  assert.match(css, /\.tv-table-wrap \{ position: relative; overflow: clip;/, 'the table is shown whole (no inner scroll box) and its box contains the screen-reader texts (no page stretching)')
+  assert.doesNotMatch(css, /\.tv-table-wrap \{[^}]*(max-height|overflow-y|overflow: auto|overflow: hidden)/, 'no short inner scroll box: the PAGE scrolls like Clients and Tasks')
+  assert.match(css, /\.tv-table th \{ position: sticky; top: var\(--topbar-h, 64px\);/, 'the header sticks under the top bar while the page scrolls')
   assert.match(css, /\.tv-table td \{[^}]*height: 56px;/)
   assert.doesNotMatch(css, /\.tv-c-[a-z]+ \{ width: \d+%; \}/, 'columns size to their content, no fixed shares')
   // the order of the page: header, toolbar, chips row, breakdown (folded), table
@@ -138,7 +139,7 @@ test('phone: search and one Filters button, totals scroll sideways, filters open
   const phone = css.slice(css.indexOf('@media (max-width: 768px)'))
   assert.match(phone, /\.tv-more-panel \{ position: fixed;[^}]*bottom: 0;[^}]*border-radius: 16px 16px 0 0;/)
   assert.match(phone, /\.tv-backdrop \{ position: fixed; inset: 0;/)
-  assert.match(css, /@media \(max-width: 899px\) \{[\s\S]*\.tv-table-wrap \{ max-height: none; overflow: visible; \}/, 'no inner scroll box for cards')
+  assert.match(css, /@media \(max-width: 899px\) \{[\s\S]*\.tv-table-wrap \{ overflow: visible; \}/, 'no clipping box for cards')
   assert.match(css, /\.tv-table td::before \{ content: attr\(data-label\);/)
   assert.match(css, /\.tv \{ overflow-x: clip; \}/, 'nothing pushes the page sideways')
 })
@@ -173,7 +174,7 @@ test('the rows keep their information but lose the redundant captions', async ()
   assert.doesNotMatch(table, /row\.orderRef|className="ident"/, 'no order number under the job')
   assert.match(table, /<Link to=\{`\/candidates\/\$\{row\.candidateId\}`\}>\{row\.name\}<\/Link>\s*<small className="tv-passport tnum">\{row\.passportNumber \|\| <span className="tv-muted">Passport not added<\/span>\}<\/small>\s*\{row\.travellerId && <span className="tv-traveller tnum" title=\{`Traveller number \$\{row\.travellerId\}`\}>\{row\.travellerId\}<\/span>\}/, 'the passport number sits under the name and the traveller number under the passport number')
   const css = await readFile(new URL('../src/styles/travelled.css', import.meta.url), 'utf8')
-  assert.match(css, /\.tv-table td\.tv-who \.tv-traveller \{[^}]*display: inline-block[^}]*font-variant-numeric: tabular-nums/, 'the traveller number is a small tabular chip under the passport number')
+  assert.match(css, /\.tv-table td\.tv-who \.tv-traveller \{[^}]*display: block[^}]*width: max-content; min-width: 64px; margin: 4px auto 0;[^}]*text-align: center[^}]*font-variant-numeric: tabular-nums/, 'the traveller number is a centred tabular chip of one fixed minimum width under the passport number')
   assert.match(table, /docToText\(row\.commencementDate\)/, 'DOC reads as dd/mm/yyyy like the Tasks list')
   assert.match(table, /serialNumber\(page, pageSize, index\)/, 'S NO runs across pages')
   assert.match(table, /row\.status !== 'deployed' &&/, 'a "Deployed" pill on every row of a list of travellers says nothing')
@@ -186,4 +187,16 @@ test('the rows keep their information but lose the redundant captions', async ()
 test('the table scroll box contains the absolutely placed screen-reader texts of its rows, so a long page cannot stretch the document', async () => {
   const css = await read('../src/styles/travelled.css')
   assert.match(css, /\.tv-table-wrap \{ position: relative;/)
+})
+
+test('the full table, the page scrolls: no inner scroll box, a page change scrolls the table into view, the chip is centred and as wide for CI 01 as for CI 100', async () => {
+  const css = await read('../src/styles/travelled.css')
+  const source = await read('../src/screens/travelled/travelled.tsx')
+  assert.doesNotMatch(css, /calc\(100dvh - 380px\)/, 'the old short box is gone')
+  assert.match(css, /\.tv-table-wrap \{ position: relative; overflow: clip; scroll-margin-top:/, 'clip is not a scroll container, so the sticky header follows the page')
+  assert.match(source, /wrap\.current\?\.scrollIntoView\(\{ block: 'start' \}\)/)
+  assert.doesNotMatch(source, /wrap\.current\?\.scrollTo/)
+  assert.match(css, /@media \(max-width: 899px\) \{[\s\S]*\.tv-table td\.tv-who \.tv-traveller \{ margin-left: 0; \}/, 'on a phone card the chip sits left like the rest of the card')
+  const dateColumn = source.match(/<td data-label="Date of travel"[^\n]*/)[0]
+  assert.match(dateColumn, /row\.travelDate \? formatTravelDay\(row\.travelDate\)/, 'the date comes from the air-ticket stage (row.travelDate), right after DOC')
 })

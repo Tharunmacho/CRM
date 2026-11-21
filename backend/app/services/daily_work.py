@@ -403,14 +403,32 @@ def run_beside(db, main, *reads):
 
 
 def stage_facts_query(*where):
-    """Stage 6 (advance), stage 10 (visa arrival, which used to carry the Google review tick) and stage 11 (Google review) records, never a reopened one, for the placements in `where`."""
+    """Stage 6 (advance), stage 10 (visa arrival, which used to carry the Google review tick), stage 11 (Google review) and stage 13 (air ticket:
+    the travel date) records, never a reopened one, for the placements in `where`.
+
+    A reopened stage-13 record is still read (so that it stays the latest attempt and an older attempt's date does not come back), but its data
+    is blanked: a placement whose ticket stage was reopened has not travelled yet."""
+    reopened = ApplicationStage.reopened_reason.isnot(None)
+    data = case((and_(ApplicationStage.stage == TOTAL_STAGES, reopened), None), else_=ApplicationStage.data).label("data")
     return (select(ApplicationStage.application_id, ApplicationStage.stage, ApplicationStage.attempt, ApplicationStage.completed_at,
-                   ApplicationStage.amount, ApplicationStage.amount_currency, ApplicationStage.data)
-            .where(ApplicationStage.stage.in_((ADVANCE_STAGE, VISA_STAGE, REVIEW_STAGE)), ApplicationStage.reopened_reason.is_(None), *where))
+                   ApplicationStage.amount, ApplicationStage.amount_currency, data)
+            .where(ApplicationStage.stage.in_((ADVANCE_STAGE, VISA_STAGE, REVIEW_STAGE, TOTAL_STAGES)),
+                   or_(ApplicationStage.reopened_reason.is_(None), ApplicationStage.stage == TOTAL_STAGES), *where))
+
+
+def _travel_day(data) -> str | None:
+    """The stage-13 record's `travelDate` as an ISO date, or None when it is missing or not a real calendar day (the Travelled screen's rule)."""
+    raw = (data or {}).get("travelDate")
+    if not isinstance(raw, str) or len(raw) != 10:
+        return None
+    try:
+        return date.fromisoformat(raw).isoformat()
+    except ValueError:
+        return None
 
 
 def stage_facts(rows) -> dict[str, dict]:
-    """{application id: {"advance": (amount, currency) or None, "review": bool, "status", "total", "expected", "currency"}}
+    """{application id: {"advance": (amount, currency) or None, "review": bool, "status", "total", "expected", "currency", "travelDate"}}
     from `stage_facts_query` rows.
 
     The latest attempt of a stage is the effective record (the Advance collections report's rule). The advance is the amount the
@@ -420,7 +438,8 @@ def stage_facts(rows) -> dict[str, dict]:
 
     The stage-9 record also gives `status` ('collected', 'pending' or None; a record from before the status existed reads as
     Collected when it holds an amount), `total` (the total service charge, or None), `expected` (the advance expected while
-    pending, or None) and `currency` of those amounts (None without a stage-9 record). `advance_text.advance_cell` turns an entry
+    pending, or None) and `currency` of those amounts (None without a stage-9 record). `travelDate` is the stage-13 (air ticket) record's
+    travel date as an ISO day, or None (no ticket yet, no date, or the stage was reopened). `advance_text.advance_cell` turns an entry
     into the tracker sheet's Advance cell."""
     latest: dict[tuple[str, int], tuple] = {}
     for row in rows:
@@ -429,9 +448,11 @@ def stage_facts(rows) -> dict[str, dict]:
             latest[key] = row
     facts: dict[str, dict] = {}
     for (application_id, stage), (_a, _s, _attempt, _at, amount, currency, data) in latest.items():
-        entry = facts.setdefault(application_id, {"advance": None, "review": False, "status": None, "total": None, "expected": None, "currency": None})
+        entry = facts.setdefault(application_id, {"advance": None, "review": False, "status": None, "total": None, "expected": None, "currency": None, "travelDate": None})
         data = data or {}
-        if stage == ADVANCE_STAGE:
+        if stage == TOTAL_STAGES:
+            entry["travelDate"] = _travel_day(data)
+        elif stage == ADVANCE_STAGE:
             raw = amount if amount is not None else data.get("amount")
             value = None
             try:
@@ -471,7 +492,7 @@ def payment_fields(app, facts: dict[str, dict]) -> dict:
     currency = advance[1] if advance else fact["currency"] if fact and fact["expected"] is not None else None
     return {"advanceAmount": advance[0] if advance else None, "advanceCurrency": currency, "googleReview": review,
             "advanceStatus": fact["status"] if fact else None, "advanceExpected": fact["expected"] if fact else None,
-            "serviceChargeTotal": fact["total"] if fact else None}
+            "serviceChargeTotal": fact["total"] if fact else None, "travelDate": fact["travelDate"] if fact else None}
 
 
 OPEN_WORK_KINDS = [TaskKind.stage, TaskKind.remedical, TaskKind.initial_call]

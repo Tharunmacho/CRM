@@ -34,7 +34,7 @@ TUESDAY = datetime(2026, 11, 3, 3, 0, tzinfo=timezone.utc)  # 08:30 IST
 SEVEN = ["Visa in progress", "Visa stamping in progress", "Awaiting Gamca Medical", "Offer Accepted", "Offer Declined by Candidate",
          "PCC Pending", "Trial feedback pending"]
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-HEADER = ["S.No", "DOC", "Recruiter", "Job", "Client", "Country", "Candidate", "Care ID", "Agency", "Advance", "Stage", "Today", "Remark", "Notes"]
+HEADER = ["S.No", "DOC", "DOT", "Recruiter", "Job", "Client", "Country", "Candidate", "Care ID", "Agency", "Advance", "Stage", "Today", "Remark", "Notes"]
 
 
 def frozen(clock):
@@ -355,7 +355,7 @@ def test_every_row_carries_only_recorded_agency_names(desk):
     follow = {i["candidateId"]: i for i in get(desk, "asha", "/api/follow-up").json()["items"]}
     assert follow["c2"]["agency"] == "Gulf Link" and follow["c5"]["agency"] is None
     rows = sheet(get(desk, "asha", "/api/daily-work/export?format=xlsx"))[1]
-    assert {r[6]: r[8] for r in rows[1:]} == {"Bina Example": "Gulf Link", "Anil Sample": "Sigma Agency", "Email Agency": "Lotus Overseas",
+    assert {r[7]: r[9] for r in rows[1:]} == {"Bina Example": "Gulf Link", "Anil Sample": "Sigma Agency", "Email Agency": "Lotus Overseas",
                                             "Bulk Imported": "", "Machine Source": "", "Esha Made-up": "", "Chandra Invented": ""}
     changed = desk.client.put("/api/candidates/c1/application-form/assignment", json={"source": "email"})
     assert changed.status_code == 200, changed.text
@@ -396,18 +396,18 @@ def test_the_excel_has_the_screens_columns_and_rows_in_the_screens_order(desk):
     assert rows[0] == HEADER
     assert "<pane" in xml and 'state="frozen"' in xml and "<autoFilter" in xml
     # untouched first (the furthest stage first), then what was done today: Bina (5), Anil (1), then Esha (moved a stage), Chandra (called)
-    assert [r[6] for r in rows[1:]] == ["Bina Example", "Anil Sample", "Esha Made-up", "Chandra Invented"]
+    assert [r[7] for r in rows[1:]] == ["Bina Example", "Anil Sample", "Esha Made-up", "Chandra Invented"]
     assert [r[0] for r in rows[1:]] == ["1", "2", "3", "4"]                    # S.No
     bina, anil, esha, chandra = rows[1:]
-    assert bina[1:] == ["20-Dec-2026", "Asha", "Welder", "Gulf Builders", "Qatar", "Bina Example", "CI-002", "", "10k collected/25k",
+    assert bina[1:] == ["20-Dec-2026", "", "Asha", "Welder", "Gulf Builders", "Qatar", "Bina Example", "CI-002", "", "10k collected/25k",
                         tasks_export.stage_text(5), "", "=cmd|' /C calc'!A0", ""]
-    assert anil[1:] == ["05-Dec-2026", "Asha", "Welder", "Gulf Builders", "Qatar", "Anil Sample", "CI-001", "Sigma Agency", "",
+    assert anil[1:] == ["05-Dec-2026", "", "Asha", "Welder", "Gulf Builders", "Qatar", "Anil Sample", "CI-001", "Sigma Agency", "",
                         tasks_export.stage_text(1), "", "", ""]
-    assert esha[11] == "Stage moved 09:30" and esha[1] == "" and esha[10].startswith("Stage 4 - ")
-    assert chandra[10] == "Initial call" and chandra[11] == "Called 08:30" and chandra[4] == "" and chandra[1] == ""
+    assert esha[12] == "Stage moved 09:30" and esha[1] == "" and esha[11].startswith("Stage 4 - ")
+    assert chandra[11] == "Initial call" and chandra[12] == "Called 08:30" and chandra[5] == "" and chandra[1] == ""
     # no "Remark added" wording anywhere; the remark text is stored as text, never as a formula
     assert "Remark added" not in xml and "<f>" not in xml
-    assert 'r="M2" s="7" t="inlineStr"' in xml
+    assert 'r="N2" s="7" t="inlineStr"' in xml
 
 
 @pytest.mark.parametrize(("candidate", "endpoint"), [("c1", "daily-work"), ("c2", "follow-up")])
@@ -428,14 +428,14 @@ def test_notes_keep_every_update_today_across_stage_tasks(desk, candidate, endpo
     assert all(n["by"] == "Asha" and n["id"] and n["at"] for n in row["notes"])
     assert all(not item["todayNotes"] and not item["notes"] for item in items if item["candidateId"] != candidate)
     exported = sheet(get(desk, "asha", "/api/daily-work/export"))[1]
-    note_cell = next(r[-1] for r in exported[1:] if r[7] == row["candidateCareId"])
+    note_cell = next(r[-1] for r in exported[1:] if r[8] == row["candidateCareId"])
     assert note_cell.splitlines() == ["04 Nov 00:00 Asha - Update 4", "08:30 Asha - Update 2", "08:30 Asha - Update 3", "00:00 Asha - Update 1",
                                       "02 Nov 23:59 Asha - Update 0"]   # all of them, newest first, the date shown for another day
 
 
 def test_the_excel_follows_the_scoping_of_the_list(desk):
     def names(user, query):
-        return [r[6] for r in sheet(get(desk, user, "/api/daily-work/export?format=xlsx" + query))[1][1:]]
+        return [r[7] for r in sheet(get(desk, user, "/api/daily-work/export?format=xlsx" + query))[1][1:]]
 
     assert names("asha", "") == ["Bina Example", "Anil Sample", "Esha Made-up", "Chandra Invented"]
     assert names("asha", "&staff=asha") == names("asha", "&staff=all") == names("asha", "")
@@ -449,7 +449,7 @@ def test_the_excel_follows_the_scoping_of_the_list(desk):
     # the same order as the screen's list: furthest stage first among the untouched
     assert everyone[:3] == ["Bina Example", "Deepak Test", "Anil Sample"]
     rows = sheet(get(desk, "admin", "/api/daily-work/export?staff=ravi"))[1]
-    assert rows[1][2] == "Ravi"
+    assert rows[1][3] == "Ravi"
     as_user(desk, "admin")
     assert desk.client.get("/api/daily-work/export?format=xlsx&staff=nobody").status_code == 404
     assert desk.client.get("/api/daily-work/export?format=csv").status_code == 422

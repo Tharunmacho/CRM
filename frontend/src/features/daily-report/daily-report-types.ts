@@ -79,6 +79,8 @@ export interface DailyPeriod {
   /** The period includes today: it is compared with the same time of the previous period (additive). */
   partial?: boolean
   previousUntil?: string
+  /** Total: from the earliest record to today, nothing to compare with. */
+  allTime?: boolean
 }
 
 export interface UnassignedLeads { total: number; neverContacted: number; newInPeriod: number }
@@ -123,6 +125,35 @@ export interface DailyReport {
   /** Additive: the same per credited person (the Task report's matrix in its Completed mode). */
   stageFlowStaff?: StageFlowStaff[]
   byClient?: ClientRow[]
+  /** Additive: the management reading of the Task report and of the Lead sheet report (older servers send neither). */
+  taskInsight?: TaskInsight
+  leadInsight?: LeadInsight
+}
+
+/* ---------------------------------------------------------------- the management reading (additive keys of the report) */
+
+export interface WaitingStage { no: number; label: string; count: number; stuck: number; avgDays: number | null }
+export interface LongestWaiting { candidateId: string; careId: string | null; name: string; staffId: string | null; staffName: string; stage: number; stageLabel: string; since: string | null; days: number }
+export interface ExitReason { label: string; count: number; previous: number | null }
+export interface Compared { value: number; previous: number | null }
+/** The Task report's management figures: how long candidates have waited at their stage now, how many are stuck, what was completed and lost in the period. */
+export interface TaskInsight {
+  stuckDays: number
+  waiting: { total: number; stuck: number; byStage: WaitingStage[]; busiest: WaitingStage | null }
+  stuckPerStaff: Record<string, number>
+  longest: LongestWaiting[]
+  completed: Compared
+  stopped: Compared
+  exitReasons: ExitReason[]
+  exitOther: number
+}
+export interface AgingLead { leadId: string; name: string; staffId: string | null; staffName: string; since: string | null; days: number }
+/** The Lead sheet report's management figures: leads nobody has contacted for more than `staleDays`, and the previous period's answers. */
+export interface LeadInsight {
+  staleDays: number
+  stale: { total: number; unassigned: number; perStaff: Record<string, number> }
+  aging: AgingLead[]
+  previous: { interested: number; notInterested: number } | null
 }
 
 export interface DrillRow {
