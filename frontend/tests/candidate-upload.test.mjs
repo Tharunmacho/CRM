@@ -145,7 +145,8 @@ test('Check people in documents shows only when the server finds more than one p
 test('the page sends every file as kind resume without replacing the others, and uses the one-second poll', async () => {
   const page = await readFile(new URL('../src/screens/candidates/add-candidate.tsx', import.meta.url), 'utf8')
   assert.match(page, /intake\.upload\('resume', file, \{ many: true \}\)/)
-  assert.match(page, /title="Upload documents" subtitle="Drop all of this candidate's files together, in any order. Every page is sorted into its own field and the details fill in by themselves/)
+  assert.match(page, /title="Upload documents">/)
+  assert.doesNotMatch(page, /Drop all of this candidate's files together/, 'no explanatory line under the section title')
   assert.doesNotMatch(page, /More documents \(optional\)|Extract details|choose Extract|MultiFileSlot|<FileDrop/)
   assert.doesNotMatch(page, /Kept on the profile when you save/)
   assert.doesNotMatch(page, /Aadhaar copy'/)
@@ -372,12 +373,12 @@ test('there is no Extract step: saving the dropped files starts the reading, new
   assert.equal((page.match(/<EntryUploadZone/g) ?? []).length, 1)
 })
 
-test('the zone lists a chip only for a kind that was found, under one heading, and says what it sorts while it is empty', async () => {
+test('the zone lists a chip only for a kind that was found, under one heading, and shows no explanatory line while it is empty', async () => {
   const zone = await readFile(new URL('../src/features/candidates/components/entry-upload-zone.tsx', import.meta.url), 'utf8')
   assert.match(zone, /chips\.filter\(\(chip\) => chip\.state !== 'idle'\)/)
   assert.match(zone, /found\.length > 0 && \(/)
   assert.match(zone, /aria-labelledby="uz-chips-head"/)
-  assert.match(zone, /rows\.length === 0 && <p className="uz-hint">/)
+  assert.doesNotMatch(zone, /uz-hint/)
 })
 
 test('the reading strip says where the work really is: saved, waiting for the reader, sorting the pages, then reading what was found', () => {

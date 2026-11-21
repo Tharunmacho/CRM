@@ -8,7 +8,8 @@ type KpiTone = 'blue' | 'green' | 'amber' | 'violet' | 'red'
 interface SummaryItem {
   label: string
   value: ReactNode
-  detail: ReactNode
+  /** The muted line under the figure; most screens leave it out. */
+  detail?: ReactNode
   icon: LucideIcon
   /** Only changes the ink of the icon (green, amber, red carry meaning); blue and violet stay neutral. */
   tone?: KpiTone
@@ -52,7 +53,7 @@ export function SummaryCards({ items }: { items: SummaryItem[] }) {
             </span>
           </div>
           <strong className="summary-value tnum">{value}</strong>
-          <p>{detail}</p>
+          {detail ? <p>{detail}</p> : null}
         </section>
       ))}
     </div>
@@ -77,7 +78,7 @@ export function RecordIdentity({
       </span>
       <div className="min-w-0">
         <p className="record-name" title={name}>{name}</p>
-        {detail && <p className="record-detail">{detail}</p>}
+        {detail && <p className="record-detail" title={typeof detail === 'string' ? detail : undefined}>{detail}</p>}
       </div>
     </div>
   )

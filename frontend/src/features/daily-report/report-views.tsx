@@ -8,8 +8,8 @@ import { PeopleBoard } from './report-people'
 import { LeadStatusPanel, StageProgressPanel } from './report-sections'
 import { AttendancePanel } from './report-attendance'
 import {
-  attendanceDay, changeLine, changedSinceText, clientRows, contactedPct, dailyCells, dailyCols, dayClosed, dayCloseTitle, DAY_CLOSED_COL, figureGroups, interviewsNote, hasLeadPeriod, leadCols, LEAD_PCT_COL, leadCells, unassignedInfo, metricOf, numberText,
-  pctText, showByClient, STAGE_TOTAL_COL, stageSummary, statusRows, sumCells, taskStageCols, taskStageRows, taskStageTotals, totalCells, totalVs, vsLabel, vsOf,
+  attendanceDay, changedSinceText, clientRows, contactedPct, dailyCells, dailyCols, dayClosed, dayCloseTitle, DAY_CLOSED_COL, figureGroups, interviewsNote, hasLeadPeriod, leadCols, LEAD_PCT_COL, leadCells, unassignedInfo, metricOf, numberText,
+  pctText, showByClient, STAGE_TOTAL_COL, stageSummary, statusRows, sumCells, taskStageCols, taskStageRows, taskStageTotals, totalCells,
 } from './daily-report-view'
 import type { DailyReport, StaffRow } from './daily-report-types'
 
@@ -78,7 +78,7 @@ function PctCell({ assigned, contacted }: { assigned: number | null | undefined;
 }
 
 /** Leads only: how many are on the sheet, who owns them, who has contacted how many and what the leads said. Every figure ties to the Lead sheet screen. */
-export function LeadSheetView({ report, roster, today, scope, staff, onPickStaff, onDrill }: ViewProps) {
+export function LeadSheetView({ report, roster, scope, staff, onPickStaff, onDrill }: ViewProps) {
   const sheet = report.leadSheet
   const cols = leadCols(report)
   const period = hasLeadPeriod(report)
@@ -88,26 +88,22 @@ export function LeadSheetView({ report, roster, today, scope, staff, onPickStaff
   const contacted = sheet?.contacted ?? report.leadFeedback.contacted
   const assigned = sheet?.assigned ?? totals.assigned
   const pct = contactedPct(assigned, contacted)
-  const label = vsLabel(report.period, today)
-  const prev = sheet?.previous
   const unassigned = unassignedInfo(sheet)
-  /** "+3 vs yesterday": the hover text of a tile that has a previous value (nothing when the period is Total). */
-  const moved = (now: number | undefined, before: number | undefined | null) => (now == null || before == null ? undefined : changeLine(vsOf(now, before), label) || undefined)
   const status = statusRows(sheet)
   const never = sheet?.neverContacted
   const tiles: StatTileData[] = period && sheet && never !== undefined
     ? [
       { key: 'total', label: 'Total leads', value: numberText(sheet.totalLeads), icon: Layers, title: 'All the leads on the sheet, whatever the period', ...opens(sheet.totalLeads, () => onDrill('leadsTotal', null)) },
-      { key: 'new', label: 'New leads', value: numberText(sheet.newInPeriod), icon: PlusCircle, title: moved(sheet.newInPeriod, prev?.newInPeriod), ...opens(sheet.newInPeriod, () => onDrill('leadsNewInPeriod', null)) },
-      { key: 'assigned', label: 'Assigned', value: numberText(sheet.assignedInPeriod), icon: UserCheck, title: moved(sheet.assignedInPeriod, prev?.assignedInPeriod), ...opens(sheet.assignedInPeriod, () => onDrill('leadsAssignedInPeriod', null)) },
-      { key: 'contacted', label: 'Contacted', value: numberText(contacted), icon: PhoneCall, title: moved(contacted, prev?.contacted), ...opens(contacted, () => onDrill('leadsContacted', null)) },
+      { key: 'new', label: 'New leads', value: numberText(sheet.newInPeriod), icon: PlusCircle, ...opens(sheet.newInPeriod, () => onDrill('leadsNewInPeriod', null)) },
+      { key: 'assigned', label: 'Assigned', value: numberText(sheet.assignedInPeriod), icon: UserCheck, ...opens(sheet.assignedInPeriod, () => onDrill('leadsAssignedInPeriod', null)) },
+      { key: 'contacted', label: 'Contacted', value: numberText(contacted), icon: PhoneCall, ...opens(contacted, () => onDrill('leadsContacted', null)) },
       { key: 'never', label: 'Not contacted', value: numberText(never), icon: Clock3, title: 'Leads never contacted, whatever the period: the same number as the Lead sheet screen', ...opens(never, () => onDrill('leadsNotContacted', null)) },
     ]
     : period && sheet
       ? [
-        { key: 'new', label: 'New leads', value: numberText(sheet.newInPeriod), icon: PlusCircle, title: moved(sheet.newInPeriod, prev?.newInPeriod), ...opens(sheet.newInPeriod, () => onDrill('leadsNewInPeriod', null)) },
-        { key: 'assigned', label: 'Assigned', value: numberText(sheet.assignedInPeriod), icon: UserCheck, title: moved(sheet.assignedInPeriod, prev?.assignedInPeriod), ...opens(sheet.assignedInPeriod, () => onDrill('leadsAssignedInPeriod', null)) },
-        { key: 'contacted', label: 'Contacted', value: numberText(contacted), icon: PhoneCall, title: moved(contacted, prev?.contacted), ...opens(contacted, () => onDrill('leadsContacted', null)) },
+        { key: 'new', label: 'New leads', value: numberText(sheet.newInPeriod), icon: PlusCircle, ...opens(sheet.newInPeriod, () => onDrill('leadsNewInPeriod', null)) },
+        { key: 'assigned', label: 'Assigned', value: numberText(sheet.assignedInPeriod), icon: UserCheck, ...opens(sheet.assignedInPeriod, () => onDrill('leadsAssignedInPeriod', null)) },
+        { key: 'contacted', label: 'Contacted', value: numberText(contacted), icon: PhoneCall, ...opens(contacted, () => onDrill('leadsContacted', null)) },
         { key: 'backlog', label: 'Still to contact', value: numberText(sheet.backlog), icon: Clock3, title: 'Assigned leads never contacted, whatever the period', ...opens(sheet.backlog, () => onDrill('leadsBacklog', null)) },
       ]
       : [

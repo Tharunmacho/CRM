@@ -1,6 +1,6 @@
 /**
  * Pure helpers of the Reports page: date presets in the agency's time, the column model of the three tables
- * (Daily report, Lead sheet, Stages), the Total row and its "vs yesterday" text, the day-close and partial-period
+ * (Daily report, Lead sheet, Stages), the Total row, the day-close and partial-period
  * lines, queries, paging and the CSV of a drill-down list. No React, no imports except types, so node can test it as it
  * is (tests/daily-report-view.test.mjs).
  */
@@ -222,32 +222,6 @@ export function interviewsNote(report: DailyReport): string {
   return `${n.toLocaleString('en-IN')} ${n === 1 ? 'interview was' : 'interviews were'} recorded without a mode and ${n === 1 ? 'is' : 'are'} not counted as online.`
 }
 
-export interface Vs { kind: 'up' | 'down' | 'flat'; text: string }
-/** "+3" / "−2" / "0" against the previous period. */
-export function vsOf(value: number, previous: number): Vs {
-  const diff = Math.round(value - previous)
-  return diff > 0 ? { kind: 'up', text: `+${diff}` } : diff < 0 ? { kind: 'down', text: `−${Math.abs(diff)}` } : { kind: 'flat', text: '0' }
-}
-/** The change against the previous period for the Total row only. Online interviews have no previous value of their own. */
-export function totalVs(metrics: DailyMetric[]): Record<string, Vs> {
-  const out: Record<string, Vs> = {}
-  for (const key of DAILY_ORDER) {
-    if (key === 'interviewsOnline') continue
-    const metric = metrics.find(item => item.key === key)
-    if (metric && metric.previous != null) out[key] = vsOf(metric.value, metric.previous)
-  }
-  return out
-}
-/** The muted line under a band total: "−25 vs yesterday", "+1 vs yesterday", "no change". */
-export function changeLine(vs: Vs | undefined, label: string): string {
-  if (!vs) return ''
-  return vs.kind === 'flat' ? 'no change' : `${vs.text} vs ${label}`
-}
-/** What the Total row compares with: "yesterday" for today, otherwise the matching earlier period. */
-export function vsLabel(period: Pick<DailyPeriod, 'from' | 'to'>, today: string): string {
-  if (period.from !== period.to) return 'previous period'
-  return period.to === today ? 'yesterday' : 'day before'
-}
 /** The footer of the table: who has not submitted yet (one day, supervisors). Empty when there is nothing to say. */
 export function dayCloseFoot(compliance: { expected: number; missing: { name: string }[] } | null, show = 8): string {
   if (!compliance || compliance.expected <= 0) return ''

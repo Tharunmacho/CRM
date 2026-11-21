@@ -543,7 +543,7 @@ export default function AddCandidatePage() {
           <div className="ac-form-card">
             <fieldset disabled={disabledAll} className="ac-fieldset">
               {/* ------------------------------------------------------------------ Documents first */}
-              <FormSection id="candidate-documents" icon={FolderOpen} title="Upload documents" subtitle="Drop all of this candidate's files together, in any order. Every page is sorted into its own field and the details fill in by themselves, then you check them and save.">
+              <FormSection id="candidate-documents" icon={FolderOpen} title="Upload documents">
                 <div className="ac-docs">
                   <EntryUploadZone rows={documentRows} chips={chips} reports={readReports} progress={readProgress(documentRows)} disabled={disabledAll} max={MAX_DOCUMENT_FILES} problems={addProblems}
                     onAdd={(files) => void addDocuments(files)} onRemove={removeDocument} onRetry={retryFile} onPlacePage={placePage}
@@ -621,7 +621,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Contact details */}
-              <FormSection id="candidate-contact" icon={Contact} title="Contact details" subtitle="How to reach the candidate and a family member, and when to call.">
+              <FormSection id="candidate-contact" icon={Contact} title="Contact details">
                 <div className="ac-g">
                   {F('phone', 'Mobile number', <PhoneField value={form.phone} onChange={(value) => set('phone', value)} invalid={Boolean(errors.phone)} />, { cls: 's-4', required: true })}
                   {F('whatsapp', 'WhatsApp number', <PhoneField value={effectiveWhatsapp(form)} disabled={whatsappIsSame(form)} onChange={(value) => set('whatsapp', value)} showHint={false} />,
@@ -633,7 +633,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Passport */}
-              <FormSection id="candidate-passport" icon={IdCard} title="Passport details" subtitle="Read from the passport copy. The original passport is collected at stage 7."
+              <FormSection id="candidate-passport" icon={IdCard} title="Passport details"
                 aside={<span className={`ac-pill ${passportAvailable ? 'is-good' : 'is-muted'}`}><i aria-hidden />{passportAvailable ? 'Passport available' : 'No passport yet'}</span>}>
                 <div className="ac-g">
                   {text('passportNo', 'Passport number', { cls: 's-3', placeholder: 'M1234567' })}
@@ -644,7 +644,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Education */}
-              <FormSection id="candidate-education" icon={GraduationCap} title="Educational details" subtitle="Course, passed year and institute, newest first." aside={sectionMissing('education')}>
+              <FormSection id="candidate-education" icon={GraduationCap} title="Educational details" aside={sectionMissing('education')}>
                 <EntryRowsEditor kind="education" value={form.education} onChange={(value) => set('education', value)} source={sources.education} suggestions={{ level: labels(OPT.educationLevel), institute: served.institutes }} />
               </FormSection>
 
@@ -660,7 +660,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Job preference */}
-              <FormSection id="candidate-work" icon={Target} title="Job preference" subtitle="Job titles and skills help us search the Data Bank and match candidates to orders.">
+              <FormSection id="candidate-work" icon={Target} title="Job preference">
                 <div className="ac-g">
                   <div className="ac-f s-6" data-from={sources.designation ? '' : undefined}>
                     <TagField label="Job preference" value={form.designation} onChange={(value) => set('designation', value)} suggestions={designationSuggestions}
@@ -678,7 +678,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Assessment */}
-              <FormSection id="candidate-assessment" icon={Gauge} title="Assessment & preferences" subtitle="From the screening conversation. The recruiter still records the initial call on the profile.">
+              <FormSection id="candidate-assessment" icon={Gauge} title="Assessment & preferences">
                 <div className="ac-g">
                   {F('serviceChargesStatus', 'Service charges', <FormOptionSelect category={OPT.serviceCharges} value={form.serviceChargesStatus} onChange={(value) => set('serviceChargesStatus', value)} label="Service charges" allowAdd />, { cls: 's-4' })}
                   <EntryField label="Interest level" className="s-12" hint="Tap the chosen card again to clear it.">
@@ -688,7 +688,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Source, follow-up, assignment */}
-              <FormSection id="candidate-source" icon={Share2} title="Source & follow-up" subtitle="Where the candidate came from, who looks after them and when to follow up. The client, country and job come from the order once the candidate is matched.">
+              <FormSection id="candidate-source" icon={Share2} title="Source & follow-up">
                 <div className="ac-g">
                   <EntryField label="Source" className="s-3">
                     {/* "Not recorded" is saved as the catch-all source "Other" (the column cannot be empty); the list is the admin-managed one. */}

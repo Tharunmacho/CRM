@@ -91,7 +91,6 @@ export default function OtherReports({ embedded = false }: { embedded?: boolean 
   const copy = weeklyMode ? STAFF_WEEKLY_COPY : active
   const update = (key: keyof typeof filters, value: string) => { setExported(''); setFilters(previous => ({ ...previous, [key]: value })) }
   const changed = filters.client_id || filters.order_id || filters.designation_id || (supervisor && filters.staff_id) || filters.from_date !== defaultFrom || filters.to_date !== today
-  const activeCount = [filters.client_id, filters.order_id, filters.designation_id, supervisor ? filters.staff_id : ''].filter(Boolean).length + (filters.from_date !== defaultFrom || filters.to_date !== today ? 1 : 0)
   const reset = () => { setExported(''); setFilters({ from_date: defaultFrom, to_date: today, client_id: '', order_id: '', designation_id: '', staff_id: '' }) }
   const presetFrom = (days: number | 'ytd') => days === 'ytd' ? `${today.slice(0, 4)}-01-01` : shiftDay(today, -(days - 1))
   const preset = (days: number | 'ytd') => { setExported(''); setFilters(previous => ({ ...previous, from_date: presetFrom(days), to_date: today })) }
@@ -111,7 +110,7 @@ export default function OtherReports({ embedded = false }: { embedded?: boolean 
     <section className="rv-card rv-report-head" aria-label="Choose a report">
       <Tabs tabs={REPORTS.filter(item => allowed.includes(item.key)).map(item => ({ key: item.key, label: item.label }))} active={report} onChange={chooseReport} />
       <header>
-        <div className="rv-report-title"><span className="rv-icon is-lg"><Icon size={20} strokeWidth={1.8} /></span><div><h2>{copy.title}</h2><p>{copy.note}</p></div></div>
+        <div className="rv-report-title"><span className="rv-icon is-lg"><Icon size={20} strokeWidth={1.8} /></span><div><h2>{copy.title}</h2></div></div>
         {collectionsMode ? null : weeklyMode ? <StaffWeeklyExport weekly={weekly} /> : <div className="rv-export">
           <div role="group" aria-label="Export this report">
             <Button size="sm" disabled={!data || !!exporting} icon={exporting === 'xlsx' ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />} onClick={() => void exportFile('xlsx')}>{exporting === 'xlsx' ? 'Preparing Excel…' : 'Export Excel'}</Button>
@@ -119,7 +118,7 @@ export default function OtherReports({ embedded = false }: { embedded?: boolean 
           </div>
           <p className={exporting ? 'rv-export-note is-busy' : exported && !exportError ? 'rv-export-note is-done' : 'rv-export-note'} role="status">
             {exporting ? <><span className="rv-progress" aria-hidden="true"><i /></span>Preparing your {exporting === 'xlsx' ? 'Excel' : 'PDF'} file. A long period can take up to a minute.</>
-              : exported && !exportError ? <><Check size={14} aria-hidden="true" />{exported}</> : 'The file uses the same filters and dates as the screen.'}
+              : exported && !exportError ? <><Check size={14} aria-hidden="true" />{exported}</> : null}
           </p>
         </div>}
       </header>
@@ -144,7 +143,7 @@ export default function OtherReports({ embedded = false }: { embedded?: boolean 
 
         <section className="rv-card rv-filters" aria-label="Report filters">
           <header>
-            <div className="rv-filters-title"><span className="rv-icon"><Filter size={16} /></span><div><h2>Filters</h2><p>{activeCount ? `${activeCount} filter${activeCount === 1 ? '' : 's'} in use for every report and file` : 'Used for every report and file you download'}</p></div></div>
+            <div className="rv-filters-title"><span className="rv-icon"><Filter size={16} /></span><div><h2>Filters</h2></div></div>
             <div className="rv-filters-actions">
               <div className="rv-presets" role="group" aria-label="Date range shortcuts">
                 {PRESETS.map(item => { const on = filters.from_date === presetFrom(item.days) && filters.to_date === today

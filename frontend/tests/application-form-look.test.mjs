@@ -87,7 +87,7 @@ test('the context strip is a five-item descriptions grid with the stage clock fo
   const strip_ = await src('features/application-form/components/context-strip.tsx')
   for (const key of ['data-ctx="stage"', 'data-ctx="doc"', 'af-ctx-clock', 'af-context-change']) assert.ok(strip_.includes(key), key)
   const css = strip(await src('styles/application-form-tabs.css'))
-  assert.match(css, /\.af-context-cells \{[^}]*grid-template-columns: minmax\(0, 1\.7fr\) minmax\(0, 1\.6fr\) minmax\(0, 1fr\) minmax\(0, 1\.3fr\) minmax\(0, 0\.8fr\)/)
+  assert.match(css, /\.af-context-cells \{[^}]*grid-auto-flow: column; grid-auto-columns: minmax\(0, 1fr\)/)
   assert.match(css, /\.af-ctx \{[^}]*border-left: 1px solid var\(--af-line\)/, 'a divider between items')
   assert.match(css, /\.af-context-change \{[^}]*background: transparent/, 'Change is a text button')
 })

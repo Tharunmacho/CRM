@@ -19,10 +19,12 @@
 :root:root .ops-fit .ui-data-table:is(.is-grid, .is-plain) { border: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); border-radius: var(--table-frame-radius, 6px); }
 
 /* names and places wrap at spaces; no ellipsis, no clamp */
-:root:root .ops-fit :is(.record-name, .cl-cell > b, .cl-cell > span:not(.cl-line), .cl-place-text b, .cl-place-text small, .uv-name > span, .jv-cell-title, .jv-cell-sub, .as-name, .wa-doc-caption, .ai-cell) {
-  max-width: none; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; word-break: normal; -webkit-line-clamp: unset;
+:root:root .ops-fit :is(.record-name, .cl-cell > b, .cl-cell > span:not(.cl-line), .cl-place-text b, .cl-place-text small, .jv-cell-title, .jv-cell-sub, .as-name, .wa-doc-caption, .ai-cell) {
+  max-width: 100%; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; word-break: normal; -webkit-line-clamp: unset;
 }
 :root:root .ops-fit :is(.record-name, .cl-cell > b, .cl-place-text b, .cl-place-text small) { display: block; }
+/* a name longer than three lines is cut there with its full text as the tooltip (title), so one very long name cannot make its row several times taller than the others */
+:root:root:root .ops-fit :is(.record-name, .cl-cell > b)[title] { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: break-word; }
 /* a contact cell never grows past its column: the e-mail shrinks with its ellipsis (the whole address is the tooltip) instead of overflowing on both sides */
 :root:root .ops-fit .cl-cell { grid-template-columns: minmax(0, 1fr); }
 :root:root .ops-fit .cs-stack-names { min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
@@ -32,17 +34,16 @@
 /* chips (specialisation, country) wrap to the next line; the text of one chip is never cut */
 :root:root .ops-fit .cs-tags { flex-wrap: wrap; }
 :root:root .ops-fit .cs-tag { max-width: 100%; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
-:root:root .ops-fit .uv-work { white-space: normal; }
+:root:root .ops-fit .uv-work { white-space: nowrap; }
 /* a role / status chip is one word group: it never breaks inside a word (the column leaves room for it) */
 :root:root .ops-fit .ui-data-table td :is(.ui-badge, .ui-badge-chip, .ui-badge-dot) { white-space: nowrap; }
-:root:root .ops-fit .uv-flags { max-width: none; }
 :root:root .ops-fit .js-openings { max-width: none; }
 
 /* the Actions column is a share of the table (the DataTable cannot give an actions header a width) */
 :root:root .ops-fit .ui-data-table table.is-fixed th.ui-actions-cell { width: 20%; min-width: 0; }
 :root:root .ops-fit.ops-clients .ui-data-table table.is-fixed th.ui-actions-cell { width: 21%; }
 :root:root .ops-fit.ops-agencies .ui-data-table table.is-fixed th.ui-actions-cell { width: 15%; }
-:root:root .ops-fit.ops-jobs .ui-data-table table.is-fixed th.ui-actions-cell { width: 17%; }
+:root:root .ops-fit.ops-jobs .ui-data-table table.is-fixed th.ui-actions-cell { width: 21%; }
 :root:root .ops-fit.ops-users .ui-data-table table.is-fixed th.ui-actions-cell { width: 16%; }
 :root:root .ops-fit.ops-currencies .ui-data-table table.is-fixed th.ui-actions-cell { width: 25%; }
 :root:root .ops-fit .ui-data-table :is(th, td).ui-actions-cell { min-width: 0; }
@@ -105,7 +106,7 @@
  * (below it the rows are labelled cards that keep their left labels). The cell wrappers centre too, so a value sits under its heading. ---------- */
 @media (min-width: 768px) {
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 :is(th, td) { text-align: center; }
-  :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 td :is(.record-identity, .cl-cell > .cl-line, .cs-tags, .jv-person, .uv-person, .uv-name, .cs-row-actions, .uv-actions, .wa-doc-actions, .jv-tracker-label, .jv-row-actions) { justify-content: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 td :is(.record-identity, .cl-cell > .cl-line, .cs-tags, .jv-person, .cs-row-actions, .uv-actions, .wa-doc-actions, .jv-tracker-label, .jv-row-actions) { justify-content: center; }
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 td :is(.record-name, .record-detail, .cl-cell, .cl-place-text, .cl-progress, .js-client, .js-openings, .uv-work, .ai-cell, .wa-state, .cd-cand-text, .jv-stage-cell, .jv-tracker, .jv-cell, .jv-cell-title, .jv-cell-sub) { text-align: center; justify-items: center; }
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 td .uv-status { justify-items: center; }
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-768 td :is(.wa-state, .cl-place.is-stacked) { align-items: center; }
@@ -113,7 +114,7 @@
 }
 @media (min-width: 1024px) {
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 :is(th, td) { text-align: center; }
-  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 td :is(.record-identity, .cl-cell > .cl-line, .cs-tags, .jv-person, .uv-person, .uv-name, .cs-row-actions, .uv-actions, .wa-doc-actions, .jv-tracker-label, .jv-row-actions) { justify-content: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 td :is(.record-identity, .cl-cell > .cl-line, .cs-tags, .jv-person, .cs-row-actions, .uv-actions, .wa-doc-actions, .jv-tracker-label, .jv-row-actions) { justify-content: center; }
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 td :is(.record-name, .record-detail, .cl-cell, .cl-place-text, .cl-progress, .js-client, .js-openings, .uv-work, .ai-cell, .wa-state, .cd-cand-text, .jv-stage-cell, .jv-tracker, .jv-cell, .jv-cell-title, .jv-cell-sub) { text-align: center; justify-items: center; }
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 td .uv-status { justify-items: center; }
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-1024 td :is(.wa-state, .cl-place.is-stacked) { align-items: center; }
@@ -121,7 +122,7 @@
 }
 @media (min-width: 1280px) {
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 :is(th, td) { text-align: center; }
-  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td :is(.record-identity, .cl-cell > .cl-line, .cs-tags, .jv-person, .uv-person, .uv-name, .cs-row-actions, .uv-actions, .wa-doc-actions, .jv-tracker-label, .jv-row-actions) { justify-content: center; }
+  :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td :is(.record-identity, .cl-cell > .cl-line, .cs-tags, .jv-person, .cs-row-actions, .uv-actions, .wa-doc-actions, .jv-tracker-label, .jv-row-actions) { justify-content: center; }
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td :is(.record-name, .record-detail, .cl-cell, .cl-place-text, .cl-progress, .js-client, .js-openings, .uv-work, .ai-cell, .wa-state, .cd-cand-text, .jv-stage-cell, .jv-tracker, .jv-cell, .jv-cell-title, .jv-cell-sub) { text-align: center; justify-items: center; }
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td .uv-status { justify-items: center; }
   :root:root:root .ops-fit .ui-data-table.ui-table-stack-1280 td :is(.wa-state, .cl-place.is-stacked) { align-items: center; }

@@ -45,3 +45,24 @@ test('the history sheet shows leads that moved and marks a deleted account like 
   assert.match(sheet, /deactivat\|deleted/)
   assert.match(sheet, /transfer\.leads/)
 })
+
+test('the Team member cell is the name alone, from the left: no avatar, no e-mail line, no "You" chip; the e-mail and "You" are the tooltip and the screen-reader text', async () => {
+  const page = await read('screens/users/users.tsx')
+  const start = page.indexOf("key: 'name', header: 'Team member'")
+  const cell = page.slice(start, page.indexOf("key: 'role'", start))
+  assert.match(cell, /align: 'text'/)
+  assert.match(cell, /className="uv-member" title=\{u\.email \+ \(u\.id === store\.me\.id \? ' \(you\)' : ''\)\}/)
+  assert.match(cell, /className="sr-only"/)
+  assert.doesNotMatch(cell, /UserAvatar|uv-email|<em>|uv-person/)
+  assert.match(page, /columns\.map\(column => \(\{ align: 'center' as const, \.\.\.column \}\)\)/, 'the other columns stay centred')
+  const css = await read('styles/users-v2.css')
+  assert.match(css, /\.uv-flags \{[^}]*width: 156px;/, 'the switches block is one width in every row')
+  assert.match(css, /\.uv-flags label > span \{[^}]*text-align: left;/)
+})
+
+test('User Management carries no explanatory captions under its headings or cards', async () => {
+  const page = await read('screens/users/users.tsx')
+  for (const gone of [/Automatic assignment is off/, /Recruiter preferences below/, /Add your team, choose what each person/, /Automatic assignment is on\. New candidates/, /With access to the CRM/, /On leave today/, /Can be given new candidates automatically/, /uv-assignment-note/, /uv-foot/]) assert.doesNotMatch(page, gone)
+  const css = await read('styles/users-v2.css')
+  assert.doesNotMatch(css, /uv-assignment-note|uv-foot|\.uv-email|\.uv-person/)
+})

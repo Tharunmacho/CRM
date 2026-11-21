@@ -98,7 +98,7 @@ export default function ClientDetailPage() {
 
       <section aria-labelledby="cd-orders-title">
         <div className="cd-orders-head">
-          <div><h2 id="cd-orders-title">Jobs &amp; candidates</h2><p>All jobs for this client and the candidates matched to them.</p></div>
+          <div><h2 id="cd-orders-title">Jobs &amp; candidates</h2></div>
           {companies.length > 1 && (
             <Select aria-label="Filter jobs by company" value={employer} onChange={(event) => setEmployer(event.target.value)}>
               <option value="">All companies</option>

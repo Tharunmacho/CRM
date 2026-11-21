@@ -118,7 +118,6 @@ export default function TodoPage() {
         <Panel flush className="td-list-panel">
           <PanelHeader
             title="My to-dos"
-            meta="Your reminders, grouped by day"
             action={<span className="td-private"><LockKeyhole size={13} aria-hidden="true" /> Private to you</span>}
           />
           <Tabs
@@ -163,7 +162,7 @@ export default function TodoPage() {
         </Panel>
 
         <Panel flush className="td-progress-panel">
-          <PanelHeader title="Your progress" meta="What you have finished and what is left" />
+          <PanelHeader title="Your progress" />
           <div className="td-progress-body">
             <div className="td-ring-wrap">
               <div className="td-ring" role="img" aria-label={`${completion}% of your to-dos completed`}>
@@ -203,10 +202,6 @@ export default function TodoPage() {
               )}
             </section>
 
-            <p className="td-privacy-note">
-              <LockKeyhole size={15} aria-hidden="true" />
-              <span>Only you can see this list. Team work is on the Tasks page.</span>
-            </p>
           </div>
         </Panel>
       </div>

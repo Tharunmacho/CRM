@@ -60,7 +60,8 @@
 .jv-avatar.is-lg { width: 44px; height: 44px; font-size: 14px; }
 .jv-meter { height: 5px; margin-top: 6px; overflow: hidden; border-radius: 999px; background: var(--tint-2); }
 .jv-meter span { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
-.jv-owner { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-main); }
+.jv-owner { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; font-size: 14px; color: var(--text-main); overflow-wrap: anywhere; text-align: left; }
+.jv-owner > .ui-avatar, .jv-owner > :first-child { flex: none; }
 .jv-place { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
 .jv-place i { font-style: normal; color: var(--text-light); }
 .jv-flag-img { flex: none; width: 20px; height: 14px; border-radius: 3px; object-fit: cover; box-shadow: 0 0 0 1px var(--border-main); }

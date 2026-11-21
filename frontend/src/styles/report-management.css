@@ -40,14 +40,6 @@ html:root .rp-cards .summary-value { font-size: 30px; }
 }
 @media (max-width: 479px) { html:root .rp-cards .workspace-summary { grid-template-columns: minmax(0, 1fr); } }
 
-.rp-note { display: flex; flex-direction: column; gap: 3px; }
-.rp-note-text { display: block; overflow-wrap: break-word; }
-.rp-trend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; color: var(--text-muted); font-size: 12.5px; font-weight: 600; line-height: 1.35; }
-.rp-trend b { font-weight: 700; }
-.rp-trend > span:not(.rp-sr) { color: var(--text-muted); font-weight: 500; }
-.rp-trend.is-good, .rp-trend.is-good b { color: var(--success-ink); }
-.rp-trend.is-bad, .rp-trend.is-bad b { color: var(--error-ink); }
-
 /* ---------------------------------------------------------------- panels */
 .dwr .rp-panel { margin-bottom: 16px; }
 .dwr .rp-panel > .dw-panel-head { align-items: center; }

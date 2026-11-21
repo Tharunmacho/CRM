@@ -35,7 +35,7 @@ export function EntryProgress({ completeness, reading, filledByDocuments, next, 
             <span className="ac-prog-label">
               {reading ? <><LoaderCircle size={14} className="ac-spin" aria-hidden /> Reading your documents. Fields fill in when we are done.</>
                 : filledByDocuments ? <><Sparkles size={14} aria-hidden /> {filledByDocuments} {filledByDocuments === 1 ? 'field was' : 'fields were'} filled from your documents. Anything you type is kept.</>
-                : 'Start with the documents below, then check and complete the fields.'}
+                : null}
             </span>
             <span className="ac-prog-count tnum">{filled} of {total} details</span>
           </div>

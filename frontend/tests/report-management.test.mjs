@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
 
-/* The management reading of the Task report and the Lead sheet report: card figures with the previous period, stuck and aging marks, conversion, and the layout rules. */
+/* The management reading of the Task report and the Lead sheet report: card figures, stuck and aging marks, conversion, and the layout rules. */
 
 const moduleUrl = (source) => {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
@@ -16,30 +16,8 @@ const lead = await import(moduleUrl((await src('features/daily-report/lead-matri
 
 const period = (days, to = '2026-11-21') => ({ from: '2026-11-15', to, days })
 
-test('what the previous period is called: a day against yesterday or the day before, a week against last week, any other length by its days', () => {
-  assert.equal(m.compareName(period(1, '2026-11-21'), '2026-11-21'), 'yesterday')
-  assert.equal(m.compareName(period(1, '2026-11-20'), '2026-11-21'), 'the day before')
-  assert.equal(m.compareName(period(7), '2026-11-21'), 'last week')
-  assert.equal(m.compareName(period(21), '2026-11-21'), 'the previous 21 days')
-})
-
-test('a trend: arrow direction, the signed number, and whether the change is good, bad or just a change', () => {
-  assert.deepEqual(m.trendOf(18, 6, 'last week', 'up'), { kind: 'up', delta: '+12', against: 'last week', tone: 'good' })
-  assert.deepEqual(m.trendOf(2, 5, 'last week', 'up'), { kind: 'down', delta: '−3', against: 'last week', tone: 'bad' })
-  assert.equal(m.trendOf(8, 3, 'yesterday', 'down').tone, 'bad') // more lost is bad
-  assert.equal(m.trendOf(1, 3, 'yesterday', 'down').tone, 'good')
-  assert.equal(m.trendOf(4, 1, 'yesterday', 'none').tone, 'plain')
-  assert.deepEqual(m.trendOf(5, 5, 'yesterday', 'up'), { kind: 'flat', delta: '0', against: 'yesterday', tone: 'plain' })
-  assert.equal(m.trendOf(5, null, 'yesterday'), null) // Total: nothing to compare with
-  assert.equal(m.trendOf(null, 5, 'yesterday'), null)
-  assert.equal(m.trendOf(1200, 0, 'last week').delta, '+1,200')
-})
-
-test('the trend as a sentence for a screen reader', () => {
-  assert.equal(m.trendSentence(m.trendOf(18, 6, 'last week')), '12 more than last week')
-  assert.equal(m.trendSentence(m.trendOf(2, 5, 'yesterday')), '3 fewer than yesterday')
-  assert.equal(m.trendSentence(m.trendOf(5, 5, 'yesterday')), 'same as yesterday')
-  assert.equal(m.trendSentence(null), '')
+test('nothing is compared with the previous period: the helpers are gone', () => {
+  for (const gone of ['compareName', 'trendOf', 'trendSentence', 'biggestReason']) assert.equal(m[gone], undefined, gone)
 })
 
 test('shares, conversion and days in words', () => {
@@ -72,18 +50,16 @@ const insight = {
   exitOther: 0,
 }
 
-test('the Task report summary: completed and lost against the previous period, the biggest reason, the share stuck', () => {
-  const summary = m.taskSummary({ taskInsight: insight, period: period(1, '2026-11-21') }, '2026-11-21')
+test('the Task report summary: completed and lost, the share stuck', () => {
+  const summary = m.taskSummary({ taskInsight: insight })
   assert.equal(summary.waiting, 16)
-  assert.deepEqual(summary.completed, { value: 20, previous: 3 })
-  assert.deepEqual(summary.stopped, { value: 8, previous: 9 })
-  assert.equal(summary.reason.label, 'Rejected at interview') // ties go to the first listed
+  assert.equal(summary.completed, 20)
+  assert.equal(summary.stopped, 8)
   assert.equal(summary.stuck, 5)
   assert.equal(summary.stuckPct, 31)
   assert.equal(summary.busiest.no, 3)
-  assert.equal(summary.against, 'yesterday')
-  assert.equal(m.taskSummary({ period: period(1) }, '2026-11-21'), null) // an older server: no management reading, no cards
-  assert.equal(m.biggestReason([]), null)
+  assert.ok(!('against' in summary) && !('reason' in summary), 'no previous period, no "most lost" reason')
+  assert.equal(m.taskSummary({}), null) // an older server: no management reading, no cards
 })
 
 test('stuck per person and the waits by stage come from the reading; without it they are not counted (a dash, not a zero)', () => {
@@ -126,25 +102,19 @@ const leadReport = () => ({
   ],
 })
 
-test('the Lead sheet summary: new, interested with its conversion, not interested, follow-up, all against the previous period', () => {
-  const summary = m.leadSummary(leadReport(), '2026-11-21')
-  assert.deepEqual(summary.newLeads, { value: 19, previous: 10 })
-  assert.deepEqual(summary.interested, { value: 3, previous: 1 })
-  assert.deepEqual(summary.notInterested, { value: 2, previous: 4 })
+test('the Lead sheet summary: new, interested, not interested, follow-up, conversion, aging', () => {
+  const summary = m.leadSummary(leadReport())
+  assert.equal(summary.newLeads, 19)
+  assert.equal(summary.interested, 3)
+  assert.equal(summary.notInterested, 2)
   assert.equal(summary.followUp, 11)
-  assert.deepEqual(summary.conversion, { value: 25, previous: 14 }) // 3 of 12, against 1 of 7
+  assert.equal(summary.conversion, 25) // 3 of 12
   assert.equal(summary.stale, 6)
   assert.equal(summary.staleDays, 3)
-  assert.equal(summary.against, 'yesterday')
-  const total = leadReport()
-  total.leadInsight.previous = null
-  total.leadSheet.previous = null
-  const flat = m.leadSummary(total, '2026-11-21')
-  assert.equal(flat.interested.previous, null)
-  assert.equal(flat.conversion.previous, null) // Total: nothing to compare with
+  assert.ok(!('against' in summary))
   const old = leadReport()
   delete old.leadSheet.newInPeriod
-  assert.equal(m.leadSummary(old, '2026-11-21'), null)
+  assert.equal(m.leadSummary(old), null)
 })
 
 test('the lead matrix adds interested, conversion and aging per recruiter, the Unassigned row and a Total that adds the rows', () => {
@@ -198,4 +168,14 @@ test('the Stuck figure and the Aging figure open their lists, and the cards that
   assert.match(leads, /onDrill\('leadsFollowUp'/)
   const view = await src('features/daily-report/daily-report-view.ts')
   assert.match(view, /Stuck: waiting more than 7 days/)
+})
+
+test('the report cards carry no comparison and no sentence: a card is its icon, label and number', async () => {
+  for (const file of ['features/daily-report/report-task.tsx', 'features/daily-report/report-lead.tsx', 'features/daily-report/report-views.tsx']) {
+    const source = await src(file)
+    assert.doesNotMatch(source, /CardNote|TrendLine|trendOf|vs yesterday|vs \$\{|Most:|detail:/, file)
+  }
+  await assert.rejects(src('features/daily-report/report-cards.tsx'), /ENOENT/)
+  const css = await src('styles/report-management.css')
+  assert.doesNotMatch(css, /rp-trend|rp-note/)
 })

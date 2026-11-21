@@ -1,42 +1,8 @@
 /**
- * The management reading of the two period reports (Task report, Lead sheet report): the summary-card figures with their comparison against the previous
- * period, the conversion rate, days in words, the stuck and aging marks. Pure (types only), so node can test it as it is (tests/report-management.test.mjs).
+ * The management reading of the two period reports (Task report, Lead sheet report): the summary-card figures, the conversion rate, days in words, the stuck and aging marks. Pure (types only), so node can test it as it is (tests/report-management.test.mjs).
  * The server counts; this file only turns its numbers into the sentences and shares a manager reads.
  */
-import type { Compared, DailyReport, ExitReason, WaitingStage } from './daily-report-types'
-
-export type TrendTone = 'good' | 'bad' | 'plain'
-export interface Trend {
-  kind: 'up' | 'down' | 'flat'
-  /** "+12", "−3", "0". */
-  delta: string
-  /** What it is compared with: "last week", "yesterday", "the previous 3 days". */
-  against: string
-  /** good = the change is what a manager wants (more completed, fewer lost), bad = the opposite, plain = no judgement. */
-  tone: TrendTone
-}
-
-/** What the previous period is called on the cards: a day is compared with the day before, a week with the last week, any other length by its days. */
-export function compareName(period: { from: string; to: string; days: number }, today: string): string {
-  if (period.days <= 1) return period.to === today ? 'yesterday' : 'the day before'
-  if (period.days === 7) return 'last week'
-  return `the previous ${period.days} days`
-}
-
-/** The arrow and number of a card ("+12 vs last week"); null when there is nothing to compare with (a missing figure, or the period Total). `better` says which direction is good. */
-export function trendOf(value: number | null | undefined, previous: number | null | undefined, against: string, better: 'up' | 'down' | 'none' = 'up'): Trend | null {
-  if (value == null || previous == null || !Number.isFinite(value) || !Number.isFinite(previous)) return null
-  const diff = Math.round(value - previous)
-  const kind = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat'
-  const tone: TrendTone = kind === 'flat' || better === 'none' ? 'plain' : (kind === 'up') === (better === 'up') ? 'good' : 'bad'
-  return { kind, delta: diff > 0 ? `+${diff.toLocaleString('en-IN')}` : diff < 0 ? `−${Math.abs(diff).toLocaleString('en-IN')}` : '0', against, tone }
-}
-/** The same as a sentence for a screen reader and a tooltip: "12 more than last week", "3 fewer than yesterday", "same as last week". */
-export function trendSentence(trend: Trend | null): string {
-  if (!trend) return ''
-  const n = trend.delta.replace(/^[+−]/, '')
-  return trend.kind === 'flat' ? `same as ${trend.against}` : `${n} ${trend.kind === 'up' ? 'more' : 'fewer'} than ${trend.against}`
-}
+import type { DailyReport, WaitingStage } from './daily-report-types'
 
 /** A share as a whole percent (never above 100 for a part of a whole); null without a whole to divide by. */
 export function percentOf(part: number | null | undefined, whole: number | null | undefined): number | null {
@@ -56,32 +22,25 @@ export function daysText(days: number | null | undefined): string {
 /** "38d" on the cards of a narrow table. */
 export const daysShort = (days: number | null | undefined) => (days == null || !Number.isFinite(days) ? '–' : `${Number.isInteger(days) ? days : days.toFixed(1)}d`)
 
-/** The reason most candidates were lost for (ties: the first listed). */
-export const biggestReason = (reasons: readonly ExitReason[]): ExitReason | null => reasons.reduce<ExitReason | null>((best, item) => (item.count > (best?.count ?? 0) ? item : best), null)
-
 /* ---------------------------------------------------------------- Task report */
 
 export interface TaskSummary {
   stuckDays: number
   waiting: number
-  completed: Compared
-  stopped: Compared
-  reason: ExitReason | null
+  completed: number
+  stopped: number
   stuck: number
   stuckPct: number | null
   busiest: WaitingStage | null
-  /** The comparison label, "last week". */
-  against: string
 }
 
-/** The five cards of the Task report; null when the server has not sent the management reading yet. */
-export function taskSummary(report: Pick<DailyReport, 'taskInsight' | 'period'>, today: string): TaskSummary | null {
+/** The cards of the Task report; null when the server has not sent the management reading yet. */
+export function taskSummary(report: Pick<DailyReport, 'taskInsight'>): TaskSummary | null {
   const insight = report.taskInsight
   if (!insight) return null
   return {
-    stuckDays: insight.stuckDays, waiting: insight.waiting.total, completed: insight.completed, stopped: insight.stopped, reason: biggestReason(insight.exitReasons),
+    stuckDays: insight.stuckDays, waiting: insight.waiting.total, completed: insight.completed.value, stopped: insight.stopped.value,
     stuck: insight.waiting.stuck, stuckPct: percentOf(insight.waiting.stuck, insight.waiting.total), busiest: insight.waiting.busiest,
-    against: compareName(report.period, today),
   }
 }
 
@@ -104,37 +63,32 @@ export function waitTone(days: number, stuckDays: number): 'ok' | 'late' | 'long
 /* ---------------------------------------------------------------- Lead sheet report */
 
 export interface LeadSummary {
-  newLeads: Compared
-  contacted: Compared
-  interested: Compared
-  notInterested: Compared
+  newLeads: number
+  contacted: number
+  interested: number
+  notInterested: number
   followUp: number
-  conversion: { value: number | null; previous: number | null }
+  conversion: number | null
   stale: number
   staleDays: number
-  against: string
 }
 
-/** The seven cards of the Lead sheet report; null when the server has not sent the period-aware lead figures. */
-export function leadSummary(report: Pick<DailyReport, 'leadSheet' | 'leadFeedback' | 'leadInsight' | 'period'>, today: string): LeadSummary | null {
+/** The cards of the Lead sheet report; null when the server has not sent the period-aware lead figures. */
+export function leadSummary(report: Pick<DailyReport, 'leadSheet' | 'leadFeedback' | 'leadInsight'>): LeadSummary | null {
   const sheet = report.leadSheet
   if (!sheet || sheet.newInPeriod === undefined) return null
   const insight = report.leadInsight
-  const was = insight?.previous ?? null
-  const back = sheet.previous ?? null
   const contacted = report.leadFeedback.contacted
   const interested = report.leadFeedback.interested
-  const lost = report.leadFeedback.byOutcome.find(item => item.key === 'notInterested')?.count ?? 0
   return {
-    newLeads: { value: sheet.newInPeriod, previous: back?.newInPeriod ?? null },
-    contacted: { value: contacted, previous: back?.contacted ?? null },
-    interested: { value: interested, previous: was?.interested ?? null },
-    notInterested: { value: lost, previous: was?.notInterested ?? null },
+    newLeads: sheet.newInPeriod,
+    contacted,
+    interested,
+    notInterested: report.leadFeedback.byOutcome.find(item => item.key === 'notInterested')?.count ?? 0,
     followUp: report.leadFeedback.callbacksDue,
-    conversion: { value: conversion(interested, contacted), previous: was && back ? conversion(was.interested, back.contacted) : null },
+    conversion: conversion(interested, contacted),
     stale: insight?.stale.total ?? 0,
     staleDays: insight?.staleDays ?? 3,
-    against: compareName(report.period, today),
   }
 }
 /** Stage records completed and stopped in the period, by stage number, for the people shown (the Administrator account left out); null when the server sends no per-person flow. */

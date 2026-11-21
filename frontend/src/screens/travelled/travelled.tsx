@@ -20,7 +20,6 @@ import {
 import '@/styles/data-bank-v2.css'
 import '@/styles/travelled.css'
 import '@/styles/touch-targets.css'
-import { docToText } from '@/screens/tasks/doc-input'
 
 const SHOWN = 6
 const BREAKDOWN_KEY = 'crm-travelled-breakdown'
@@ -302,7 +301,7 @@ function TravelTable({ rows, total, page, pageSize, filtered, onPage, onPageSize
         <tbody>
           {shown.map((row, index) => <tr key={row.applicationId}>
             <td data-label="S NO" className="tnum">{serialNumber(page, pageSize, index)}</td>
-            <td data-label="DOC" className="tnum">{docToText(row.commencementDate) || <span className="tv-muted">—</span>}</td>
+            <td data-label="DOC" className="tnum">{formatTravelDay(row.commencementDate) || <span className="tv-muted">—</span>}</td>
             <td data-label="Date of travel" className="tnum tv-c-when">{row.travelDate ? formatTravelDay(row.travelDate) : <span className="tv-muted">Not recorded</span>}</td>
             <td data-label="Candidate" className="tv-who">
               <Link to={`/candidates/${row.candidateId}`}>{row.name}</Link>

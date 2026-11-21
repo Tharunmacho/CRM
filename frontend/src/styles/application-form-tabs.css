@@ -90,13 +90,14 @@
 
 /* ------------------------------------------------------------ The context strip: five definitions, full text, a hairline between them */
 .af .af-context { display: flex; align-items: center; gap: 16px; min-width: 0; padding: 16px 24px; background: var(--bg-card); border: 1px solid var(--af-line); border-radius: 12px; box-shadow: var(--af-shadow); }
-.af .af-context-cells { display: grid; flex: 1 1 auto; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 0.8fr); align-items: stretch; min-width: 0; margin: 0; }
+.af .af-context-cells { display: grid; flex: 1 1 auto; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);   /* one equal column per fact that is shown (client, job, [recruiter], stage, DOC): an absent recruiter no longer shifts the stage into a narrow column */ align-items: stretch; min-width: 0; margin: 0; }
 .af .af-ctx { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 0 16px; border-left: 1px solid var(--af-line); }
 .af .af-ctx:first-child { padding-left: 0; border-left: 0; }
 .af .af-ctx dt { margin: 0; font-size: 12px; font-weight: 600; line-height: 16px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
 .af .af-ctx dd { display: flex; align-items: flex-start; gap: 8px; min-width: 0; margin: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 20px; color: var(--text-main); }
 .af .af-ctx dd > svg { flex: none; width: 16px; height: 16px; position: relative; top: 2px; color: var(--primary); }
 .af .af-ctx dd > span { min-width: 0; }
+.af .af-ctx[data-ctx='stage'] dd > span { overflow-wrap: break-word; }   /* a stage name wraps between words, never inside one */
 .af .af-ctx dd small { flex: none; font-size: 12px; font-weight: 500; line-height: 20px; color: var(--text-muted); }
 .af .af-ctx dd.af-ctx-clock { font-size: 12.5px; font-weight: 500; line-height: 16px; color: var(--text-muted); }
 .af .af-ctx dd.af-ctx-clock > svg { width: 14px; height: 14px; position: relative; top: 1px; color: inherit; }
@@ -421,7 +422,7 @@
 /* ------------------------------------------------------------ Phone: the bar is one short row, cards stack, targets are 44px */
 @media (max-width: 900px) {
   .af .af-context { flex-wrap: wrap; row-gap: 12px; }
-  .af .af-context-cells { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .af .af-context-cells { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
   .af .af-ctx, .af .af-ctx:first-child { padding: 0; border-left: 0; }
   .af .af-context-change { margin-left: auto; }
 }
@@ -445,7 +446,7 @@
   .af .af-missing li { min-height: 48px; }
   .af .af-missing button { height: 44px; }
   .af .af-context { padding: 12px 16px; }
-  .af .af-context-cells { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .af .af-context-cells { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .af .af-context-change { width: 100%; height: 44px; border: 1px solid var(--border-control); background: var(--bg-card); }
   /* The tab bar is a segmented control: a tinted track, the chosen segment a raised white pill (no underline). It scrolls inside itself. */
   .af .af-tablist-wrap { background: var(--tint-2); }

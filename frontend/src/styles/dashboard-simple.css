@@ -16,14 +16,16 @@
   --dc-walk_in: var(--chart-3, var(--dr-amber));
   --dc-other: var(--dr-slate);
 }
-.dashsimple { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; width: 100%; max-width: 1500px; margin: 0 auto; padding: 4px 0 28px; color: var(--text-main); font-size: 14px; }
+.dashsimple { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; width: 100%; max-width: none; margin: 0; padding: 0 0 28px; color: var(--text-main); font-size: 14px; }
 .dashsimple > * { min-width: 0; }
 .dashsimple button { font-family: inherit; }
 .dashsimple button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .dashsimple .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-.ds-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
-.ds-head h1 { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.2; letter-spacing: -.035em; }
+.ds-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+/* the page-header look every screen shares (skin.css section 6): 28/34 title, 14px under it, the short accent bar */
+.ds-head h1 { position: relative; margin: 0; padding-bottom: 14px; font-size: 28px; font-weight: 600; line-height: 34px; letter-spacing: -.03em; }
+.ds-head h1::after { content: ''; position: absolute; left: 0; bottom: 0; width: 36px; height: 4px; border-radius: 4px; background: var(--accent-2); }
 .ds-error { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--error-edge); border-radius: 10px; background: var(--error-fill); color: var(--error-ink); font-size: 13px; }
 .ds-error button { margin-left: auto; border: 1px solid var(--error-edge); border-radius: 6px; background: var(--bg-card); padding: 4px 10px; color: var(--error-ink); font-size: 12px; cursor: pointer; }
 
@@ -100,7 +102,7 @@
 
 @media (max-width: 760px) { .sg-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 760px) {
-  .ds-head h1 { font-size: 24px; }
+  .ds-head h1 { font-size: 24px; line-height: 30px; padding-bottom: 12px; }
   .ds-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .ds-card { padding: 16px; }
   .ds-grid > .ds-card:last-child:nth-child(odd) { grid-column: 1 / -1; }

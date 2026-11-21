@@ -304,7 +304,7 @@ export const Select = forwardRef<
         onClick={() => (open ? close() : show())}
         onKeyDown={handleKeys}
       >
-        <span>{display}</span>
+        <span title={display}>{display}</span>
         <ChevronDown size={15} aria-hidden="true" />
       </button>
       {open &&

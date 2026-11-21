@@ -15,10 +15,6 @@ export interface DailyMetric {
   /** The plain sentence that says how this number is counted (the small i on a column heading). */
   definition: string
   value: number
-  /** The previous period's value; missing for Total (nothing to compare with). */
-  previous: number | null
-  /** Percent change against the previous period; null when the previous period had nothing to compare with. */
-  changePct: number | null
   series: SeriesPoint[]
 }
 
@@ -74,12 +70,11 @@ export interface HistoryPage { total: number; page: number; pageSize: number; ro
 export interface Compliance { expected: number; submitted: number; missing: { id: string; name: string }[] }
 
 export interface DailyPeriod {
-  from: string; to: string; days: number; previousFrom: string; previousTo: string
+  from: string; to: string; days: number
   bucket?: 'day' | 'week'
-  /** The period includes today: it is compared with the same time of the previous period (additive). */
+  /** The period includes today (additive). */
   partial?: boolean
-  previousUntil?: string
-  /** Total: from the earliest record to today, nothing to compare with. */
+  /** Total: from the earliest record to today. */
   allTime?: boolean
 }
 
@@ -94,9 +89,8 @@ export interface LeadSheetSummary {
   /** Additive: the columns of the lead matrix (the nine statuses, then the status templates that hold leads) and every recruiter's leads by column; the row 'unassigned' is the leads nobody owns. */
   statusColumns?: { key: string; label: string; template?: boolean }[]
   byStatusPerStaff?: { id: string; counts: Record<string, number> }[]
-  /** Additive, period-aware: new leads, leads assigned and not yet contacted in the period, the backlog (assigned, never contacted), and the same figures for the previous period. */
+  /** Additive, period-aware: new leads, leads assigned and not yet contacted in the period and the backlog (assigned, never contacted). */
   newInPeriod?: number; assignedInPeriod?: number; notContactedInPeriod?: number; backlog?: number
-  previous?: { assignedInPeriod: number; contacted: number; newInPeriod: number }
 }
 export interface StageTotal { no: number; key: string; label: string; count: number }
 /** One of the 13 stages over the period (additive `stageFlow`): stage records completed in it, and how many of those ended the placement. */
@@ -134,8 +128,8 @@ export interface DailyReport {
 
 export interface WaitingStage { no: number; label: string; count: number; stuck: number; avgDays: number | null }
 export interface LongestWaiting { candidateId: string; careId: string | null; name: string; staffId: string | null; staffName: string; stage: number; stageLabel: string; since: string | null; days: number }
-export interface ExitReason { label: string; count: number; previous: number | null }
-export interface Compared { value: number; previous: number | null }
+export interface ExitReason { label: string; count: number }
+export interface Compared { value: number }
 /** The Task report's management figures: how long candidates have waited at their stage now, how many are stuck, what was completed and lost in the period. */
 export interface TaskInsight {
   stuckDays: number
@@ -148,12 +142,11 @@ export interface TaskInsight {
   exitOther: number
 }
 export interface AgingLead { leadId: string; name: string; staffId: string | null; staffName: string; since: string | null; days: number }
-/** The Lead sheet report's management figures: leads nobody has contacted for more than `staleDays`, and the previous period's answers. */
+/** The Lead sheet report's management figures: leads nobody has contacted for more than `staleDays`. */
 export interface LeadInsight {
   staleDays: number
   stale: { total: number; unassigned: number; perStaff: Record<string, number> }
   aging: AgingLead[]
-  previous: { interested: number; notInterested: number } | null
 }
 
 export interface DrillRow {

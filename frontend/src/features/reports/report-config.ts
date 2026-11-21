@@ -4,18 +4,16 @@ export type ReportKey = 'funnel' | 'staff' | 'source' | 'orders' | 'rejections' 
 
 /**
  * The reports. `question` is the plain question the report answers (shown in the report list);
- * `note` says what it counts; `how` explains, line by line, how the numbers are worked out (these
+ * `how` explains, line by line, how the numbers are worked out (these
  * restate the server's rules, they add none).
  */
-export const REPORTS: { key: ReportKey; label: string; question: string; title: string; note: string; how: string[] }[] = [
+export const REPORTS: { key: ReportKey; label: string; question: string; title: string; how: string[] }[] = [
   {
     key: 'collections', label: 'Fee collections', question: 'What is owed and what has been received?', title: 'Candidate fee collections',
-    note: 'Service fees, GST, invoices, actual money received and the remaining balance for each candidate.',
     how: ['Agreed totals include the saved service fee and GST. Invoiced totals include issued invoices only.', 'Received amounts include confirmed payment records. Voided receipts are retained in history and excluded from received totals.'],
   },
   {
     key: 'funnel', label: 'Pipeline', question: 'Where do we lose people?', title: 'Pipeline funnel',
-    note: 'How many candidates reached each stage, how many were lost before the next one, and how long each stage takes. Only candidates matched to an order in this period are counted. A candidate who is only waiting still counts as active.',
     how: [
       'Reached: candidates matched to an order in the period who got to this stage or went past it.',
       'Active or waiting: still sitting at this stage, not ended. Moved on: now at a later stage, or deployed. Ended here: the application was closed at this stage.',
@@ -25,7 +23,6 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
   },
   {
     key: 'staff', label: 'Recruiter performance', question: 'Who is carrying what?', title: 'Recruiter performance',
-    note: 'Candidates given to each person, tasks finished, the average hours each person takes per stage, and overdue tasks sent to the admin.',
     how: [
       'Assigned: candidates that arrived in the period and were first given to this person, within your filters.',
       'Average hours per stage: time from when a task is created to when its stage is finished, for this person. Stages with no finished task have no average; they are not counted as zero.',
@@ -34,7 +31,6 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
   },
   {
     key: 'source', label: 'Sources', question: 'Where do candidates come from?', title: 'Candidate sources',
-    note: 'Where new candidates came from in this period: each email account, WhatsApp, and candidates added by hand.',
     how: [
       'Counts candidates added in the period, with your filters, by the way they first reached the CRM.',
       'Email candidates are grouped by the connected mailbox that received the first message.',
@@ -43,7 +39,6 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
   },
   {
     key: 'orders', label: 'Order status', question: 'Are orders getting filled?', title: 'Order status',
-    note: 'For each order: open jobs compared with candidates matched, selected and deployed.',
     how: [
       'Openings: how many people the order needs.',
       'Matched, selected and deployed count candidates who were added to the order during the chosen dates, so matched can be higher than openings.',
@@ -52,7 +47,6 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
   },
   {
     key: 'rejections', label: 'Rejections', question: 'Why do applications end?', title: 'Rejections by stage and reason',
-    note: 'Candidates whose application ended in this period, such as failed prescreen, rejected at interview or medically unfit.',
     how: [
       'Counts applications that ended inside the period, at the stage where they ended.',
       'Reasons are the closing reasons chosen when the stage is completed.',
@@ -61,7 +55,6 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
   },
   {
     key: 'advance', label: 'Advance collections', question: 'How much money came in?', title: 'Advance collections',
-    note: 'Advance money collected from each candidate, and per month. Each currency is added up separately.',
     how: [
       'An amount appears when stage 9 records the advance as collected.',
       'Currencies are never converted or mixed: each has its own total and chart.',
@@ -76,7 +69,6 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
  */
 export const STAFF_WEEKLY_COPY = {
   title: 'Recruiter performance',
-  note: "Each person's attendance, hours, daily tasks and candidates from prescreening to deployment, for a week or any period you choose, worked out from the live records.",
 }
 
 /**

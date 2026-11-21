@@ -4,9 +4,8 @@ import { initials } from '@/shared/lib/format'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { ScrollEdges } from '@/screens/tasks/daily-table'
 import { hueOf } from './report-table'
-import { CardNote } from './report-cards'
 import { LongestWaitingPanel } from './report-lists'
-import { flowByStage, daysText, stuckOf, taskSummary, trendOf, waitingByStage } from './report-management'
+import { flowByStage, daysText, stuckOf, taskSummary, waitingByStage } from './report-management'
 import { buildStageMatrix, numberText, reportPeople, shownOverdue, type MatrixRow } from './daily-report-view'
 import type { ViewProps } from './report-views'
 
@@ -32,16 +31,15 @@ function Person({ name }: { name: string }) {
 }
 
 /**
- * The Task report, read as a manager: five cards at the top (waiting now, completed and lost in the period against the previous period, stuck, the busiest stage's
- * wait), the 13 stages recruiter by recruiter with a Stuck column, stage by stage with its waits, where candidates are lost and who has waited longest.
+ * The Task report, read as a manager: two cards at the top (stages completed, stopped or lost in the period), the 13 stages recruiter by recruiter with a Stuck column, stage by stage with its waits, where candidates are lost and who has waited longest.
  * Waiting is what is true now; completed and lost follow the period; the recruiter filter narrows all of it to one person.
  */
-export function TaskReportView({ report, roster, staff, today, onDrill }: ViewProps) {
+export function TaskReportView({ report, roster, staff, onDrill }: ViewProps) {
   const team = report.scope === 'team'
   const picked = team ? staff : ''
   const matrix = buildStageMatrix(report, picked)
   const insight = report.taskInsight
-  const summary = taskSummary(report, today)
+  const summary = taskSummary(report)
   const waits = waitingByStage(report)
   const people = reportPeople(roster.length ? roster : report.staff)
   const shown = new Set(reportPeople(report.staff).filter(row => !picked || row.id === picked).map(row => row.id))
@@ -52,10 +50,8 @@ export function TaskReportView({ report, roster, staff, today, onDrill }: ViewPr
   const one = picked ? people.find(row => row.id === picked)?.name : undefined
 
   const cards = summary ? [
-    { label: 'Stages completed', value: numberText(summary.completed.value), icon: CheckCircle2, tone: 'green' as const,
-      detail: <CardNote trend={trendOf(summary.completed.value, summary.completed.previous, summary.against, 'up')} /> },
-    { label: 'Stopped or lost', value: numberText(summary.stopped.value), icon: UserX, tone: 'amber' as const,
-      detail: <CardNote trend={trendOf(summary.stopped.value, summary.stopped.previous, summary.against, 'down')}>{summary.reason ? `Most: ${summary.reason.label} (${numberText(summary.reason.count)})` : undefined}</CardNote> },
+    { label: 'Stages completed', value: numberText(summary.completed), icon: CheckCircle2, tone: 'green' as const },
+    { label: 'Stopped or lost', value: numberText(summary.stopped), icon: UserX, tone: 'amber' as const },
   ] : []
 
   const row = (item: MatrixRow) => <tr key={item.id} className="dwm-row">

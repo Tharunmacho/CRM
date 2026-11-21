@@ -213,7 +213,7 @@ export function CampaignsTab({ onPickCampaign, refreshKey = 0, canAdmin = false,
           <button type="button" className="db-refresh" title="Refresh the campaigns" aria-label="Refresh the campaigns" onClick={() => { setLoading(true); void load() }}><RefreshCw size={15} /></button>
         </div>
       </div>
-      <p className="lc-tip">{scopeMine ? 'These are your own assigned leads. ' : ''}Click a campaign to see its leads. Rates are shares of the campaign's leads; Converted is the share that became candidates.</p>
+      {scopeMine && <p className="lc-tip">These are your own assigned leads.</p>}
       {data?.truncated && <p className="lc-tip" role="status">Only the 500 biggest campaigns are listed.</p>}
       {error && data && <p role="alert" className="db-alert">{error} Showing the last loaded figures.</p>}
       <div ref={boxRef} className={cn('db-box', loading && data && 'is-busy')} aria-busy={loading || undefined}>{body}</div>

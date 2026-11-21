@@ -37,7 +37,7 @@ test('no ops table has an inner scroll box or a country flag in a cell', async (
 
 test('the column shares of each list add up to 100 per cent, so the table fills its panel and never scrolls sideways', async () => {
   const sum = (source, from, to) => [...source.slice(source.indexOf(from), source.indexOf(to)).matchAll(/width: '(\d+)%'/g)].reduce((n, m) => n + Number(m[1]), 0)
-  const actions = { clients: 21, agencies: 15, jobs: 17, users: 16 }
+  const actions = { clients: 21, agencies: 15, jobs: 21, users: 16 }
   const clients = await read('screens/clients/clients.tsx')
   assert.equal(sum(clients, 'function ClientTable(', 'function AgencyTable(') + actions.clients, 100)
   assert.equal(sum(clients, 'function AgencyTable(', 'function Skeleton(') + actions.agencies, 100)

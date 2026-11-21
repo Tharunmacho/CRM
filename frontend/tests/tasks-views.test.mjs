@@ -162,7 +162,7 @@ test('arrow keys move along the filter bar and wrap; Home and End jump; other ke
   assert.equal(m.nextViewIndex('ArrowRight', 0, 0), null)
 })
 
-test('the summary, the empty states, the caption and the export follow the view', () => {
+test('the summary, the empty states and the export follow the view', () => {
   assert.equal(m.viewSummary('current', 12, 3), '12 candidates · 3 recruiters')
   assert.equal(m.viewSummary('current', 1, 1), '1 candidate · 1 recruiter')
   assert.equal(m.viewSummary('current', 5), '5 candidates')
@@ -174,11 +174,7 @@ test('the summary, the empty states, the caption and the export follow the view'
   assert.equal(m.viewEmptyTitle('rejected'), 'No rejected candidates')
   assert.equal(m.viewEmptyTitle('travelled'), 'No travelled candidates')
   assert.equal(m.viewEmptyTitle('all'), 'No candidates')
-  assert.equal(m.VIEW_CAPTION.current, '')
-  for (const view of ['declined', 'rejected', 'travelled', 'all']) assert.ok(m.VIEW_CAPTION[view].length > 20, view)
-  assert.match(m.VIEW_CAPTION.declined, /^Declined: the candidate said no/)
-  assert.match(m.VIEW_CAPTION.rejected, /^Rejected: the client \(or a later step such as the medical or the visa\) turned the candidate down\./)
-  assert.match(m.VIEW_CAPTION.travelled, /deployed/)
+  assert.equal(m.VIEW_CAPTION, undefined, 'no explanatory sentence under the tabs')
   assert.equal(m.exportLabel('current'), 'Export Excel')
   assert.equal(m.exportLabel('declined'), 'Export Excel · Declined')
   assert.equal(m.exportPath('all'), '/daily-work/export?format=xlsx&staff=all')
@@ -239,7 +235,7 @@ test('the screen keeps the view in ?view=, defaults to current, keeps the old ro
   assert.match(await code('../src/features/daily-work/daily-work-export.ts'), /exportFileName\(day, person, view\)/)
 })
 
-test('the filter bar: tabs with counts, one tab stop, arrows move, Enter picks, the caption explains the closed views', async () => {
+test('the filter bar: tabs with counts, one tab stop, arrows move, Enter picks, and no caption sits under them', async () => {
   const bar = await code('../src/screens/tasks/view-tabs.tsx')
   assert.match(bar, /role="tablist"/)
   assert.match(bar, /role="tab"/)
@@ -248,8 +244,7 @@ test('the filter bar: tabs with counts, one tab stop, arrows move, Enter picks, 
   assert.match(bar, /nextViewIndex\(event\.key, index, tabs\.length\)/)
   assert.match(bar, /event\.preventDefault\(\)/)
   assert.match(bar, /<button[\s\S]*type="button"/,'real buttons: Enter and Space pick the view')
-  assert.match(bar, /VIEW_CAPTION\[active\]/)
-  assert.match(bar, /role="note"/)
+  assert.doesNotMatch(bar, /VIEW_CAPTION|role="note"/, 'no explanatory sentence under the tabs')
   assert.doesNotMatch(bar, /onFocus/, 'arrowing past a tab never starts a request')
   const table = await code('../src/screens/tasks/daily-table.tsx')
   assert.match(table, /role: 'tabpanel', 'aria-labelledby': labelledBy/)

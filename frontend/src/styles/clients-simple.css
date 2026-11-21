@@ -7,18 +7,20 @@
 .clients-simple button:focus-visible, .clients-simple a:focus-visible, .clients-simple input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* ---------- Page ---------- */
-.clients-simple.cs-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; width: 100%; max-width: 1500px; margin: 0 auto; padding: 4px 0 28px; color: var(--text-main); font-size: 14px; }
+.clients-simple.cs-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; width: 100%; max-width: none; margin: 0; padding: 0 0 28px; color: var(--text-main); font-size: 14px; }
 .clients-simple.cs-page > * { min-width: 0; }
-.clients-simple .cs-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
-.clients-simple .cs-head h1 { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.2; letter-spacing: -.035em; }
+.clients-simple .cs-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; margin-bottom: 6px; }
+/* the page-header look every screen shares (skin.css section 6): 28/34 title, 14px under it, the short accent bar */
+.clients-simple .cs-head h1 { position: relative; margin: 0; padding-bottom: 14px; font-size: 28px; font-weight: 600; line-height: 34px; letter-spacing: -.03em; }
+.clients-simple .cs-head h1::after { content: ''; position: absolute; left: 0; bottom: 0; width: 36px; height: 4px; border-radius: 4px; background: var(--accent-2); }
 .clients-simple .cs-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.clients-simple .cs-btn-primary, .clients-simple .cs-btn-green { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 42px; padding: 0 18px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .14s, border-color .14s, color .14s; }
+.clients-simple .cs-btn-primary, .clients-simple .cs-btn-green { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 40px; padding: 0 18px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .14s, border-color .14s, color .14s; }
 /* The second header button: the logo green, darkened so white text keeps clear contrast in light and dark mode. */
 .clients-simple .cs-btn-green { --cs-solid: color-mix(in srgb, var(--brand-green, #5ac419) 58%, #0a3d12); border-color: var(--cs-solid); background: var(--cs-solid); color: #fff; font-weight: 600; }
 .clients-simple .cs-btn-green:hover { border-color: color-mix(in srgb, var(--cs-solid) 82%, #000); background: color-mix(in srgb, var(--cs-solid) 82%, #000); }
 .clients-simple .cs-btn-primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); font-weight: 600; }
 .clients-simple .cs-btn-primary:hover { border-color: var(--primary-hover); background: var(--primary-hover); }
-.clients-simple .cs-btn-import { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 0 16px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; cursor: pointer; }
+.clients-simple .cs-btn-import { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 0 16px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; cursor: pointer; }
 .clients-simple .cs-btn-import:hover { border-color: var(--primary); color: var(--primary); }
 .clients-simple .cs-agency-name-preview { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--tint-1); color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
 .clients-simple .cs-agency-name-preview strong { color: var(--text-main); }
@@ -157,7 +159,7 @@
 
 /* ---------- Phone ---------- */
 @media (max-width: 760px) {
-  .clients-simple .cs-head h1 { font-size: 24px; }
+  .clients-simple .cs-head h1 { font-size: 24px; line-height: 30px; padding-bottom: 12px; }
   .clients-simple .cs-actions { width: 100%; }
   .clients-simple .cs-actions > * { flex: 1 1 0; padding: 0 10px; }
   .clients-simple .cs-panel { padding: 10px; }

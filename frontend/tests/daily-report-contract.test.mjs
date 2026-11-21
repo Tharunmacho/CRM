@@ -53,8 +53,7 @@ test("Daily report = the client's seven figures only: every cell, the Total row 
   assert.deepEqual(report.staff.map(p => v.dayClosed(p, true).text), ['Submitted 18:42', 'Not submitted', 'Not submitted'])
   assert.deepEqual(report.staff.filter(p => p.idle).map(p => p.id), ['u-zoya'])
   assert.equal(v.dayCloseTitle(report.compliance), '1 of 3 recruiters submitted. Not submitted yet \u2014 Anil Kumar, Zoya Khan')
-  assert.equal(v.vsLabel(report.period, '2026-11-17'), 'yesterday')
-  assert.equal(v.totalVs(report.metrics).offers.text, '−1')
+  for (const gone of ['vsLabel', 'totalVs', 'vsOf', 'changeLine']) assert.equal(v[gone], undefined, `${gone}: nothing is compared with the previous period any more`)
   assert.match(v.interviewsNote(report), /^2 interviews were recorded without a mode and are not counted as online/)
 })
 

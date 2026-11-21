@@ -32,7 +32,7 @@
 .ld .db-tbl.is-fit thead th .db-th-sort.is-on .db-th-caret.is-idle, .ld .db-tbl.is-fit thead th:hover .db-th-caret.is-idle { opacity: 1; }
 .ld .db-tbl.is-fit thead th .db-th-sort:focus-visible { outline: 2px solid var(--on-primary); outline-offset: 3px; border-radius: 4px; }
 /* the actions column has no heading of its own (its cells are the arrow, the tick box and the menu): the word stays for screen readers and the tooltip */
-:root:root .ld .db-tbl.is-grid.is-fit thead th:first-child:not(.is-select) { font-size: 0; }
+:root:root .ld .db-tbl.is-grid.is-fit[aria-label='Leads'] thead th:first-child:not(.is-select) { font-size: 0; }   /* only the lead list: Campaigns and Uploads keep their first heading (Campaign, File) */
 /* the select-all box sits exactly over the row boxes (it skips the width of the row arrow) */
 :root:root .ld .db-tbl.is-grid.is-fit thead th.is-select { overflow: visible; padding-left: 28px; padding-right: 0; text-align: left; }
 .ld .db-tbl.is-fit thead th .custom-checkbox { border-color: var(--on-primary); }

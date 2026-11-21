@@ -121,9 +121,9 @@ function JobTable({ rows, query, loading, newId, onOpen, onEdit, onDelete }: { r
       render: (row) => <div className="cl-cell"><b title={row.company}><Hi text={row.company} query={query} /></b></div>,
     },
     { key: 'location', header: 'Location', width: '11%', align: 'center', render: (row) => <Location country={row.country} city={row.city} query={query} /> },
-    { key: 'salary', header: 'Salary', width: '12%', align: 'center', render: (row) => <Salary order={row.order} /> },
-    { key: 'openings', header: 'Openings', width: '13%', align: 'center', render: (row) => <Openings row={row} /> },
-    { key: 'status', header: 'Status', width: '10%', align: 'center', render: (row) => <OrderStatusText order={row.order} /> },
+    { key: 'salary', header: 'Salary', width: '10%', align: 'center', render: (row) => <Salary order={row.order} /> },
+    { key: 'openings', header: 'Openings', width: '12%', align: 'center', render: (row) => <Openings row={row} /> },
+    { key: 'status', header: 'Status', width: '9%', align: 'center', render: (row) => <OrderStatusText order={row.order} /> },
     {
       key: 'actions', header: 'Actions', actions: true,
       render: (row) => <span className="cs-row-actions">
@@ -307,7 +307,7 @@ export default function JobsPage() {
         <label className="cs-search">
           <Search size={18} aria-hidden="true" />
           <input ref={searchBox} autoFocus type="search" value={text} onChange={(event) => setText(event.target.value)} maxLength={120} autoComplete="off" spellCheck={false} aria-keyshortcuts="/"
-            placeholder="Search by job, client, country or status" aria-label="Search jobs" />
+            placeholder="Search job, client or country" aria-label="Search jobs" />
           {text && <button type="button" className="cs-search-clear" aria-label="Clear search" onClick={clearText}><X size={15} /></button>}
         </label>
         <div className="js-filter">

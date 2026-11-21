@@ -113,7 +113,7 @@ test('phones: cards keep 44px targets and the filters stack', () => {
 })
 
 test('the actions column has no visible heading and the cards drop empty rows', async () => {
-  assert.match(css, /thead th:first-child:not\(\.is-select\) \{ font-size: 0; \}/)
+  assert.match(css, /\[aria-label='Leads'\] thead th:first-child:not\(\.is-select\) \{ font-size: 0; \}/)
   const cards = await read('../src/features/leads/components/lead-cards.tsx')
   assert.match(cards, /\{lead\.countryInterest\?\.trim\(\) && /)
   assert.doesNotMatch(cards, /: '–'\}<\/dd>/, 'no dash-only Follow-up / Country rows')

@@ -85,8 +85,6 @@ export function EntryUploadZone({ rows, chips, reports = [], progress, disabled,
           onChange={(event) => { const list = event.currentTarget.files; take(list); event.currentTarget.value = '' }} />
       </div>
 
-      {rows.length === 0 && <p className="uz-hint">One file or many. We sort every page for you: resume, passport, Aadhaar, education and experience certificates, medical, signed offer, visa, police clearance and photo.</p>}
-
       {problems.length > 0 && <ul role="alert" className="uz-problems">{problems.map((message) => <li key={message}>{message}</li>)}</ul>}
 
       {rows.length > 1 && (

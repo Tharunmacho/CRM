@@ -78,8 +78,7 @@ test('Lead sheet monitoring: five tiles tied to the Lead sheet screen, a table w
   assert.match(t, /Total leads 150 New leads 12 Assigned 20 Contacted 31 Not contacted 180/)
   assert.ok(html.includes('title="All the leads on the sheet, whatever the period"'))
   assert.ok(html.includes('title="Leads never contacted, whatever the period: the same number as the Lead sheet screen"')) // the all-time tiles say so
-  assert.ok(html.includes('title="+2 vs yesterday"')) // new leads 12 against 10
-  assert.ok(html.includes('title="+7 vs yesterday"')) // contacted 31 against 24
+  assert.ok(!/vs yesterday|vs previous|fewer than|more than/.test(html), 'a tile never compares with the previous period')
   assert.deepEqual(headings(html), ['Recruiter', 'Assigned', 'Contacted', 'Interested', 'Call back', 'Not interested', 'Wrong number', 'No response', 'Not contacted', 'Contacted %'])
   assert.deepEqual(personRows(html), [10, 10, 10, 10]) // three recruiters and Unassigned
   assert.match(t, /Meera Nair 8 20 4 5 2 1 6 55 33%/) // assigned today, contacted, ..., never contacted, contacted of the workload (20 of 60)

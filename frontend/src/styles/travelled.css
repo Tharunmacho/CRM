@@ -7,7 +7,6 @@
 .tv { min-width: 0; font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif; }
 .tv :is(button, input, select) { font-family: inherit; }
 .tv > * { min-width: 0; }
-.tv .workspace-page-header { margin-bottom: 14px; }
 .tv-card { min-width: 0; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); box-shadow: none; }
 .tv-body { display: grid; gap: 16px; min-width: 0; transition: opacity .15s; }
 .tv-body.is-stale { opacity: .6; }
@@ -101,8 +100,8 @@
 .tv-table-wrap { position: relative; overflow: clip; scroll-margin-top: calc(var(--topbar-h, 64px) + 8px); }
 .tv-table { width: 100%; min-width: 0; table-layout: auto; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
 /* the columns size to their content (table-layout: auto): each at least its longest word and its heading plus the padding, the rest shared by what each holds; no fixed percentages */
-.tv-table td { overflow-wrap: break-word; }
-/* the three short columns ask for just their content (px, not shares); S NO fits 4 digits, DOC dd/mm/yyyy, Date of travel dd Mon yyyy */
+:root:root:root:root .tv-table tbody td { overflow-wrap: anywhere; }   /* an unbroken run of letters wraps inside its column; the columns size themselves from the other text */
+/* the three short columns ask for just their content (px, not shares); S NO fits 4 digits, DOC and Date of travel dd Mon yyyy, Date of travel dd Mon yyyy */
 .tv-table col.tv-c-sno { width: 56px; }
 .tv-table col.tv-c-doc { width: 100px; }
 .tv-table col.tv-c-date { width: 112px; }

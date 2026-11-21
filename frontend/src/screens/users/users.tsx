@@ -123,7 +123,6 @@ function TeamPage() {
   )
 
   const header = (actions?: boolean) => <PageHeader title="User Management" eyebrow="People & permissions"
-    description="Add your team, choose what each person can do, and choose who gets new candidates."
     actions={actions ? <><Button icon={<RefreshCw className="h-4 w-4" />} onClick={() => { accountRead.refresh(); availability.refresh() }}>Refresh</Button>
       <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ user: null })}>Add user</Button></> : undefined} />
 
@@ -142,16 +141,13 @@ function TeamPage() {
 
   const columns: Column<User>[] = [
     {
-      key: 'name', header: 'Team member', width: '21%', sortable: true, value: (u) => u.name.toLowerCase(),
-      render: (u) => <div className="uv-person">
-        <UserAvatar name={u.name} muted={!u.active} />
-        <div>
-          <p className="uv-name"><span>{u.name}</span>{u.id === store.me.id && <em>You</em>}</p>
-          <p className="uv-email" title={u.email}>{u.email}</p>
-        </div>
-      </div>,
+      key: 'name', header: 'Team member', width: '19%', sortable: true, align: 'text', value: (u) => u.name.toLowerCase(),
+      // The name alone, from the left. The e-mail (and "You" for your own row) are the tooltip and the screen-reader text.
+      render: (u) => <span className="uv-member" title={u.email + (u.id === store.me.id ? ' (you)' : '')}>
+        {u.name}<span className="sr-only">{u.id === store.me.id ? ' (you), ' : ', '}{u.email}</span>
+      </span>,
     },
-    { key: 'role', header: 'Role', width: '12%', sortable: true, value: (u) => roleRank[u.role], render: (u) => <RolePill role={u.role} /> },
+    { key: 'role', header: 'Role', width: '11%', sortable: true, value: (u) => roleRank[u.role], render: (u) => <RolePill role={u.role} /> },
     {
       key: 'phone', header: 'Phone', width: '12%',
       render: (u) => u.phone ? <div><a className="uv-phone" href={'tel:' + u.phone.replace(/\s+/g, '')} title={'Call ' + u.name}>{u.phone}</a></div> : <span className="uv-none" aria-label="Phone not set">—</span>,
@@ -164,14 +160,14 @@ function TeamPage() {
       </div> },
     },
     {
-      key: 'assignment', header: 'New candidates', width: '17%',
+      key: 'assignment', header: 'New candidates', width: '18%',
       render: (u) => u.role === 'staff' && u.active ? <div className="uv-flags">
         <label className={cn(flagText.muted && 'is-muted')} title={flagText.note || undefined}><span>Auto-assign</span><Switch checked={u.receivesAutoAssign} disabled={!!pending} label={flagText.label + ': ' + u.name} compact onChange={(on) => void changeFlag(u, { receivesAutoAssign: on })} /></label>
         <label><span>On leave</span><Switch checked={u.onLeave} disabled={!!pending} label={'On leave: ' + u.name} compact onChange={(on) => void changeFlag(u, { onLeave: on })} /></label>
       </div> : <span className="uv-none" title={u.role !== 'staff' ? 'Recruiters only' : 'Account inactive'}>—</span>,
     },
     {
-      key: 'work', header: 'Open work', width: '11%', sortable: true, value: (u) => work(u.id).candidates + work(u.id).tasks,
+      key: 'work', header: 'Open work', width: '13%', sortable: true, value: (u) => work(u.id).candidates + work(u.id).tasks,
       render: (u) => { const counts = work(u.id); return <div className="uv-work">
         <span><b>{counts.candidates}</b> {counts.candidates === 1 ? 'candidate' : 'candidates'}</span>
         <span><b>{counts.tasks}</b> open {counts.tasks === 1 ? 'task' : 'tasks'}</span>
@@ -198,17 +194,16 @@ function TeamPage() {
   return <div className="uv">
     {header(true)}
     <SummaryCards items={[
-      { label: 'Team members', value: people.length, detail: `${people.length - activeCount} inactive`, icon: Users },
-      { label: 'Active accounts', value: activeCount, detail: 'With access to the CRM', icon: UserCheck, tone: 'green', onSelect: () => toggleStatus('active'), active: statusFilter === 'active' },
-      { label: 'Getting new candidates', value: autoOn && availability.data ? eligible.length : '—', detail: autoOn ? 'Can be given new candidates automatically' : 'Automatic assignment is off', icon: RotateCw, onSelect: () => toggleStatus('in_rotation'), active: statusFilter === 'in_rotation' },
-      { label: 'On leave', value: availability.data ? onLeave.length : '—', detail: 'On leave today', icon: CalendarDays, tone: 'amber', onSelect: () => toggleStatus('on_leave'), active: statusFilter === 'on_leave' },
+      { label: 'Team members', value: people.length, icon: Users },
+      { label: 'Active accounts', value: activeCount, icon: UserCheck, tone: 'green', onSelect: () => toggleStatus('active'), active: statusFilter === 'active' },
+      { label: 'Getting new candidates', value: autoOn && availability.data ? eligible.length : '—', icon: RotateCw, onSelect: () => toggleStatus('in_rotation'), active: statusFilter === 'in_rotation' },
+      { label: 'On leave', value: availability.data ? onLeave.length : '—', icon: CalendarDays, tone: 'amber', onSelect: () => toggleStatus('on_leave'), active: statusFilter === 'on_leave' },
     ]} />
 
-    <Panel flush className="uv-panel uv-rotation">
+    {autoOn && <Panel flush className="uv-panel uv-rotation">
       <PanelHead id="uv-rotation-title" title="Candidate assignment"
-        description={autoOn ? 'Automatic assignment is on. New candidates are shared out one after another among active recruiters who can be given new candidates and are not on leave. Approved leave and the On leave switch both pause this.' : 'Automatic assignment is off. New candidates wait until an admin or an MD assigns a recruiter.'}
-        actions={autoOn ? <><span className="uv-chip-label"><RotateCw size={13} aria-hidden="true" />One by one</span><Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} disabled={availability.loading} onClick={availability.refresh}>Refresh</Button></> : undefined} />
-      {autoOn && <div className="uv-rotation-body" role="group" aria-labelledby="uv-rotation-title">
+        actions={<><span className="uv-chip-label"><RotateCw size={13} aria-hidden="true" />One by one</span><Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} disabled={availability.loading} onClick={availability.refresh}>Refresh</Button></>} />
+      <div className="uv-rotation-body" role="group" aria-labelledby="uv-rotation-title">
         {availability.loading ? <p role="status" className="uv-note">Checking who is free…</p>
           : availability.error ? <p role="alert" className="uv-error">{availability.error}</p>
           : <>
@@ -221,10 +216,9 @@ function TeamPage() {
               <h3>Paused</h3>
               <div className="uv-rotation-list">{onLeave.map((u) => <span key={u.id} className="uv-rotation-chip is-paused" title={u.name + ' · ' + availabilityWords(u.availability.status, u.availability.label)}><UserAvatar name={u.name} size="sm" muted /><span>{u.name}</span><small>{availabilityWords(u.availability.status, u.availability.label)}</small></span>)}</div>
             </div>}
-            {availability.data && <p className="uv-foot">Status for {availability.data.today} ({availability.data.timezone}). The number next to each name is how many candidates they already have.</p>}
           </>}
-      </div>}
-    </Panel>
+      </div>
+    </Panel>}
 
     {error && <p role="alert" className="uv-error uv-banner">{error}</p>}
 
@@ -238,8 +232,7 @@ function TeamPage() {
         <div className="uv-sort-narrow"><Select aria-label="Sort team members" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}><option value="name">Sort: Name</option><option value="role">Sort: Role</option><option value="work">Sort: Open work</option></Select></div>
         {filtered && <Button variant="ghost" onClick={clearFilters}>Clear filters</Button>}
       </div>
-      {!autoOn && <p className="uv-assignment-note">Automatic assignment is off. Recruiter preferences below are saved for when it is enabled.</p>}
-      <DataTable compact plain stackBelow={1280} pageSize={PAGE_SIZE} rows={rows} columns={columns.map(column => ({ ...column, align: 'center' as const }))} rowKey={(u) => u.id}
+      <DataTable compact plain stackBelow={1280} pageSize={PAGE_SIZE} rows={rows} columns={columns.map(column => ({ align: 'center' as const, ...column }))} rowKey={(u) => u.id}
         resetPageKey={`${query}|${roleFilter}|${statusFilter}`} rowClassName={(u) => cn(!u.active && 'uv-row-off')}
         empty={<EmptyState title="No team members match" description="Try a different name, email or filter."
           action={filtered ? <Button onClick={clearFilters}>Clear filters</Button> : undefined} />} />

@@ -374,15 +374,6 @@ export function outcomeStageText(outcome: Pick<DailyOutcome, 'stage'>, titleOf: 
   return title ? `at ${outcome.stage} · ${title}` : `at ${outcome.stage}`
 }
 
-/** The one sentence under the filter bar that says what a view means (nothing for the current process). */
-export const VIEW_CAPTION: Record<DailyView, string> = {
-  current: '',
-  declined: 'Declined: the candidate said no (they turned the offer or the job down).',
-  rejected: 'Rejected: the client (or a later step such as the medical or the visa) turned the candidate down.',
-  travelled: 'Travelled: the candidate was deployed and has flown.',
-  all: 'All: the current process plus the candidates who were declined, rejected or have travelled.',
-}
-
 /** The visible lines under a closed row's chip: WHERE ("at 5 · Offer letter"), WHY (the reason), WHEN ("19 Nov 2026") and, when the server sends it, WHO ("by Asha"). */
 export function outcomeDetail(outcome: DailyOutcome, titleOf?: (stage: number) => string | undefined, timeZone?: string): { where: string; why: string; when: string; by: string; line: string } {
   const where = outcomeStageText(outcome, titleOf)

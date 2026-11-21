@@ -210,3 +210,10 @@
 @media (min-width: 1024px) { :root:root .rv-card.rv-table:has(> .ui-data-table.ui-table-stack-1024) { border-color: transparent; } }
 @media (min-width: 768px) { :root:root .rv-card.rv-table:has(> .ui-data-table.ui-table-stack-768) { border-color: transparent; } }
 :root:root .rv-card.rv-table:has(> .ui-data-table:is(.is-grid, .is-plain):not([class*='ui-table-stack-'])) { border-color: transparent; }
+
+/* ---------- text never leaves its box, whatever its length ----------
+ * A block, a grid item or a flex item inside a cell is at most as wide as the cell, so an unbroken run of letters (a long name, an
+ * e-mail, a pasted code) wraps inside the column instead of pushing across the neighbouring cells. In a table that sizes its columns
+ * from the content (table-layout: auto) the wrap point is also allowed anywhere, so one very long word cannot stretch the whole table. */
+:root:root .ui-data-table.is-grid tbody td :is(b, strong, small, span, a, p, div, h3, em, i) { max-width: 100%; }
+:root:root .ui-data-table.is-grid table:not(.is-fixed) tbody td { overflow-wrap: anywhere; }

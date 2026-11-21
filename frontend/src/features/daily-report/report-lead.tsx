@@ -5,9 +5,8 @@ import { initials } from '@/shared/lib/format'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { ScrollEdges } from '@/screens/tasks/daily-table'
 import { hueOf } from './report-table'
-import { CardNote } from './report-cards'
 import { AgingLeadsPanel } from './report-lists'
-import { leadSummary, trendOf } from './report-management'
+import { leadSummary } from './report-management'
 import { numberText } from './daily-report-view'
 import { headLines, leadMatrix, type MatrixRow } from './lead-matrix'
 import type { ViewProps } from './report-views'
@@ -40,15 +39,15 @@ function Heading({ label, title, className }: { label: string; title: string; cl
 }
 
 /**
- * The Lead sheet report, read as a manager: seven cards (new, contacted, interested, not interested, follow-up, conversion, aging) with the previous period
- * beside them, the recruiter by status matrix with conversion and aging columns and a Total row, the status now, and the aging leads.
+ * The Lead sheet report, read as a manager: four cards (new, interested, not interested, follow-up),
+ * the recruiter by status matrix with conversion and aging columns and a Total row, the status now, and the aging leads.
  */
-export function LeadReportView({ report, roster, staff, today, onDrill }: ViewProps) {
+export function LeadReportView({ report, roster, staff, onDrill }: ViewProps) {
   const sheet = report.leadSheet
   const team = report.scope === 'team'
   const picked = team ? staff : ''
   const matrix = useMemo(() => leadMatrix(report, picked, roster), [report, picked, roster])
-  const summary = leadSummary(report, today)
+  const summary = leadSummary(report)
   if (!sheet) return <section className="dw-panel dwm-panel" aria-label="Lead sheet report"><p className="dwr-quiet">{NEEDS_SERVER}</p></section>
 
   const line = summary?.staleDays ?? 3
@@ -58,15 +57,11 @@ export function LeadReportView({ report, roster, staff, today, onDrill }: ViewPr
   const drillStale = (row: MatrixRow) => ((row.stale ?? 0) > 0 && !row.unassigned ? () => onDrill('leadsStale', row.id === 'total' ? picked || null : row.id) : undefined)
 
   const cards = summary ? [
-    { label: 'New leads', value: numberText(summary.newLeads.value), icon: PlusCircle, tone: 'blue' as const,
-      detail: <CardNote trend={trendOf(summary.newLeads.value, summary.newLeads.previous, summary.against, 'up')} />,
-      ...(summary.newLeads.value > 0 ? { onSelect: () => onDrill('leadsNewInPeriod', picked || null) } : {}) },
-    { label: 'Interested', value: numberText(summary.interested.value), icon: ThumbsUp, tone: 'green' as const,
-      detail: <CardNote trend={trendOf(summary.interested.value, summary.interested.previous, summary.against, 'up')}>{summary.conversion.value == null ? undefined : `${summary.conversion.value}% of those contacted`}</CardNote> },
-    { label: 'Not interested', value: numberText(summary.notInterested.value), icon: ThumbsDown, tone: 'blue' as const,
-      detail: <CardNote trend={trendOf(summary.notInterested.value, summary.notInterested.previous, summary.against, 'none')} /> },
+    { label: 'New leads', value: numberText(summary.newLeads), icon: PlusCircle, tone: 'blue' as const,
+      ...(summary.newLeads > 0 ? { onSelect: () => onDrill('leadsNewInPeriod', picked || null) } : {}) },
+    { label: 'Interested', value: numberText(summary.interested), icon: ThumbsUp, tone: 'green' as const },
+    { label: 'Not interested', value: numberText(summary.notInterested), icon: ThumbsDown, tone: 'blue' as const },
     { label: 'Needs follow-up', value: numberText(summary.followUp), icon: CalendarClock, tone: 'amber' as const,
-      detail: <CardNote />,
       ...(summary.followUp > 0 ? { onSelect: () => onDrill('leadsFollowUp', picked || null) } : {}) },
   ] : []
 

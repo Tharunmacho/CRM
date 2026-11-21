@@ -9,7 +9,9 @@ test('Travelled is a fit table with the Tasks look: no scroll, light column line
   assert.match(css, /\.tv-table-wrap \{ position: relative; overflow: clip;/, 'no sideways scroll and no inner scroll box (the page scrolls)')
   assert.match(css, /\.tv-table \{ width: 100%; min-width: 0; table-layout: auto;/, 'the columns size to their content (longest word + padding), not to fixed shares')
   assert.doesNotMatch(css, /min-width: 820px/)
-  assert.doesNotMatch(css, /overflow-wrap: anywhere/, 'words wrap at spaces, never mid-word')
+  // words wrap at spaces; only a run of letters longer than its column is broken (the one scoped rule below), so it stays inside its cell
+  assert.equal([...css.matchAll(/overflow-wrap: anywhere/g)].length, 1)
+  assert.match(css, /\.tv-table tbody td \{ overflow-wrap: anywhere; \}/)
   assert.match(css, /border-radius: var\(--table-frame-radius, 6px\)/)
   assert.doesNotMatch(css, /\.tv-c-[a-z]+ \{ width: \d+%; \}/, 'no per-column percentage widths')
 })

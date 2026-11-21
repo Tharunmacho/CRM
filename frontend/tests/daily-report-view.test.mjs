@@ -71,12 +71,6 @@ test('Total is asked as period=all, with the filters, for the report, its lists,
   assert.equal(v.apiQuery({ ...q, all: false }), 'from=2000-01-01&to=2026-11-18&staff=u1&client=all')
 })
 
-test('with Total there is nothing to compare with: no change text from a missing previous value', () => {
-  const noPrevious = report.metrics.map(m => ({ ...m, previous: null, changePct: null }))
-  assert.deepEqual(v.totalVs(noPrevious), {})
-  assert.deepEqual(Object.keys(v.totalVs(report.metrics)).sort(), ['forwarded', 'offers', 'prescreened', 'shortlisted', 'travelled', 'visas'])
-})
-
 test('an older "View staff report" link carries dates in the address: they are shown as a range, with no button pressed', () => {
   assert.deepEqual(v.choiceFromParams('2026-11-02', '2026-11-08', '2026-11-17'), { preset: 'range', from: '2026-11-02', to: '2026-11-08' })
   assert.equal(v.choiceFromParams(null, '2026-11-08', '2026-11-17'), null)
@@ -120,11 +114,7 @@ test('which numbers open a drill-down: the seven figures (online interviews open
   assert.deepEqual(drills, { forwarded: 'forwarded', prescreened: 'prescreened', shortlisted: 'shortlisted', interviewsOnline: 'interviews', offers: 'offers', visas: 'visas', travelled: 'travelled' })
 })
 
-test('the muted line under a band total, and the day-close footer', () => {
-  assert.equal(v.changeLine({ kind: 'down', text: '\u221225' }, 'yesterday'), '\u221225 vs yesterday')
-  assert.equal(v.changeLine({ kind: 'up', text: '+1' }, 'yesterday'), '+1 vs yesterday')
-  assert.equal(v.changeLine({ kind: 'flat', text: '0' }, 'yesterday'), 'no change')
-  assert.equal(v.changeLine(undefined, 'yesterday'), '')
+test('the day-close footer', () => {
   assert.equal(v.dayCloseFoot(report.compliance), 'not submitted yet \u2014 Anil Kumar, Zoya Khan')
   assert.equal(v.dayCloseFoot({ expected: 2, missing: [] }), 'everyone has submitted.')
   assert.equal(v.dayCloseFoot(null), '')
@@ -152,21 +142,6 @@ test('interviews not counted as online get one quiet footnote', () => {
   assert.equal(v.interviewsNote(one), '1 interview was recorded without a mode and is not counted as online.')
   assert.equal(v.interviewsNote({ ...report, extra: { ...report.extra, interviewsOnline: 5 } }), '')
   assert.equal(v.interviewsNote({ ...report, extra: { ...report.extra, interviewsOnline: 9 } }), '') // never negative
-})
-
-test('"vs yesterday" appears only for the figures with a previous value, as a signed difference', () => {
-  assert.deepEqual(v.vsOf(27, 24), { kind: 'up', text: '+3' })
-  assert.deepEqual(v.vsOf(1, 3), { kind: 'down', text: '\u22122' })
-  assert.deepEqual(v.vsOf(4, 4), { kind: 'flat', text: '0' })
-  const vs = v.totalVs(report.metrics)
-  assert.deepEqual(Object.keys(vs).sort(), ['forwarded', 'offers', 'prescreened', 'shortlisted', 'travelled', 'visas'])
-  assert.equal(vs.prescreened.text, '\u22122') // 18 against 20
-  assert.equal(vs.shortlisted.text, '+4') // 4 against nothing
-  assert.equal(vs.travelled.kind, 'flat')
-  assert.equal(vs.interviewsOnline, undefined) // the online subset has no previous value of its own
-  assert.equal(v.vsLabel({ from: '2026-11-17', to: '2026-11-17' }, '2026-11-17'), 'yesterday')
-  assert.equal(v.vsLabel({ from: '2026-11-16', to: '2026-11-16' }, '2026-11-17'), 'day before')
-  assert.equal(v.vsLabel({ from: '2026-11-10', to: '2026-11-16' }, '2026-11-17'), 'previous period')
 })
 
 test('the Day closed tile hover text: how many recruiters submitted and who has not (long lists are cut)', () => {

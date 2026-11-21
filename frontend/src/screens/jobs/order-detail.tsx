@@ -165,7 +165,7 @@ export default function OrderDetailPage() {
       value: (a) => store.user(store.candidate(a.candidateId)?.ownerId ?? '')?.name ?? '',
       render: (a) => {
         const owner = store.user(store.candidate(a.candidateId)?.ownerId ?? '')?.name
-        return owner ? <span className="jv-owner"><Avatar name={owner} size="sm" />{owner.split(' ')[0]}</span> : <span className="text-ink-400">Not assigned</span>
+        return owner ? <span className="jv-owner" title={owner}><Avatar name={owner} size="sm" />{owner.split(' ')[0]}</span> : <span className="text-ink-400">Not assigned</span>
       },
     },
     {
@@ -278,7 +278,7 @@ export default function OrderDetailPage() {
 
       <div className="jv-detail-grid">
         <Panel flush>
-          <PanelHeader title="Job details" meta="What was agreed with the client for this job" action={<OrderStatusText order={order} />} />
+          <PanelHeader title="Job details" action={<OrderStatusText order={order} />} />
           <div className="jv-card-body">
             <dl className="jv-fields">
               <div className="jv-field"><dt><FileText size={14} aria-hidden="true" />Job reference</dt><dd className="ident">{order.ref}</dd></div>
@@ -298,7 +298,7 @@ export default function OrderDetailPage() {
         </Panel>
 
         <Panel flush>
-          <PanelHeader title="Candidate requirements" meta="Responsibilities, skills and employer requirements" action={<Button className="whitespace-nowrap" onClick={() => navigate(`/clients/${client.clientId}`)}>View client</Button>} />
+          <PanelHeader title="Candidate requirements" action={<Button className="whitespace-nowrap" onClick={() => navigate(`/clients/${client.clientId}`)}>View client</Button>} />
           <div className="jv-card-body">
             <p className="jv-require-title">{designation.title}<span>{designation.minExperience > 0 ? `${designation.minExperience}+ years experience` : 'Any experience'}</span></p>
             <p className="jv-subtle">Responsibilities</p>
@@ -359,7 +359,7 @@ export default function OrderDetailPage() {
                     <StageMini no={a.currentStage} closed={a.status === 'closed'} />
                     {a.status === 'closed' && a.closureReason && <p className="jv-stage-note">{closureText(a.closureReason)}</p>}
                     <dl className="jv-mcard-meta">
-                      <div><dt>Recruiter</dt><dd>{owner ? <span className="jv-owner"><Avatar name={owner} size="sm" />{owner.split(' ')[0]}</span> : 'Not assigned'}</dd></div>
+                      <div><dt>Recruiter</dt><dd>{owner ? <span className="jv-owner" title={owner}><Avatar name={owner} size="sm" />{owner.split(' ')[0]}</span> : 'Not assigned'}</dd></div>
                       <div><dt>Updated</dt><dd>{dateTimeLabel(a.updatedAt)}</dd></div>
                     </dl>
                     <div className="jv-mcard-foot">
