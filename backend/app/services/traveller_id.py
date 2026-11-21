@@ -10,10 +10,10 @@ Both start with ``CI`` (the agency), but they are different series with differen
 
 * The series is continuous: the next traveller always gets one more than the highest number ever issued, it never restarts
   (not each April, not ever) and a number is never reused, even if its candidate is deleted.
-* A candidate "travels" when their placement becomes ``deployed`` (stage 12, which needs the actual ticket and a travel
+* A candidate "travels" when their placement becomes ``deployed`` (stage 13, the air ticket, which needs the actual ticket and a travel
   date; see ``domain.stages._stage12``).  The ID is assigned there, dynamically and never before, in the same transaction,
   by ``assign_traveller_id``.
-* It is immutable once assigned and unique.  Reopening stage 12 afterwards keeps the number; completing the stage again
+* It is immutable once assigned and unique.  Reopening stage 13 afterwards keeps the number; completing the stage again
   returns the same one.
 * Serial numbers are reserved with one PostgreSQL upsert on a single counter row, so concurrent completions never receive
   the same number and a rolled-back transaction does not consume one.

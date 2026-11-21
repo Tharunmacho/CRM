@@ -69,12 +69,12 @@ def seed(engine, storage) -> SimpleNamespace:
         # applications: every tenth candidate is deployed, every fifth other one is active, the rest have a closed earlier one
         run("INSERT INTO crm_applications (id, candidate_id, order_id, owner_id, current_stage, status) "
             "SELECT 'ap' || g, 'cd' || g, 'or' || (1 + g % 24), CASE WHEN g % 2 = 0 THEN 'a' ELSE 'b' END, "
-            "CASE WHEN g % 10 = 0 THEN 11 ELSE 1 + g % 8 END, (CASE WHEN g % 10 = 0 THEN 'deployed' WHEN g % 5 = 0 THEN 'active' ELSE 'closed' END)::application_status "
+            "CASE WHEN g % 10 = 0 THEN 13 ELSE 1 + g % 8 END, (CASE WHEN g % 10 = 0 THEN 'deployed' WHEN g % 5 = 0 THEN 'active' ELSE 'closed' END)::application_status "
             f"FROM generate_series(1, {CANDIDATES}) g WHERE g % 3 <> 0")
         run("INSERT INTO crm_application_stages (id, application_id, stage, attempt, data, outcome, owner_id, completed_by) "
             "SELECT 'st' || g || '-' || s, 'ap' || g, s, 1, "
-            "CASE WHEN s = 11 THEN jsonb_build_object('travelDate', to_char(date '2026-01-01' + g, 'YYYY-MM-DD'), 'airline', 'Air Test', 'pnr', 'PNR' || g) ELSE '{}'::jsonb END, 'passed', "
-            f"'a', 'admin' FROM generate_series(1, {CANDIDATES}) g, generate_series(1, 11) s WHERE g % 3 <> 0 AND s <= CASE WHEN g % 10 = 0 THEN 11 ELSE 1 + g % 8 END")
+            "CASE WHEN s = 13 THEN jsonb_build_object('travelDate', to_char(date '2026-01-01' + g, 'YYYY-MM-DD'), 'airline', 'Air Test', 'pnr', 'PNR' || g) ELSE '{}'::jsonb END, 'passed', "
+            f"'a', 'admin' FROM generate_series(1, {CANDIDATES}) g, generate_series(1, 13) s WHERE g % 3 <> 0 AND s <= CASE WHEN g % 10 = 0 THEN 13 ELSE 1 + g % 8 END")
         run("INSERT INTO crm_lead_batches (id, file_name, file_size, file_sha256, file_format, uploaded_by, status, rows_total, rows_new, column_map) "
             "SELECT 'lb' || g, 'sheet-' || g || '.csv', 4000, md5(g::text) || md5(g::text || 'x'), 'csv', 'admin', 'completed', 200, 200, "
             "'{\"full_name\": \"name\", \"which_position_are_you_applying_for?\": \"positionApplied\"}'::jsonb FROM generate_series(1, 3) g")

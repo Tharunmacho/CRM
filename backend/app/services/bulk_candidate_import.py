@@ -1,6 +1,6 @@
 """Bulk import of candidates who already went through the whole process (a folder of documents per person).
 
-Typing 30 finished placements by hand means 30 candidate forms, 30 x 12 uploads and 30 x 12 stage screens. This module is the
+Typing 30 finished placements by hand means 30 candidate forms, 30 x 13 uploads and 30 x 13 stage screens. This module is the
 shared brain behind the "Import candidates" screen so that work becomes: pick the folder, fill one sheet, press import.
 
 Three pieces, all pure except where a database is passed in:
@@ -34,7 +34,7 @@ from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry, Candidate, CandidateStatus, Order,
     OrderStatus, Role, Source, Task, TaskKind, User,
 )
-from app.domain.stages import ADVANCE_STAGE, PASSPORT_STAGE, STAMPING_STAGE, TOTAL_STAGES, StageOptions, stage_by_no, validate_payload
+from app.domain.stages import ADVANCE_STAGE, MEDICAL_STAGE, PASSPORT_STAGE, PCC_STAGE, REVIEW_STAGE, STAMPING_STAGE, TICKET_STAGE, TOTAL_STAGES, VISA_STAGE, StageOptions, stage_by_no, validate_payload
 from app.services import document_storage
 from app.services.application_form import SLOT_LABELS, SLOT_SPECS, deployment_gaps
 from app.services.invoice_access import can_see_invoices
@@ -45,7 +45,7 @@ from app.services.candidate_identity import identity_matches, normalize_candidat
 ADVANCE_RECEIPT = "advance_receipt"
 SOURCE_BUNDLE = "source_bundle"   # the scan as received, kept when pages cut from it were not filed again (Source document evidence)
 # Every document the folder can hold: the form's own slots, plus the stage 9 receipt that is not a candidate document.
-KIND_LABELS: dict[str, str] = {**SLOT_LABELS, ADVANCE_RECEIPT: "Advance receipt (stage 9)", "aadhaar": "Aadhaar card"}
+KIND_LABELS: dict[str, str] = {**SLOT_LABELS, ADVANCE_RECEIPT: "Advance receipt (stage 6)", "aadhaar": "Aadhaar card"}
 CANDIDATE_SLOTS = tuple(spec[0] for spec in SLOT_SPECS)
 READ_SLOTS = ("resume", "passport", "aadhaar")  # the three identity documents: pages of these kinds are told apart by content
 # Only these slots supply candidate form fields. Other document types are sorted and filed locally.
@@ -53,8 +53,8 @@ SENT_TO_READER = tuple(spec[0] for spec in SLOT_SPECS if spec[5])
 IMAGE_ONLY = ("photo",)
 # Candidate document -> (stage, field) whose evidence it is. The same stored file is attached to both places.
 STAGE_FILES: dict[str, tuple[int, str]] = {
-    "signed_offer": (5, "file"), "pcc": (7, "file"), ADVANCE_RECEIPT: (9, "receipt"), "visa": (10, "file"),
-    "visa_stamping": (11, "file"), "air_ticket": (12, "file"),
+    "signed_offer": (5, "file"), ADVANCE_RECEIPT: (ADVANCE_STAGE, "receipt"), "pcc": (PCC_STAGE, "file"), "visa": (VISA_STAGE, "file"),
+    "google_review": (REVIEW_STAGE, "file"), "visa_stamping": (STAMPING_STAGE, "file"), "air_ticket": (TICKET_STAGE, "file"),
 }
 SUPPORTED_EXTENSIONS = (".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic", ".doc", ".docx")
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".heic")
@@ -326,24 +326,24 @@ COLUMNS: tuple[Column, ...] = (
     Column("interview_time", "Interview time", "Stage 3, HH:MM. Optional.", aliases=()),
     Column("interview_mode", "Interview mode", "Stage 3: online or in person. Optional.", aliases=("mode",)),
     Column("interview_remarks", "Interview remarks", "Stage 4. Defaults to a note that the result was imported.", aliases=("remarks", "interviewresult", "interviewfeedback")),
-    Column("medical_date", "Medical date", "Stage 6, the day the medical was applied for. Optional.", aliases=("medical", "medicalapplied", "medicalapplieddate")),
-    Column("passport_collected_date", "Passport collected on", "Stage 8. Optional.", aliases=("passportcollected", "passportdate")),
-    Column("advance_amount", "Advance amount", "Stage 9, the amount collected. Needed.", True, ("advance", "amount", "advancepayment", "advancecollected")),
-    Column("advance_currency", "Advance currency", "Stage 9, e.g. INR. Defaults to the agency's advance currency.", aliases=("currency",)),
-    Column("advance_status", "Advance status", "Stage 9: collected or pending. Optional; collected when an amount is given. With pending, the amount is the advance expected.",
+    Column("medical_date", "Medical date", "Stage 8, the day the medical was applied for. Optional.", aliases=("medical", "medicalapplied", "medicalapplieddate")),
+    Column("passport_collected_date", "Passport collected on", "Stage 7. Optional.", aliases=("passportcollected", "passportdate")),
+    Column("advance_amount", "Advance amount", "Stage 6, the amount collected. Needed.", True, ("advance", "amount", "advancepayment", "advancecollected")),
+    Column("advance_currency", "Advance currency", "Stage 6, e.g. INR. Defaults to the agency's advance currency.", aliases=("currency",)),
+    Column("advance_status", "Advance status", "Stage 6: collected or pending. Optional; collected when an amount is given. With pending, the amount is the advance expected.",
            aliases=("advancestatus", "paymentstatus", "advancestate")),
-    Column("service_charge_total", "Total service charge", "Stage 9, the whole service charge, in the same currency. Optional.",
+    Column("service_charge_total", "Total service charge", "Stage 6, the whole service charge, in the same currency. Optional.",
            aliases=("servicecharge", "totalservicecharge", "servicefee", "totalservicefee", "totalcharge", "totalfee")),
-    Column("advance_date", "Advance date", "Stage 9. Optional.", aliases=("advancedate", "paymentdate")),
-    Column("advance_mode", "Advance mode", "Stage 9: cash, bank, upi or cheque. Optional.", aliases=("paymentmode",)),
-    Column("receipt_no", "Receipt number", "Stage 9. Optional.", aliases=("receipt", "receiptno", "receiptnumber")),
+    Column("advance_date", "Advance date", "Stage 6. Optional.", aliases=("advancedate", "paymentdate")),
+    Column("advance_mode", "Advance mode", "Stage 6: cash, bank, upi or cheque. Optional.", aliases=("paymentmode",)),
+    Column("receipt_no", "Receipt number", "Stage 6. Optional.", aliases=("receipt", "receiptno", "receiptnumber")),
     Column("visa_arrival_date", "Visa arrived on", "Stage 10. Optional.", aliases=("visadate", "visaarrived", "visaarrival")),
-    Column("google_review", "Google review", "Stage 10: yes or no. Optional.", aliases=("review", "googlereview")),
-    Column("stamping_date", "Visa stamped on", "Stage 11. Optional.", aliases=("stamping", "visastamping", "stampeddate")),
-    Column("booked_by", "Ticket booked by", "Stage 12: employer or agency. Optional.", aliases=("ticketbookedby", "bookedby")),
-    Column("travel_date", "Travel date", "Stage 12. Optional.", aliases=("traveldate", "flightdate", "departure")),
-    Column("airline", "Airline and flight", "Stage 12. Optional.", aliases=("flight", "airlineflight", "airlineandflight")),
-    Column("pnr", "PNR", "Stage 12. Optional.", aliases=("pnrno", "bookingreference")),
+    Column("google_review", "Google review", "Stage 11: yes or no. Optional.", aliases=("review", "googlereview")),
+    Column("stamping_date", "Visa stamped on", "Stage 12. Optional.", aliases=("stamping", "visastamping", "stampeddate")),
+    Column("booked_by", "Ticket booked by", "Stage 13: employer or agency. Optional.", aliases=("ticketbookedby", "bookedby")),
+    Column("travel_date", "Travel date", "Stage 13. Optional.", aliases=("traveldate", "flightdate", "departure")),
+    Column("airline", "Airline and flight", "Stage 13. Optional.", aliases=("flight", "airlineflight", "airlineandflight")),
+    Column("pnr", "PNR", "Stage 13. Optional.", aliases=("pnrno", "bookingreference")),
 )
 COLUMN_KEYS = tuple(column.key for column in COLUMNS)
 
@@ -557,7 +557,7 @@ def _file_ref(kind: str, files: dict[str, dict]) -> dict | None:
 
 
 def stage_inputs(row: dict, files: dict[str, dict], options: StageOptions) -> tuple[dict[int, dict], list[dict]]:
-    """The twelve stage payloads for a finished placement, and the problems with the sheet's values.
+    """The thirteen stage payloads for a finished placement, and the problems with the sheet's values.
 
     `files` maps a document kind to the file reference to store (`{id, name, url, sizeKb, version}`); the plan passes
     placeholders. A stage the rules cannot complete simply shows up in the evaluation, with the rule's own wording.
@@ -626,20 +626,22 @@ def stage_inputs(row: dict, files: dict[str, dict], options: StageOptions) -> tu
         # Imported history only ever records the positive outcomes (Selected, Agreed, Fit): the folder is the evidence that
         # the candidate moved on, and a candidate who stopped at one of these stages is not imported as having travelled.
         5: clean({"result": "agreed", "obtained": "yes", "file": _file_ref("signed_offer", files)}),
-        6: clean({"applied": "yes", "appliedDate": medical, "result": "fit"}),
-        # Police clearance: only what the folder shows (a PCC file); an empty stage is recorded as done manually like the others.
-        7: clean({"pccStatus": "received" if _file_ref("pcc", files) else None, "file": _file_ref("pcc", files)}),
-        8: clean({"collected": "yes", "collectedDate": collected, "copy": _file_ref("passport", files)}),
-        # A pending advance has no date, mode or receipt yet: the amount is the advance expected.
-        9: clean({"collected": "no", "advanceStatus": "pending", "amount": str(amount) if amount is not None else None,
+        # Advance first, then the passport, then the medical and the police clearance (the order of the stage list).
+        6: clean({"collected": "no", "advanceStatus": "pending", "amount": str(amount) if amount is not None else None,
                   "amountCurrency": currency, "serviceChargeTotal": str(service_total) if service_total is not None else None})
         if status == "pending" else
         clean({"collected": "yes", "advanceStatus": status, "amount": str(amount) if amount is not None else None, "amountCurrency": currency,
                "serviceChargeTotal": str(service_total) if service_total is not None else None,
                "date": advance_date, "mode": pay_mode, "receiptNo": row.get("receipt_no"), "receipt": _file_ref(ADVANCE_RECEIPT, files)}),
-        10: clean({"arrived": "yes", "date": visa, "file": _file_ref("visa", files), "googleReview": review}),
-        11: clean({"done": "yes", "date": stamping, "file": _file_ref("visa_stamping", files)}),
-        12: clean({"bookedBy": booked, "travelDate": travel, "airline": row.get("airline"), "pnr": row.get("pnr"), "file": _file_ref("air_ticket", files)}),
+        7: clean({"collected": "yes", "collectedDate": collected, "copy": _file_ref("passport", files)}),
+        8: clean({"applied": "yes", "appliedDate": medical, "result": "fit"}),
+        # Police clearance: only what the folder shows (a PCC file); an empty stage is recorded as done manually like the others.
+        9: clean({"pccStatus": "received" if _file_ref("pcc", files) else None, "file": _file_ref("pcc", files)}),
+        10: clean({"arrived": "yes", "date": visa, "file": _file_ref("visa", files)}),
+        # Google review: optional like its column; an empty stage is recorded as done manually.
+        11: clean({"googleReview": review, "file": _file_ref("google_review", files)}),
+        12: clean({"done": "yes", "date": stamping, "file": _file_ref("visa_stamping", files)}),
+        13: clean({"bookedBy": booked, "travelDate": travel, "airline": row.get("airline"), "pnr": row.get("pnr"), "file": _file_ref("air_ticket", files)}),
     }
     return stages, problems
 
@@ -655,7 +657,7 @@ def for_rules(number: int, data: dict, historical: bool = False, travel_confirme
 
     For someone who has already travelled (`historical`), the later stages prove the earlier ones happened, so the files
     those earlier stages would normally need (offer copy, advance receipt and amount, stamped visa) may be missing too. The
-    ticket and its date (stage 12) are never waived by the folder alone: they are the proof of travel. Only the office's own word
+    ticket and its date (stage 13) are never waived by the folder alone: they are the proof of travel. Only the office's own word
     that the person has flown (`travel_confirmed`) stands in for them, and then both stay blank in the stored record.
     """
     if number == 3 and data.get("scheduled") and not data.get("date"):
@@ -694,7 +696,8 @@ def evaluate_stages(stages: dict[int, dict], options: StageOptions, historical: 
 
 def stage_dates(stages: dict[int, dict], now: datetime, zone) -> dict[int, datetime]:
     """When each stage is recorded as completed: its own date at noon, never earlier than the stage before, never in the future."""
-    keys = {2: "dateForwarded", 3: "date", 6: "appliedDate", 7: "pccReceivedDate", 8: "collectedDate", 9: "date", 10: "date", 11: "date", 12: "travelDate"}
+    keys = {2: "dateForwarded", 3: "date", ADVANCE_STAGE: "date", PASSPORT_STAGE: "collectedDate", MEDICAL_STAGE: "appliedDate", PCC_STAGE: "pccReceivedDate",
+            VISA_STAGE: "date", STAMPING_STAGE: "date", TICKET_STAGE: "travelDate"}
     stamps: dict[int, datetime] = {}
     previous: datetime | None = None
     known = [parse_date(stages[n].get(key)) for n, key in keys.items() if stages[n].get(key)]
@@ -719,11 +722,14 @@ def evidence_level(row: dict, kinds: set[str]) -> int:
     (prescreening, forwarding, the interview result) are recorded as passed.
     """
     shown = {
-        3: bool(row.get("interview_date")), 5: "signed_offer" in kinds, 6: bool(row.get("medical_date")) or "medical" in kinds,
-        7: "pcc" in kinds, 8: bool(row.get("passport_collected_date")),
-        9: bool(row.get("advance_amount")) or parse_advance_status(row.get("advance_status")) is not None or ADVANCE_RECEIPT in kinds,
-        10: bool(row.get("visa_arrival_date")) or "visa" in kinds, 11: bool(row.get("stamping_date")) or "visa_stamping" in kinds,
-        12: "air_ticket" in kinds or bool(row.get("travel_date")) or bool(row.get("pnr")),
+        3: bool(row.get("interview_date")), 5: "signed_offer" in kinds,
+        ADVANCE_STAGE: bool(row.get("advance_amount")) or parse_advance_status(row.get("advance_status")) is not None or ADVANCE_RECEIPT in kinds,
+        PASSPORT_STAGE: bool(row.get("passport_collected_date")),
+        MEDICAL_STAGE: bool(row.get("medical_date")) or "medical" in kinds, PCC_STAGE: "pcc" in kinds,
+        VISA_STAGE: bool(row.get("visa_arrival_date")) or "visa" in kinds,
+        # No entry for the Google review: it is optional and says nothing about how far the placement got.
+        STAMPING_STAGE: bool(row.get("stamping_date")) or "visa_stamping" in kinds,
+        TICKET_STAGE: "air_ticket" in kinds or bool(row.get("travel_date")) or bool(row.get("pnr")),
     }
     return max((number for number, present in shown.items() if present), default=0)
 
@@ -734,7 +740,7 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
 
     `files` are [{path, kind?}]; `kind` is the user's choice when they changed the suggestion. The result's `action` is
     skip (an error stops it), documents_only (no order to put them on), in_progress (stages recorded up to the first one
-    that lacks something; the rest is done on the stage screen) or deploy (all twelve stages recorded).
+    that lacks something; the rest is done on the stage screen) or deploy (all thirteen stages recorded).
 
     The candidate's name is the sheet's, or the one read from the documents (`row["name"]`, `name_source` "documents"). With
     `folder_names` False (the Import screen) the folder is only a way of grouping files and never becomes a name: a candidate

@@ -31,11 +31,11 @@ The stage's `outcome` text (written by app.domain.stages) says what happened; on
                                                                           'Not received' and a client 'Rejected' are not counted
   visas           stage 10 'Arrived' or 'Completed manually'              _stage10 / VisaArrival.arrived; 'Visa rejected' is not
                                                                           counted
-  travelled       stage 12 'Booked' (the placement becomes Deployed)      complete_stage deploys the placement and gives the
-                                                                          Traveller ID only for a real stage 12 completion;
+  travelled       stage 13 'Booked' (the placement becomes Deployed)      complete_stage deploys the placement and gives the
+                                                                          Traveller ID only for a real stage 13 completion;
                                                                           'Not travelling' is a closure, not counted
 
-Travelled counts the day stage 12 was completed in the CRM, not the ticket's `travelDate`: `travelDate` is entered when the
+Travelled counts the day stage 13 was completed in the CRM, not the ticket's `travelDate`: `travelDate` is entered when the
 ticket is booked (it can lie in the future), the Travelled screen already treats completion as "deployed", and a folder import
 stamps `completed_at` with the stage's own date (bulk_candidate_import.stage_dates), so history stays on its real day.
 
@@ -86,7 +86,7 @@ from sqlalchemy.orm import aliased
 from app.core.roles import ROLE_LABELS
 from app.db import models as m
 from app.db.models import LEAD_STATUSES
-from app.domain.stages import STAGES, TOTAL_STAGES
+from app.domain.stages import MEDICAL_STAGE, STAGES, STOP_OUTCOMES, TICKET_STAGE, TOTAL_STAGES, VISA_STAGE
 from app.services import change_feed
 from app.services.daily_work import WORKABLE, _parked, agency_today, day_bounds
 from app.services.parallel_reads import parallel_reads
@@ -112,8 +112,14 @@ STAGE_RULES: dict[str, tuple[int, tuple[str, ...] | None]] = {
     "shortlisted": (3, ("Scheduled", "Completed manually")),
     "interviews": (4, ("Selected", "Rejected")),
     "offers": (5, ("Agreed", "Declined")),
-    "visas": (10, ("Arrived", "Completed manually")),
-    "travelled": (12, ("Booked",)),
+    "visas": (VISA_STAGE, ("Arrived", "Completed manually")),
+    "travelled": (TICKET_STAGE, ("Booked",)),
+}
+
+# The outcomes that end a placement at each stage: the stopping exits plus the older negative answers (as application_form.FAILED_OUTCOMES).
+STOPPED_OUTCOMES: dict[int, set[str]] = {
+    no: set(outcomes) | {1: {"Failed"}, 2: {"Not forwarded"}, 4: {"Rejected"}, 5: {"Declined", "Not received"}, MEDICAL_STAGE: {"Unfit"}}.get(no, set())
+    for no, outcomes in STOP_OUTCOMES.items()
 }
 
 # Business order of the screen (leads first, as the client asked); the funnel runs in STAGE order instead.
@@ -167,7 +173,7 @@ LEAD_STATUS_LABELS = {
     "resume_received": "Resume received", "converted": "Converted", "not_interested": "Not interested",
     "invalid": "Not reachable", "wrong_number": "Wrong number",
 }
-# Pipeline right now: stage 0 is a candidate who is workable but not on an order yet; 1..12 are the stage definitions.
+# Pipeline right now: stage 0 is a candidate who is workable but not on an order yet; 1..13 are the stage definitions.
 STAGE_NOW_KEYS = {0: ("unmapped", "Not on an order yet"), **{s.no: (s.key, s.title) for s in STAGES}}
 _INTERESTED = {"interested", "resume_requested", "resume_received", "converted"}
 
@@ -307,6 +313,22 @@ def read_stages(session, p: Period, zone: str, staff_id: str | None, client_id: 
     return session.execute(union_all(per_person, per_client)).all()
 
 
+def read_stage_flow(session, p: Period, staff_id: str | None, client_id: str | None) -> list:
+    """(stage, completed, stopped) for EVERY stage: the stage records completed in the period (never reopened, with a person to credit,
+    filtered like the figures), and how many of them ended the placement (the stage's own stopping outcomes). The complete stage-by-stage
+    progress of the Daily report: how many were prescreened, forwarded ... up to the air ticket."""
+    AS = m.ApplicationStage
+    who = func.coalesce(AS.completed_by, AS.owner_id)
+    conditions = [AS.completed_at >= p.start, AS.completed_at < p.end, _clean(AS), who.is_not(None), AS.outcome != "Unfit: reapplying"]
+    if staff_id:
+        conditions.append(who == staff_id)
+    if client_id:
+        conditions.append(AS.application_id.in_(
+            select(m.Application.id).join(m.Order, m.Order.id == m.Application.order_id).where(m.Order.company_id == client_id)))
+    stopped = case(*[(and_(AS.stage == no, AS.outcome.in_(sorted(outcomes))), 1) for no, outcomes in STOPPED_OUTCOMES.items() if outcomes], else_=0)
+    return session.execute(select(AS.stage, func.count(), func.coalesce(func.sum(stopped), 0)).where(*conditions).group_by(AS.stage)).all()
+
+
 _ACTIVITY = f"""
   SELECT a.id, a.user_id AS uid, a.lead_id, a.created_at, a.kind, a.meta
   FROM crm_lead_activities a
@@ -426,7 +448,7 @@ def read_tasks(session, p: Period, staff_id: str | None, now: datetime) -> list:
 
 
 def stage_now_union(staff_id: str | None):
-    """(owner, stage, candidates) for every candidate CURRENTLY at a stage, as one UNION query. Stage 1-12: the current stage of each
+    """(owner, stage, candidates) for every candidate CURRENTLY at a stage, as one UNION query. Stage 1-13: the current stage of each
     ACTIVE application. Stage 0 ('Not on an order yet'): workable candidates (new / in process / needs review, the Daily work list's
     WORKABLE) with no active application that are not parked after their own decline (daily_work._parked). The owner is the
     candidate's recruiter (Daily work's definition: Candidate.owner_id), else the application's own recorded recruiter."""
@@ -539,6 +561,7 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
         reads["clients"] = lambda s: read_clients(s, p, staff_id)
         reads["tasks"] = lambda s: read_tasks(s, p, staff_id, now)
         reads["stage_now"] = lambda s: read_stage_now(s, staff_id)
+    reads["stage_flow"] = lambda s: read_stage_flow(s, p, staff_id, client)
     if single:
         reads["submissions"] = lambda s: read_submissions(s, p.first, zone, staff_id)
     raw = dict(zip(reads, parallel_reads(db, *reads.values())))
@@ -758,6 +781,9 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
         stages = {"totals": [{"no": no, "key": STAGE_NOW_KEYS[no][0], "label": STAGE_NOW_KEYS[no][1],
                               "count": sum(x["counts"][str(no)] for x in per_staff)} for no in range(0, TOTAL_STAGES + 1)],
                   "perStaff": per_staff}
+    flow = {no: (int(done), int(ended)) for no, done, ended in raw["stage_flow"]}
+    stage_flow = [{"no": definition.no, "key": definition.key, "label": definition.title,
+                   "completed": flow.get(definition.no, (0, 0))[0], "stopped": flow.get(definition.no, (0, 0))[1]} for definition in STAGES]
     for r in rows:   # the working counters are not part of the answer
         for hidden in [k for k in r if k.startswith("_")]:
             del r[hidden]
@@ -772,6 +798,7 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
                          "interested": by_group.get("interested", 0), "callbacksDue": sum(callbacks.get(r["id"], 0) for r in rows)},
         "funnel": [{"key": key, "label": LABELS[key], "value": totals[key]} for key in FUNNEL_ORDER],
         "staff": rows, "compliance": compliance, "clients": clients, "leadSheet": lead_sheet, "byClient": by_client,
+        "stageFlow": stage_flow,
     }
     if team_tasks is not None:
         report["tasks"] = team_tasks
@@ -939,7 +966,7 @@ EXTRA_LABELS = {"leadsAssigned": "Leads assigned", "tasksDone": "Tasks done", "t
 
 
 def metric_label(metric: str) -> str | None:
-    """Label of a drill-down metric: the eight figures, the lead / task totals and `stage:<0-12>` (candidates now at that stage)."""
+    """Label of a drill-down metric: the eight figures, the lead / task totals and `stage:<0-13>` (candidates now at that stage)."""
     if metric in LABELS:
         return LABELS[metric]
     if metric in EXTRA_LABELS:

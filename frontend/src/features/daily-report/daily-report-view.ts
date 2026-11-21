@@ -379,6 +379,72 @@ export function stageSummary(report: DailyReport): { inProgress: number; notOnOr
   return { inProgress: totals.filter(item => item.no >= 1).reduce((all, item) => all + item.count, 0), notOnOrder: totals.find(item => item.no === 0)?.count ?? 0 }
 }
 
+/* ---------------------------------------------------------------- Task progress by stage (Daily report) */
+
+/** The 13 stages by number, used only when the server sent no label. */
+export const STAGE_NAMES: readonly string[] = [
+  'Prescreening', 'Forwarded', 'Interview scheduling', 'Interview result', 'Offer letter', 'Advance payment', 'Passport',
+  'Medical', 'PCC', 'Visa arrival', 'Google review', 'Visa stamping', 'Air ticket',
+]
+export interface StageProgressRow {
+  no: number
+  /** "1 · Prescreening", "0 · Not on an order yet". */
+  name: string
+  /** Candidates now at this stage; null when the server did not send the stage counts. */
+  now: number | null
+  /** Stage records completed in the period, and how many of those ended the placement; null when the server sends no `stageFlow`. */
+  completed: number | null
+  stopped: number | null
+  /** The row's share of the candidates shown in the "now" column, 0 to 100. */
+  share: number
+  /** The drill-down that lists the candidates now at this stage (only when there are some). */
+  drill?: string
+}
+export interface StageProgress {
+  rows: StageProgressRow[]
+  total: { now: number | null; completed: number | null; stopped: number | null }
+  /** The server sent `stageFlow`: the Completed and Stopped columns have figures. */
+  hasFlow: boolean
+}
+/**
+ * One row per stage 1 to 13 (and a first row "0 · Not on an order yet" only when candidates are in that group), from `stages.totals`
+ * (now at the stage) and `stageFlow` (completed / stopped in the period). The totals row adds the rows up. An older server without
+ * `stageFlow` gives null (shown as a dash) in those two columns, and without `stages` in the first.
+ */
+export function stageProgress(report: Pick<DailyReport, 'stages' | 'stageFlow'>): StageProgress {
+  const totals = new Map((report.stages?.totals ?? []).map(item => [item.no, item]))
+  const flow = new Map((report.stageFlow ?? []).map(item => [item.no, item]))
+  const hasNow = !!report.stages
+  const hasFlow = Array.isArray(report.stageFlow)
+  const nos = [...(hasNow && (totals.get(0)?.count ?? 0) > 0 ? [0] : []), ...Array.from({ length: STAGE_NAMES.length }, (_, i) => i + 1)]
+  const rows = nos.map((no): StageProgressRow => {
+    const label = no === 0 ? totals.get(0)?.label || 'Not on an order yet' : totals.get(no)?.label || flow.get(no)?.label || STAGE_NAMES[no - 1]
+    const now = hasNow ? totals.get(no)?.count ?? 0 : null
+    return { no, name: `${no} · ${label}`, now, completed: hasFlow ? flow.get(no)?.completed ?? 0 : null, stopped: hasFlow ? flow.get(no)?.stopped ?? 0 : null, share: 0, ...((now ?? 0) > 0 ? { drill: `stage:${no}` } : {}) }
+  })
+  const add = (pick: (row: StageProgressRow) => number | null) => (rows.some(row => pick(row) != null) ? rows.reduce((all, row) => all + (pick(row) ?? 0), 0) : null)
+  const total = { now: add(row => row.now), completed: add(row => row.completed), stopped: add(row => row.stopped) }
+  for (const row of rows) row.share = sharePct(row.now ?? 0, total.now ?? 0)
+  return { rows, total, hasFlow }
+}
+
+/* ---------------------------------------------------------------- Lead sheet by status (Daily report) */
+
+export interface LeadStatusTable { rows: StatusRow[]; total: number; /** Rounded shares can miss 100: the table says 100 only when there are leads. */ totalPct: number }
+/** The lead statuses with their counts and shares, and the total row; null when the server sent no lead sheet. */
+export function leadStatusTable(sheet: LeadSheetSummary | undefined): LeadStatusTable | null {
+  if (!sheet) return null
+  const rows = statusRows(sheet)
+  const total = rows.reduce((all, row) => all + row.count, 0)
+  return { rows, total, totalPct: total > 0 ? 100 : 0 }
+}
+
+/** The single day the attendance panel shows: the period's last day, never after today (Total and ranges: today). */
+export function attendanceDay(period: Pick<DailyPeriod, 'from' | 'to'>, allTime: boolean, today: string): string {
+  if (allTime || period.from !== period.to) return today
+  return period.to > today ? today : period.to
+}
+
 /** The title of a drill-down list when the server has not named it yet. */
 export function drillTitle(metric: string, report?: DailyReport | null): string {
   if (metric.startsWith('stage:')) {

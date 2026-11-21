@@ -179,10 +179,10 @@ function AgencyCards({ rows, query, active, onEdit, onDelete }: { rows: AgencyRo
 /** The tables use the shared DataTable (the old directory's look and column alignment); on a phone it stacks into labelled rows. */
 function ClientTable({ rows, query, loading, onOpen, onEdit, onDelete }: { rows: ClientRow[]; query: string; loading: boolean; onOpen: (c: Client) => void; onEdit?: (c: Client) => void; onDelete?: (c: Client) => void }) {
   const columns: Column<ClientRow>[] = [
-    { key: 'agency', header: 'Company', width: '24%', align: 'center', render: (row) => <Identity name={row.agencyName || row.client.name} query={query} /> },
+    { key: 'agency', header: 'Company', width: '24%', align: 'left', render: (row) => <Identity name={row.agencyName || row.client.name} query={query} /> },
     { key: 'contact', header: 'Contact person', width: '26%', align: 'center', render: (row) => <ContactCell name={row.client.name} phone={row.phone} email={row.email} query={query} /> },
     { key: 'location', header: 'Location', width: '14%', align: 'center', render: (row) => <Location {...clientPlace(row)} query={query} /> },
-    { key: 'staff', header: 'Recruiter', width: '15%', align: 'center', render: (row) => <StaffStack staff={row.staff} query={query} /> },
+    { key: 'staff', header: 'Recruiter', width: '15%', align: 'left', render: (row) => <StaffStack staff={row.staff} query={query} /> },
     {
       key: 'actions', header: 'Actions', actions: true,
       render: (row) => <span className="cs-row-actions">

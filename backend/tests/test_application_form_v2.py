@@ -104,7 +104,7 @@ def test_blank_form_lists_the_fourteen_slots_in_order_with_their_rules(desk):
     assert {s for s in SLOTS if docs[s]["readable"]} == {"resume", "passport", "aadhaar", "education_certificate"}   # sent to the online reader
     assert {s for s in SLOTS if docs[s]["multiple"]} == {"passport", "aadhaar", "other"}
     assert {s: docs[s]["requiredFromStage"] for s in SLOTS if docs[s]["requiredFromStage"]} == {
-        "signed_offer": 5, "medical": 6, "pcc": 7, "visa": 10, "emigration": 11, "air_ticket": 12, "undertaking_letter": 12, "insurance": 12, "invoice": 12}
+        "signed_offer": 5, "medical": 8, "pcc": 9, "visa": 10, "emigration": 12, "air_ticket": 13, "undertaking_letter": 13, "insurance": 13, "invoice": 13}
     for entry in docs.values():
         assert {"slot", "label", "hint", "required", "requiredFromStage", "readable", "multiple", "current", "history", "files", "uploaded",
                 "versions", "extraction"} <= set(entry)
@@ -181,7 +181,7 @@ def test_a_new_version_moves_the_old_one_to_history_and_other_keeps_every_file(d
 def test_invoice_tracking_uses_latest_uploaded_evidence_without_changing_pipeline_progress(desk):
     as_user(desk, "admin", Role.admin)
     before = form(desk)
-    assert before["tracking"]["summary"]["tracked"] == 12
+    assert before["tracking"]["summary"]["tracked"] == 13
     assert next(row for row in before["tracking"]["rows"] if row["key"] == "invoice_generated")["checked"] is False
     for version in (1, 2):
         assert upload(desk, "invoice", pdf(f"Invoice evidence {version}"), name=f"invoice-{version}.pdf").status_code == 202
@@ -228,11 +228,12 @@ def test_older_education_and_experience_slot_keys_are_folded_into_the_certificat
 
 
 @pytest.mark.parametrize("stage, extra", [
-    (1, set()), (5, {"signed_offer"}), (6, {"signed_offer", "medical"}), (7, {"signed_offer", "medical", "pcc"}),
-    (8, {"signed_offer", "medical", "pcc"}),
+    (1, set()), (5, {"signed_offer"}), (7, {"signed_offer"}), (8, {"signed_offer", "medical"}),
+    (9, {"signed_offer", "medical", "pcc"}),
     (10, {"signed_offer", "medical", "pcc", "visa"}),
-    (11, {"signed_offer", "medical", "pcc", "visa", "emigration"}),
-    (12, {"signed_offer", "medical", "pcc", "visa", "emigration", "air_ticket", "undertaking_letter", "insurance", "invoice"}),
+    (11, {"signed_offer", "medical", "pcc", "visa"}),
+    (12, {"signed_offer", "medical", "pcc", "visa", "emigration"}),
+    (13, {"signed_offer", "medical", "pcc", "visa", "emigration", "air_ticket", "undertaking_letter", "insurance", "invoice"}),
 ])
 def test_required_documents_follow_the_applications_current_stage(desk, stage, extra):
     as_user(desk, "admin", Role.admin)
@@ -415,7 +416,7 @@ def test_jobs_that_are_not_open_are_refused_and_nothing_changes(desk, status):
 def test_deployed_job_remains_selected_when_order_is_filled_without_changing_history(desk, client_status):
     app_id = mapped(desk)
     with desk.sessions() as db:
-        db.execute(update(Application).where(Application.id == app_id).values(status=ApplicationStatus.deployed, current_stage=12))
+        db.execute(update(Application).where(Application.id == app_id).values(status=ApplicationStatus.deployed, current_stage=13))
         db.execute(update(Order).values(status=OrderStatus.filled))
         db.execute(update(Client).where(Client.id == "client").values(status=client_status))
         db.commit()
@@ -430,7 +431,7 @@ def test_deployed_job_remains_selected_when_order_is_filled_without_changing_his
         block = data["assignment"]
         assert data["application"]["id"] == app_id
         assert data["application"]["status"] == "deployed"
-        assert block["job"]["orderId"] == "order" and block["job"]["stage"] == 12
+        assert block["job"]["orderId"] == "order" and block["job"]["stage"] == 13
         (client,) = block["options"]["clients"]
         assert client["id"] == block["client"]["id"] == "client"
         expected = [("order", "filled"), ("other-order", "filled")] if client_status == "active" else [("order", "filled")]
@@ -438,7 +439,7 @@ def test_deployed_job_remains_selected_when_order_is_filled_without_changing_his
 
     with desk.sessions() as db:
         application = db.get(Application, app_id)
-        assert (application.status, application.current_stage, application.order_id) == (ApplicationStatus.deployed, 12, "order")
+        assert (application.status, application.current_stage, application.order_id) == (ApplicationStatus.deployed, 13, "order")
         assert (
             db.scalar(select(func.count()).select_from(Application)),
             db.scalar(select(func.count()).select_from(ApplicationStage)),
@@ -856,12 +857,12 @@ def put_documents(env, *slots, candidate="candidate"):
 
 def at_final_stage(env):
     app_id = mapped(env)
-    for stage in range(1, 12):
+    for stage in range(1, 13):
         complete(env, app_id, payload(env, app_id, stage))
     # Deployment needs the ticket (kept as the stage's own evidence, so the candidate's document checklist is untouched) and the
     # travel date; the other required candidate documents may still be missing.
     saved = save(env, app_id, {"feedback": "Travel confirmed by recruiter; missing files will be collected.",
-                               "travelDate": "2026-11-15", "file": attachment(env, app_id, 12)})
+                               "travelDate": "2026-11-15", "file": attachment(env, app_id, 13)})
     assert saved.status_code == 200, saved.text
     return app_id, saved.json()["lockVersion"]
 
@@ -878,7 +879,7 @@ def test_manual_deployment_preserves_the_missing_document_checklist_for_staff_an
     assert done.status_code == 200, done.text
     with desk.sessions() as db:
         app = db.get(Application, app_id)
-        assert app.status == ApplicationStatus.deployed and app.current_stage == 12
+        assert app.status == ApplicationStatus.deployed and app.current_stage == 13
         assert db.get(Candidate, "candidate").status.value == "deployed"
     deployment = form(desk)["deployment"]
     expected = DEPLOY_ORDER if role == Role.admin else [label for label in DEPLOY_ORDER if label != "Invoice"]  # the Invoice is the admin's alone

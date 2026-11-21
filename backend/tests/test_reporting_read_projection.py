@@ -24,19 +24,19 @@ def test_sql_projection_preserves_full_reports_across_roles_dates_and_relations(
         db.add_all(m.Remark(**row, body="Daily update") for row in dataset["remarks"])
         # A future effective receipt supersedes an in-range receipt: never filter
         # attempts by date before deciding which attempt is current.
-        db.add(m.ApplicationStage(id="later-receipt", application_id="app1", stage=9, attempt=2,
+        db.add(m.ApplicationStage(id="later-receipt", application_id="app1", stage=6, attempt=2,
             data={"amount": "200.50", "currency": "USD", "documents": [{"ignored": "large payload" * 100}]},
             owner_id="a", completed_by="admin", completed_at=NOW + timedelta(days=1)))
         # Latest reopened attempt must not hide the earlier valid legacy receipt.
-        db.add(m.ApplicationStage(id="legacy-receipt", application_id="app6", stage=9, attempt=2,
+        db.add(m.ApplicationStage(id="legacy-receipt", application_id="app6", stage=6, attempt=2,
             data={"amount": "35.75", "currency": "EUR"}, owner_id=None, completed_by="admin", completed_at=NOW))
-        db.add(m.ApplicationStage(id="reopened-later", application_id="app6", stage=9, attempt=3,
+        db.add(m.ApplicationStage(id="reopened-later", application_id="app6", stage=6, attempt=3,
             data={"amount": 999, "currency": "INR"}, owner_id="b", completed_by="admin", completed_at=NOW,
             reopened_reason="Correction"))
         # Stage duration uses the matching execution even if its current owner
         # differs from the historical stage owner; pruning by task owner is wrong.
         db.add(m.Task(id="duration-task", kind=m.TaskKind.stage, title="Receipt", candidate_id="c6",
-            application_id="app6", stage=9, owner_id="b", created_at=NOW - timedelta(hours=3), completed_at=NOW))
+            application_id="app6", stage=6, owner_id="b", created_at=NOW - timedelta(hours=3), completed_at=NOW))
         db.add(m.MailAccount(id="mailbox", address="original@example.test", provider="imap", auto_ingest=False))
         db.add(m.Candidate(id="old-intake", ref="OLD", name="Old intake", phone="9000000099", source=m.Source.email,
             owner_id="a", intake_owner_id="a", created_at=NOW - timedelta(days=365), source_detail="email_message:old-message"))

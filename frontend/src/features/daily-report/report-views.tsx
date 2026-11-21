@@ -5,8 +5,10 @@ import { Select } from '@/shared/ui/primitives'
 import { StatStrip, type StatTileData } from '@/screens/tasks/daily-stat-strip'
 import { FigureTable, type FigureGroup, type FigureRow } from './report-table'
 import { PeopleBoard } from './report-people'
+import { LeadStatusPanel, StageProgressPanel } from './report-sections'
+import { AttendancePanel } from './report-attendance'
 import {
-  changeLine, changedSinceText, clientRows, contactedPct, dailyCells, dailyCols, dayClosed, dayCloseTitle, DAY_CLOSED_COL, figureGroups, interviewsNote, hasLeadPeriod, leadCols, LEAD_PCT_COL, leadCells, unassignedInfo, metricOf, numberText,
+  attendanceDay, changeLine, changedSinceText, clientRows, contactedPct, dailyCells, dailyCols, dayClosed, dayCloseTitle, DAY_CLOSED_COL, figureGroups, interviewsNote, hasLeadPeriod, leadCols, LEAD_PCT_COL, leadCells, unassignedInfo, metricOf, numberText,
   pctText, showByClient, STAGE_TOTAL_COL, stageSummary, statusRows, sumCells, taskStageCols, taskStageRows, taskStageTotals, totalCells, totalVs, vsLabel, vsOf,
 } from './daily-report-view'
 import type { DailyReport, StaffRow } from './daily-report-types'
@@ -15,7 +17,7 @@ export interface ViewProps {
   report: DailyReport
   /** The period is Total (everything): not a single day, and nothing to compare with. */
   allTime?: boolean
-  /** Everyone, even while the page is narrowed to one person (the Team cards always show the whole team). */
+  /** Everyone, even while the page is narrowed to one person: the recruiter filter's list only. The Team board and the table show the picked person alone. */
   roster: StaffRow[]
   today: string
   timeZone: string
@@ -70,8 +72,9 @@ const opens = (value: number | null | undefined, open: () => void) => ((value ??
 /* ---------------------------------------------------------------- Daily report */
 
 /**
- * The client's Daily CRM Work Report and nothing else: the seven figures in the client's order as summary tiles and Day
- * closed, the team (who has reported), and everyone's figures in a table. How each figure moved, who has not closed the day
+ * The client's Daily CRM Work Report: the seven figures in the client's order as summary tiles and Day closed, the team (who has
+ * reported), task progress by stage, everyone's figures in a table, the lead sheet by status and the day's attendance. With one
+ * recruiter picked, all of it is that person's alone. How each figure moved, who has not closed the day
  * and the interviews without a mode are the tiles' hover texts, not printed text.
  */
 export function DailyView({ report, allTime = false, roster, today, timeZone, scope, staff, onPickStaff, onDrill, onDrillClient, clientFilter = 'all', onSubmission, onHistory }: ViewProps) {
@@ -96,7 +99,12 @@ export function DailyView({ report, allTime = false, roster, today, timeZone, sc
   if (compliance) tiles.push({ key: 'closed', label: 'Day closed', value: compliance.submitted, unit: `of ${compliance.expected}`, icon: CheckCircle2, tone: 'green', progress: { done: compliance.submitted, total: compliance.expected }, title: dayCloseTitle(compliance) })
   else if (closed && closed.kind !== 'none') tiles.push({ key: 'closed', label: 'Day closed', value: closed.kind === 'submitted' ? 'Yes' : 'Not yet', icon: CheckCircle2, tone: closed.kind === 'submitted' ? 'green' : 'blue', title: closed.text })
 
-  const groups: FigureGroup[] = figureGroups(report.staff, single, todayOnly).map(group => ({
+  // One recruiter picked: the Team board, the table and its heading are that person's alone (the roster only fills the filter's list).
+  const picked = team && staff ? report.staff.filter(row => row.id === staff) : []
+  const shown = team && staff ? (picked.length ? picked : roster.filter(row => row.id === staff)) : report.staff
+  const pickedName = staff ? shown[0]?.name : undefined
+  const figuresTitle = !team ? 'Your figures' : staff ? (pickedName ? `${pickedName}'s figures` : 'Their figures') : "Everyone's figures"
+  const groups: FigureGroup[] = figureGroups(shown, single, todayOnly).map(group => ({
     key: group.key, title: group.title, tone: group.key === 'active' ? 'done' as const : undefined,
     icon: group.key === 'active' ? <CheckCircle2 size={15} aria-hidden="true" /> : <Minus size={15} aria-hidden="true" />,
     rows: group.rows.map((row): FigureRow => {
@@ -112,9 +120,10 @@ export function DailyView({ report, allTime = false, roster, today, timeZone, sc
   const byClient = clientRows(report)
   return <>
     <Tiles tiles={tiles} label="The day's figures" />
-    {team && <PeopleBoard staff={roster} single={single} todayOnly={todayOnly} selected={staff || 'all'} onSelect={id => onPickStaff(id === 'all' ? '' : id)} />}
-    <section className="dw-panel" aria-label="Everyone's figures">
-      <PanelHead title={team ? "Everyone's figures" : 'Your figures'} staff={staff} roster={roster} onPickStaff={onPickStaff} team={team} links={<>
+    {team && <PeopleBoard staff={shown} single={single} todayOnly={todayOnly} selected={staff || 'all'} onSelect={id => onPickStaff(id === 'all' ? '' : id)} />}
+    <StageProgressPanel report={report} onDrill={onDrill} />
+    <section className="dw-panel" aria-label={figuresTitle}>
+      <PanelHead title={figuresTitle} staff={staff} roster={roster} onPickStaff={onPickStaff} team={team} links={<>
         {note && <button type="button" className="dwr-textlink" title={note} onClick={() => onDrill('interviews', null)}>Show the interviews</button>}
         {onHistory && <button type="button" className="dwr-textlink" onClick={onHistory}>Submitted reports</button>}
       </>} />
@@ -128,6 +137,8 @@ export function DailyView({ report, allTime = false, roster, today, timeZone, sc
       <FigureTable caption="By client: the figures of the period for each client" cols={cols} tailHead="Total" tailNumeric nameHeader="Client" scope={`${scope}|clients`} onDrill={(metric, id) => id && onDrillClient(metric, id)}
         groups={[{ key: 'clients', title: '', icon: null, rows: byClient.map((row): FigureRow => ({ id: row.id, name: row.name, cells: row.cells, tail: <strong className="tnum">{numberText(row.cells.total)}</strong> })) }]} />
     </section>}
+    <LeadStatusPanel report={report} />
+    <AttendancePanel day={attendanceDay(report.period, allTime, today)} staff={staff} team={team} timeZone={timeZone} onPickStaff={onPickStaff} />
   </>
 }
 

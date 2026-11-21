@@ -24,7 +24,7 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import ProgrammingError
 
 from app.db import models as m
-from app.domain.stages import STAGES, TOTAL_STAGES
+from app.domain.stages import STAGES, STAMPING_STAGE, TICKET_STAGE, TOTAL_STAGES, VISA_STAGE
 from app.services import attendance_hr as hr
 from app.services import lead_metrics
 from app.services.attendance_policy import AttendancePolicy, shift_bounds
@@ -63,9 +63,9 @@ OUTCOME_COUNTS = {
     "forwarded": (2, "Forwarded"),
     "interviewsScheduled": (3, "Scheduled"),
     "selected": (4, "Selected"),
-    "visaReceived": (10, "Arrived"),
-    "visaStamped": (11, "Stamped"),
-    "deployed": (12, "Booked"),
+    "visaReceived": (VISA_STAGE, "Arrived"),
+    "visaStamped": (STAMPING_STAGE, "Stamped"),
+    "deployed": (TICKET_STAGE, "Booked"),
 }
 
 

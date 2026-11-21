@@ -153,12 +153,12 @@ def test_a_traveller_being_deployed_publishes_one_event_with_the_candidate(desk,
     apps = mapped_candidates(desk, 1)
     (candidate_id, app_id), = apps.items()
     listener = listening(desk.sessions.kw["bind"])
-    with desk.sessions() as db:   # the same writes as completing stage 11: the stage row, the placement deployed, the Traveller ID
+    with desk.sessions() as db:   # the same writes as completing stage 13: the stage row, the placement deployed, the Traveller ID
         application = db.get(m.Application, app_id)
         candidate = db.get(m.Candidate, candidate_id)
-        db.add(m.ApplicationStage(application_id=app_id, stage=12, attempt=1, outcome="Booked", completed_by="asha", owner_id="asha",
+        db.add(m.ApplicationStage(application_id=app_id, stage=13, attempt=1, outcome="Booked", completed_by="asha", owner_id="asha",
                                   completed_at=datetime.now(timezone.utc), data={"travelDate": "2026-12-01"}))
-        application.current_stage, application.status = 11, m.ApplicationStatus.deployed
+        application.current_stage, application.status = 13, m.ApplicationStatus.deployed
         candidate.status = m.CandidateStatus.deployed
         assign_traveller_id(db, candidate)
         db.commit()

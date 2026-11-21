@@ -1,0 +1,176 @@
+/*
+ * One look for every number card in the CRM (Lead sheet, Data Bank, Matched candidates, Tasks, Travelled, Inbox, Jobs, Users, Reports, ...).
+ * They all come from four components: SummaryCards (.summary-card), KpiCards (.db-kpi), the Data Bank strip (.dbs-card) and the Tasks / report
+ * strip (.dwb-stat), plus the report mini cards (.rv-mini). This sheet is the last word on how they look, so the markup stays as it is.
+ *
+ *   surface   a soft wash of the card's own colour that fades in from the top-right corner, a hairline border tinted the same way,
+ *             a 18px curve and a very light shadow; clickable cards lift a little and glow in their colour on hover.
+ *   icon      a round "halo" badge: the icon on a tinted disc with a faint ring around it.
+ *   figure    big, bold, tabular numbers; the label sits beside the icon and the caption under the figure.
+ *   accent    a short bar along the bottom edge that grows to the full width when the card is hovered or selected.
+ *   colour    every card has one colour. Cards that carry meaning keep it (green good, amber attention, red problem); the rest take
+ *             blue, teal, violet, amber, green in turn so a row never looks like five identical white boxes.
+ *
+ * Colours are mixed with the theme tokens, so every palette and the dark theme stay coherent. Specificity is deliberately high
+ * (html:root:root:root) because older sheets (depth, skin, jobs, data-bank-v2, leads) each styled these cards on their own.
+ */
+:root {
+  --sc-blue: var(--primary);
+  --sc-teal: color-mix(in srgb, #0f9bb0 82%, var(--primary));
+  --sc-violet: color-mix(in srgb, #7c5cd6 84%, var(--primary));
+  --sc-amber: color-mix(in srgb, #e39a14 86%, var(--primary));
+  --sc-green: color-mix(in srgb, #14a06b 82%, var(--primary));
+  --sc-red: var(--error-ink, #c0392b);
+  --sc-slate: color-mix(in srgb, #7d89a3 88%, var(--primary));
+}
+
+/* ---------- surface: shared by every family ---------- */
+html:root:root:root :is(.summary-card, .db-kpi, .dbs-card, .dwb-stat, .rv-mini) {
+  --tone: var(--sc-blue);
+  position: relative; box-sizing: border-box; min-width: 0; overflow: hidden; isolation: isolate;
+  border: 1px solid color-mix(in srgb, var(--tone) 17%, var(--border-main)); border-radius: 18px;
+  background:
+    radial-gradient(110% 120% at 100% 0%, color-mix(in srgb, var(--tone) 11%, transparent) 0%, transparent 56%),
+    linear-gradient(180deg, color-mix(in srgb, var(--tone) 4%, var(--bg-card)) 0%, var(--bg-card) 70%);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 5%, transparent);
+  transition: transform .2s ease, box-shadow .22s ease, border-color .18s ease, background-color .18s ease;
+}
+/* the bottom accent bar */
+html:root:root:root :is(.summary-card, .db-kpi, .dbs-card, .dwb-stat, .rv-mini)::before {
+  content: ''; display: block; position: absolute; inset: auto 18px 0 18px; z-index: 0; height: 3px; width: auto; border-radius: 3px 3px 0 0;
+  background: linear-gradient(90deg, var(--tone), color-mix(in srgb, var(--tone) 40%, transparent));
+  transform: scaleX(.16); transform-origin: left center; opacity: .85; transition: transform .3s cubic-bezier(.22, 1, .36, 1), opacity .2s;
+}
+html:root:root:root :is(.summary-card, .db-kpi, .dbs-card, .dwb-stat, .rv-mini) > * { position: relative; z-index: 1; }
+
+/* clickable cards: lift, glow, and the bar runs the full width */
+html:root:root:root :is(.summary-card.is-action, .db-kpi.is-action, .dbs-card, .dwb-stat.is-action) { cursor: pointer; }
+html:root:root:root :is(.summary-card.is-action, .db-kpi.is-action, .dbs-card, .dwb-stat.is-action):hover {
+  transform: translateY(-2px); border-color: color-mix(in srgb, var(--tone) 48%, var(--border-main));
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--tone) 16%, transparent), 0 1px 2px color-mix(in srgb, var(--text-main) 5%, transparent);
+}
+html:root:root:root :is(.summary-card, .db-kpi, .dbs-card, .dwb-stat, .rv-mini):hover::before { transform: scaleX(1); }
+html:root:root:root :is(.summary-card, .db-kpi, .dbs-card, .dwb-stat):active { transform: translateY(0); }
+html:root:root:root :is(.summary-card, .db-kpi, .dbs-card, .dwb-stat):focus-visible { outline: 2px solid var(--tone); outline-offset: 2px; }
+
+/* the selected card: the colour border, a ring, a stronger wash, the full bar */
+html:root:root:root :is(.summary-card.is-active, .summary-card[aria-pressed='true'], .db-kpi.is-on, .dbs-card.is-on, .dwb-stat.is-active) {
+  padding: var(--sc-pad, 18px 20px 20px); border: 1px solid var(--tone); outline: 0;
+  background:
+    radial-gradient(120% 130% at 100% 0%, color-mix(in srgb, var(--tone) 19%, transparent) 0%, transparent 60%),
+    linear-gradient(180deg, color-mix(in srgb, var(--tone) 9%, var(--bg-card)) 0%, color-mix(in srgb, var(--tone) 3%, var(--bg-card)) 100%);
+  box-shadow: 0 0 0 1px var(--tone), 0 12px 28px color-mix(in srgb, var(--tone) 20%, transparent);
+}
+html:root:root:root :is(.summary-card.is-active, .summary-card[aria-pressed='true'], .db-kpi.is-on, .dbs-card.is-on, .dwb-stat.is-active)::before { transform: scaleX(1); opacity: 1; }
+
+/* ---------- icon halo ---------- */
+html:root:root:root :is(.summary-icon, .db-kpi-icon, .dbs-chip, .dwb-stat-icon, .rv-mini-icon) {
+  display: inline-grid; flex: none; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 50%;
+  background: color-mix(in srgb, var(--tone, var(--primary)) 16%, var(--bg-card));
+  color: color-mix(in srgb, var(--tone, var(--primary)) 92%, var(--text-main));
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--tone, var(--primary)) 8%, transparent);
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+html:root:root:root :is(.summary-card, .db-kpi, .dbs-card, .dwb-stat, .rv-mini):hover :is(.summary-icon, .db-kpi-icon, .dbs-chip, .dwb-stat-icon, .rv-mini-icon) {
+  transform: scale(1.06); box-shadow: 0 0 0 6px color-mix(in srgb, var(--tone, var(--primary)) 12%, transparent);
+}
+
+/* ---------- SummaryCards: icon + label on top, the figure, the caption ---------- */
+html:root:root:root .summary-card { --sc-pad: 18px 20px 20px; display: flex; flex-direction: column; gap: 0; padding: 18px 20px 20px; text-align: left; }
+html:root:root:root .summary-card-top { display: flex; flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 14px; min-height: 40px; font-size: 14px; font-weight: 600; line-height: 1.3; color: var(--text-muted); }
+html:root:root:root .summary-card-top > :not(.summary-icon) { flex: 1 1 auto; min-width: 0; }
+html:root:root:root .summary-value { margin-top: 14px; font-size: 34px; font-weight: 700; line-height: 1.05; letter-spacing: -.04em; color: var(--text-main); }
+html:root:root:root :is(.summary-card > p, .summary-caption, .db-kpi-detail, .rv-mini small) { margin-top: 6px; padding-top: 0; font-size: 13px; line-height: 1.45; color: var(--text-muted); }
+/* the older coloured dash in front of a caption is gone: the dashboard's notes have none */
+html:root:root:root :is(.summary-card > p, .summary-caption, .db-kpi-detail, .rv-mini small)::before { content: none; display: none; }
+
+/* ---------- KpiCards ---------- */
+html:root:root:root .db-kpi { --sc-pad: 18px 20px 20px; display: flex; flex-direction: column; gap: 4px; padding: 18px 20px 20px; text-align: left; }
+html:root:root:root .db-kpi-top { display: flex; flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 14px; min-height: 40px; }
+html:root:root:root .db-kpi-top > :not(.db-kpi-icon) { flex: 1 1 auto; min-width: 0; }
+html:root:root:root .db-kpi-label { font-size: 14px; font-weight: 600; line-height: 1.3; color: var(--text-muted); }
+html:root:root:root .db-kpi-mid { min-height: 0; margin-top: 10px; }
+html:root:root:root .db-kpi-value { font-size: 34px; font-weight: 700; line-height: 1.05; letter-spacing: -.04em; color: var(--text-main); }
+html:root:root:root .db-kpi-spark { color: var(--tone); }
+html:root:root:root .db-kpi-foot { font-size: 13px; line-height: 1.45; color: var(--text-muted); }
+
+/* ---------- Data Bank strip: icon left, figure and label right ---------- */
+html:root:root:root .dbs-card { --sc-pad: 16px 18px 18px; display: flex; align-items: center; gap: 16px; padding: 16px 18px 18px; text-align: left; }
+html:root:root:root .dbs-text { gap: 2px; }
+html:root:root:root .dbs-value { font-size: 30px; font-weight: 700; line-height: 1.05; letter-spacing: -.04em; color: var(--text-main); }
+html:root:root:root .dbs-label { margin-top: 0; font-size: 13.5px; font-weight: 600; color: var(--text-muted); }
+html:root:root:root .dbs-card.is-muted:not(.is-on) { --tone: var(--sc-slate); }
+html:root:root:root .dbs-card.is-muted:not(.is-on) .dbs-value { color: var(--text-light); }
+
+/* ---------- Tasks and report strips ---------- */
+html:root:root:root .dwb-stat { --sc-pad: 16px 18px 18px; align-items: center; gap: 14px; padding: 16px 18px 18px; text-align: left; }
+html:root:root:root .dwb-stat-text { gap: 2px; }
+html:root:root:root .dwb-stat-label { font-size: 13.5px; font-weight: 600; color: var(--text-muted); }
+html:root:root:root .dwb-stat-figure strong { font-size: 30px; font-weight: 700; line-height: 1.05; letter-spacing: -.04em; }
+html:root:root:root .dwb-stat-detail { font-size: 12.5px; color: var(--text-muted); }
+html:root:root:root .dwb-stat .dwb-meter { height: 6px; background: color-mix(in srgb, var(--tone) 14%, var(--tint-3)); }
+html:root:root:root .dwb-stat .dwb-meter i { background: var(--tone); }
+
+/* ---------- Reports strip (the Report tabs only: .dwr): the label above its figure, both centred in the card ----------
+ * The icon sits on top, centred; then the label, then the big figure (and its unit, e.g. "of 3"), then the progress bar or caption, all on the
+ * card's centre line. The Tasks screen shares the .dwb-stat markup but not .dwr, so its cards keep their own left-aligned look. */
+html:root:root:root .dwr .dwb-stat { flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; }
+html:root:root:root .dwr .dwb-stat-text { align-items: center; width: 100%; text-align: center; }
+html:root:root:root .dwr .dwb-stat-label { text-align: center; }
+html:root:root:root .dwr .dwb-stat-figure { justify-content: center; width: 100%; }
+html:root:root:root .dwr .dwb-stat-detail { text-align: center; }
+html:root:root:root .dwr .dwb-stat .dwb-meter { width: 100%; max-width: 160px; }
+
+/* ---------- Report mini cards ---------- */
+html:root:root:root .rv-mini { padding: 18px 20px 20px; }
+html:root:root:root .rv-mini p { gap: 12px; font-size: 14px; font-weight: 600; }
+html:root:root:root .rv-mini strong { margin-top: 10px; font-size: 32px; font-weight: 700; letter-spacing: -.04em; }
+
+/* ---------- colours ---------- */
+/* Cards that carry meaning keep it. */
+html:root:root:root .summary-card:has(.tone-green), html:root:root:root .db-kpi.is-ok { --tone: var(--sc-green); }
+html:root:root:root .summary-card:has(.tone-amber), html:root:root:root .db-kpi.is-warn { --tone: var(--sc-amber); }
+html:root:root:root .summary-card:has(.tone-red), html:root:root:root .db-kpi.is-bad { --tone: var(--sc-red); }
+html:root:root:root .summary-card:has(.tone-violet) { --tone: var(--sc-violet); }
+html:root:root:root .db-kpi.is-quiet { --tone: var(--sc-slate); }
+html:root:root:root .dwb-stat:has(.tone-green) { --tone: var(--sc-green); }
+html:root:root:root .dwb-stat:has(.tone-amber) { --tone: var(--sc-amber); }
+html:root:root:root .dwb-stat:has(.tone-red) { --tone: var(--sc-red); }
+html:root:root:root .dbs-card.is-blue { --tone: var(--sc-blue); }
+html:root:root:root .dbs-card.is-amber { --tone: var(--sc-amber); }
+html:root:root:root .dbs-card.is-violet { --tone: var(--sc-violet); }
+/* The rest take a colour by position. */
+html:root:root:root .workspace-summary > .summary-card:has(.tone-blue):nth-child(5n + 2),
+html:root:root:root .db-kpis > .db-kpi:not(.is-ok, .is-warn, .is-bad, .is-quiet):nth-child(5n + 2),
+html:root:root:root .dwb-stats > li:nth-child(5n + 2) > .dwb-stat:not(:has(.tone-green, .tone-amber, .tone-red)),
+html:root:root:root .rv-minis > .rv-mini:not([style]):nth-child(5n + 2) { --tone: var(--sc-teal); }
+html:root:root:root .workspace-summary > .summary-card:has(.tone-blue):nth-child(5n + 3),
+html:root:root:root .db-kpis > .db-kpi:not(.is-ok, .is-warn, .is-bad, .is-quiet):nth-child(5n + 3),
+html:root:root:root .dwb-stats > li:nth-child(5n + 3) > .dwb-stat:not(:has(.tone-green, .tone-amber, .tone-red)),
+html:root:root:root .rv-minis > .rv-mini:not([style]):nth-child(5n + 3) { --tone: var(--sc-violet); }
+html:root:root:root .workspace-summary > .summary-card:has(.tone-blue):nth-child(5n + 4),
+html:root:root:root .db-kpis > .db-kpi:not(.is-ok, .is-warn, .is-bad, .is-quiet):nth-child(5n + 4),
+html:root:root:root .dwb-stats > li:nth-child(5n + 4) > .dwb-stat:not(:has(.tone-green, .tone-amber, .tone-red)),
+html:root:root:root .rv-minis > .rv-mini:not([style]):nth-child(5n + 4) { --tone: var(--sc-amber); }
+html:root:root:root .workspace-summary > .summary-card:has(.tone-blue):nth-child(5n),
+html:root:root:root .db-kpis > .db-kpi:not(.is-ok, .is-warn, .is-bad, .is-quiet):nth-child(5n),
+html:root:root:root .dwb-stats > li:nth-child(5n) > .dwb-stat:not(:has(.tone-green, .tone-amber, .tone-red)),
+html:root:root:root .rv-minis > .rv-mini:not([style]):nth-child(5n) { --tone: var(--sc-green); }
+
+/* ---------- phones ---------- */
+@media (max-width: 760px) {
+  html:root:root:root :is(.summary-card, .db-kpi) { --sc-pad: 14px 14px 18px; padding: 14px 14px 18px; border-radius: 16px; }
+  html:root:root:root :is(.dbs-card, .dwb-stat) { --sc-pad: 12px 12px 16px; padding: 12px 12px 16px; gap: 10px; border-radius: 16px; }
+  html:root:root:root :is(.summary-icon, .db-kpi-icon, .dbs-chip, .dwb-stat-icon, .rv-mini-icon) { width: 34px; height: 34px; }
+  html:root:root:root :is(.summary-card-top, .db-kpi-top) { min-height: 34px; gap: 10px; }
+  html:root:root:root :is(.summary-value, .db-kpi-value) { font-size: 28px; }
+  html:root:root:root .summary-value { margin-top: 10px; }
+  html:root:root:root .dbs-value, html:root:root:root .dwb-stat-figure strong { font-size: 24px; }
+  html:root:root:root .rv-mini strong { font-size: 26px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:root:root:root :is(.summary-card, .db-kpi, .dbs-card, .dwb-stat, .rv-mini),
+  html:root:root:root :is(.summary-card, .db-kpi, .dbs-card, .dwb-stat, .rv-mini)::before,
+  html:root:root:root :is(.summary-icon, .db-kpi-icon, .dbs-chip, .dwb-stat-icon, .rv-mini-icon) { transition: none; }
+  html:root:root:root :is(.summary-card, .db-kpi, .dbs-card, .dwb-stat):hover { transform: none; }
+}

@@ -79,7 +79,7 @@ test('every screen shows only the Data Bank ID (Travelled only the Traveller ID)
   assert.match(letterhead, /paperIdLine\(candidate, readableReference\)/)
 
   const travelled = await read('../src/screens/travelled/travelled.tsx')
-  assert.match(travelled, /<TravellerIdChip candidate=\{row\} \/>/)
+  assert.doesNotMatch(travelled, /TravellerIdChip/, 'the Travelled table shows no CI number')
   assert.doesNotMatch(travelled, /primaryId|careIdOf|secondaryId|candidate-ids/)
 
   const palette = await read('../src/app/layout/command-search.tsx')

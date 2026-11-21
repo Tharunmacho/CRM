@@ -186,7 +186,7 @@ def test_ambiguous_candidate_ticket_cannot_invoice_another_placement(billing):
     upload(billing, "air_ticket", pdf("Unallocated generic ticket"))
     assert read(billing)["status"] == "pending_assignment"
     assert fee(billing, "5000", app="another-placement")["status"] == "pending_ticket"
-    response = billing.client.post("/api/files", data={"entity_type": "application", "entity_id": "another-placement", "slot": "stage_12_file"},
+    response = billing.client.post("/api/files", data={"entity_type": "application", "entity_id": "another-placement", "slot": "stage_13_file"},
         files={"file": ("ticket.pdf", pdf("Specific new placement ticket"), "application/pdf")})
     assert response.status_code == 201, response.text
     assert read(billing, app="another-placement")["status"] == "issued"
@@ -196,9 +196,9 @@ def test_ambiguous_candidate_ticket_cannot_invoice_another_placement(billing):
 def test_completion_without_ticket_never_creates_an_invoice(billing):
     app = mapped(billing)
     configure(billing)
-    reach(billing, app, 12)  # stages 1-11 with their required decisions (Selected, Agreed, Fit)
+    reach(billing, app, 13)  # stages 1-12 with their required decisions (Selected, Agreed, Fit)
     # Deployment cannot be moved manually any more: it needs the ticket and the travel date, so no invoice can follow from a note.
-    saved = save(billing, app, {"feedback": "Move stage 12 manually"})
+    saved = save(billing, app, {"feedback": "Move stage 13 manually"})
     assert saved.status_code == 200, saved.text
     refused = billing.client.post(f"/api/applications/{app}/complete", json={"lock_version": saved.json()["lockVersion"]})
     assert refused.status_code == 422 and refused.json()["detail"]["missing"] == ["Air ticket", "Travel date"], refused.text
@@ -228,7 +228,7 @@ def test_concurrent_generation_issues_only_one_invoice_for_a_placement(billing):
     configure(billing)
     fee(billing, "5000", app=app)
     with billing.sessions() as db:
-        db.add(Attachment(entity_type="application", entity_id=app, slot="stage_12_file", version=1,
+        db.add(Attachment(entity_type="application", entity_id=app, slot="stage_13_file", version=1,
             file_name="ticket.pdf", content_type="application/pdf", object_key="synthetic-ticket.pdf"))
         db.commit()
     def issue():
@@ -249,7 +249,7 @@ def test_concurrent_candidates_get_different_numbers_from_the_locked_sequence(bi
     for candidate, app in pairs:
         fee(billing, "5000", candidate=candidate, app=app)
         with billing.sessions() as db:
-            db.add(Attachment(entity_type="application", entity_id=app, slot="stage_12_file", version=1,
+            db.add(Attachment(entity_type="application", entity_id=app, slot="stage_13_file", version=1,
                 file_name="ticket.pdf", content_type="application/pdf", object_key=f"{candidate}-ticket.pdf"))
             db.commit()
     def issue(pair):

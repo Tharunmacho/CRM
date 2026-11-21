@@ -175,8 +175,8 @@ def test_blank_candidate_form_has_every_docx_section_and_lists_what_is_missing(d
     assert data["recruitment"]["client"] is None and data["recruitment"]["source"] == "Walk-in"
     assert data["recruitment"]["recruiter"] == {"id": "staff", "name": "Staff"}
     assert [row["key"] for row in data["tracking"]["rows"]] == [
-        "prescreening", "forwarded", "interview_scheduling", "interview_result", "offer_letter", "medical", "pcc",
-        "passport_collection", "advance_payment", "visa", "visa_stamping", "ticket"]  # the invoice row is the admin's alone
+        "prescreening", "forwarded", "interview_scheduling", "interview_result", "offer_letter", "advance_payment",
+        "passport_collection", "medical", "pcc", "visa", "google_review", "visa_stamping", "ticket"]  # the invoice row is the admin's alone
     assert {row["status"] for row in data["tracking"]["rows"]} == {"not_started"}   # every row is a stage now (the not-applicable PCC row is gone)
     missing = {item["key"]: item for item in data["completeness"]["missing"]}
     assert missing["documents.passport"]["message"] == "Passport not uploaded"
@@ -456,8 +456,8 @@ def test_tracking_follows_the_stage_records_live(desk):
     assert data["recruitment"]["position"] == "Welder" and data["recruitment"]["clientContact"] == "Mr Contact"
     rows = {r["key"]: r for r in data["tracking"]["rows"]}
     assert rows["prescreening"]["status"] == "in_progress" and rows["forwarded"]["status"] == "not_started"
-    assert rows["pcc"]["status"] == "not_started" and rows["pcc"]["stage"] == 7 and rows["pcc"]["systemLabel"] == "PCC"   # PCC is a stage like the others
-    assert [rows[key]["stage"] for key in ("medical", "pcc", "passport_collection", "advance_payment", "visa", "visa_stamping", "ticket")] == [6, 7, 8, 9, 10, 11, 12]
+    assert rows["pcc"]["status"] == "not_started" and rows["pcc"]["stage"] == 9 and rows["pcc"]["systemLabel"] == "PCC"   # PCC is a stage like the others
+    assert [rows[key]["stage"] for key in ("advance_payment", "passport_collection", "medical", "pcc", "visa", "google_review", "visa_stamping", "ticket")] == [6, 7, 8, 9, 10, 11, 12, 13]
     assert "invoice_generated" not in rows  # a recruiter's form carries no invoice evidence
     as_user(desk, "admin", Role.admin)
     admin_rows = {r["key"]: r for r in form(desk)["tracking"]["rows"]}
@@ -475,14 +475,14 @@ def test_tracking_follows_the_stage_records_live(desk):
         complete(desk, app_id, payload(desk, app_id, stage))
     tracking = form(desk)["tracking"]
     assert tracking["summary"]["completed"] == 6 and tracking["summary"]["currentStage"] == 7
-    assert {r["key"]: r["status"] for r in tracking["rows"]}["medical"] == "completed"
-    assert {r["key"]: r["status"] for r in tracking["rows"]}["pcc"] == "in_progress"
-    assert {r["key"]: r["status"] for r in tracking["rows"]}["passport_collection"] == "not_started"
+    assert {r["key"]: r["status"] for r in tracking["rows"]}["advance_payment"] == "completed"
+    assert {r["key"]: r["status"] for r in tracking["rows"]}["passport_collection"] == "in_progress"
+    assert {r["key"]: r["status"] for r in tracking["rows"]}["medical"] == "not_started"
     complete(desk, app_id, payload(desk, app_id, 7))
     tracking = form(desk)["tracking"]
-    assert tracking["summary"]["completed"] == 7 and tracking["summary"]["currentStage"] == 8 and tracking["summary"]["currentStageLabel"] == "Passport"
-    assert {r["key"]: r["status"] for r in tracking["rows"]}["pcc"] == "completed"
-    assert {r["key"]: r["status"] for r in tracking["rows"]}["passport_collection"] == "in_progress"
+    assert tracking["summary"]["completed"] == 7 and tracking["summary"]["currentStage"] == 8 and tracking["summary"]["currentStageLabel"] == "Medical"
+    assert {r["key"]: r["status"] for r in tracking["rows"]}["passport_collection"] == "completed"
+    assert {r["key"]: r["status"] for r in tracking["rows"]}["medical"] == "in_progress"
 
     as_user(desk, "admin", Role.admin)
     reopen = desk.client.post(f"/api/applications/{app_id}/reopen", json={"lock_version": desk.client.get(f"/api/applications/{app_id}/draft").json()["lockVersion"],
@@ -490,7 +490,7 @@ def test_tracking_follows_the_stage_records_live(desk):
     assert reopen.status_code == 200, reopen.text
     rows = {r["key"]: r["status"] for r in form(desk)["tracking"]["rows"]}
     assert rows["offer_letter"] == "in_progress" and rows["forwarded"] == "completed"
-    assert rows["medical"] == "not_started"  # reopening a stage reopens the ones after it too
+    assert rows["advance_payment"] == "not_started"  # reopening a stage reopens the ones after it too
 
 
 def test_failed_prescreen_closes_the_application_and_picks_between_orders(desk):

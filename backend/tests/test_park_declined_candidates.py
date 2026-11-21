@@ -61,7 +61,7 @@ def seed(env):
     add(env, "p-offer", "CI-062", apps=[closed("offer_declined", 5)])
     add(env, "p-stage", "CI-063", owner="ravi", apps=[closed("stage_declined", 3)])
     add(env, "p-int", "CI-064", apps=[closed("not_interested", 2)])
-    add(env, "p-travel", "CI-065", apps=[closed("not_travelling", 11)])
+    add(env, "p-travel", "CI-065", apps=[closed("not_travelling", 13)])
     add(env, "p-twice", "CI-066", apps=[closed("unmapped", 1), closed("offer_declined", 5)])     # the latest one is the decline
     add(env, "x-review", "CI-070", status=CS.needs_review, apps=[closed("offer_declined", 5)])   # needs_review stays
     add(env, "x-already", "CI-071", status=CS.not_interested, apps=[closed("offer_declined", 5)])
@@ -116,7 +116,7 @@ def test_dry_run_changes_nothing_and_lists_exactly_the_right_candidates(park, ca
     line = next(row for row in out.splitlines() if "CI-062" in row)
     assert "Person p-offer" in line and "owner: Asha" in line and "offer_declined at stage 5" in line and "status: new" in line
     assert "owner: Ravi" in next(row for row in out.splitlines() if "CI-063" in row)
-    assert "stage_declined at stage 3" in out and "not_interested at stage 2" in out and "not_travelling at stage 11" in out
+    assert "stage_declined at stage 3" in out and "not_interested at stage 2" in out and "not_travelling at stage 13" in out
 
 
 def test_apply_parks_only_the_right_candidates_and_touches_nothing_else(park, capsys):

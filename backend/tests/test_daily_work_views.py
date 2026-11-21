@@ -28,7 +28,7 @@ def ended_desk(desk):
     advance(desk, apps["c0"], DECLINED_AT_OFFER)
     to_stage(desk, apps["c1"], 4)
     advance(desk, apps["c1"], REJECTED_AT_INTERVIEW)
-    set_application(desk, apps["c2"], stage=12, status="deployed", candidate_status="deployed")
+    set_application(desk, apps["c2"], stage=13, status="deployed", candidate_status="deployed")
     set_application(desk, apps["c3"], status="closed", reason="unmapped")
     other = mapped_candidates(desk, 1, owner="ravi", start=10)
     as_user(desk, "ravi")
@@ -81,7 +81,7 @@ def test_travelled_view_lists_deployed_placements(desk):
     body = view(desk, "asha", "travelled")
     assert ids(body) == ["c2"]
     outcome = body["items"][0]["outcome"]
-    assert (outcome["kind"], outcome["label"], outcome["reason"], outcome["stage"]) == ("travelled", "Travelled", None, 12)
+    assert (outcome["kind"], outcome["label"], outcome["reason"], outcome["stage"]) == ("travelled", "Travelled", None, 13)
     # The Travelled screen reads the same deployed placements.
     desk.actor.id = "asha"
     assert view(desk, "admin", "travelled")["viewCounts"]["travelled"] == 1
@@ -258,8 +258,9 @@ def test_completing_a_stage_locks_in_one_statement_and_writes_each_table_once(de
     assert done.status_code == 200, done.text
     assert done.json()["currentStage"] == 2 and done.json()["nextTaskId"]
     # candidate + order + application locked together (the stand-in actor of this fixture costs two user reads; a real session has it
-    # in memory), the attempt number, the open tasks, then one write per table
-    assert len(seen) <= 10, seen
+    # in memory), the attempt number, the open tasks, whether the next stage already has a live completed record (it is then skipped),
+    # then one write per table
+    assert len(seen) <= 11, seen
     assert sum(s.startswith("SELECT crm_candidates") for s in seen) == 1 and not any(s.startswith("SELECT crm_job_orders") for s in seen), seen
     assert sum(s.startswith("UPDATE crm_applications") for s in seen) == 1, seen
     assert done.status_code == 200 and desk.client.get(f"/api/applications/{app_id}/draft").json()["lockVersion"] == saved.json()["lockVersion"] + 1

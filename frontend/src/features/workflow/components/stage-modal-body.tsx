@@ -38,6 +38,7 @@ import {
   TOTAL_STAGES,
   closureLabels,
   fieldVisible,
+  MEDICAL_STAGE,
   stageByNo,
   userRefId,
   userRefName,
@@ -231,15 +232,15 @@ export function StageModal({
                 </details>
               </li>
             })}
-            {live === 6 && effective.some((record) => record.stage === 6) && <li className="sm-step is-done">
+            {live === MEDICAL_STAGE && effective.some((record) => record.stage === MEDICAL_STAGE) && <li className="sm-step is-done">
               <span className="sm-node" aria-hidden="true">6</span>
               <details className="sm-card">
                 <summary className="sm-summary">
-                  <span className="sm-summary-copy"><b>Previous medical attempts ({effective.filter((record) => record.stage === 6).length})</b><span>The medical is being done again. Earlier tries stay on record.</span></span>
+                  <span className="sm-summary-copy"><b>Previous medical attempts ({effective.filter((record) => record.stage === MEDICAL_STAGE).length})</b><span>The medical is being done again. Earlier tries stay on record.</span></span>
                   <Badge tone="amber" variant="dot">Unfit: reapplying</Badge>
                   <ChevronDown className="sm-chev h-4 w-4" aria-hidden="true" />
                 </summary>
-                <div className="sm-done-body">{effective.filter((record) => record.stage === 6).map((record) => <CompletedStage key={record.attempt} record={record} files={files} app={app} />)}</div>
+                <div className="sm-done-body">{effective.filter((record) => record.stage === MEDICAL_STAGE).map((record) => <CompletedStage key={record.attempt} record={record} files={files} app={app} />)}</div>
               </details>
             </li>}
             {app.status === 'active' ? (
@@ -355,7 +356,7 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
   const statusTone = app.status === 'closed' ? 'stamp' : app.status === 'deployed' ? 'green' : 'navy'
   const statusLabel = app.status === 'active' ? 'Active' : app.status === 'deployed' ? 'Deployed' : 'Closed'
   const progressLead = app.status === 'active' ? `Stage ${app.currentStage} of ${STAGES.length} · ${stageByNo(app.currentStage).title}` : app.status === 'deployed' ? 'Deployed' : `Closed at stage ${app.currentStage}${app.closureReason ? ` · ${closureLabels[app.closureReason]}` : ''}`
-  const progressText = app.status === 'active' ? 'Write feedback and choose Save and move to advance manually. Documents are optional for stage movement.' : app.status === 'deployed' ? 'All 12 stages are done. Open any stage to read its saved feedback.' : 'This order is closed for this candidate. Saved feedback, results and documents are below.'
+  const progressText = app.status === 'active' ? 'Write feedback and choose Save and move to advance manually. Documents are optional for stage movement.' : app.status === 'deployed' ? 'All 13 stages are done. Open any stage to read its saved feedback.' : 'This order is closed for this candidate. Saved feedback, results and documents are below.'
   return (
     <>
       <header className="sm-head">
@@ -1151,7 +1152,7 @@ function DeployedRow() {
       <span className="sm-end-icon" aria-hidden="true"><Trophy className="h-5 w-5" /></span>
       <div>
         <b>Deployed</b>
-        <p>All 12 stages are done. The order's deployed count went up by one. When deployed equals openings, the order becomes Filled.</p>
+        <p>All 13 stages are done. The order's deployed count went up by one. When deployed equals openings, the order becomes Filled.</p>
       </div>
     </section>
   )

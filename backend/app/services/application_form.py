@@ -26,7 +26,7 @@ from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry, Candidate, Client, Company,
     Designation, DocumentExtractionJob, EmailIngestionJob, MailAttachment, Order, Priority, Role, Source, Task, TodoItem, User,
 )
-from app.domain.stages import STOP_OUTCOMES, TOTAL_STAGES, stage_by_no
+from app.domain.stages import MEDICAL_STAGE, STOP_OUTCOMES, TOTAL_STAGES, stage_by_no
 from app.services import form_assignment, form_feedback
 from app.services import form_extraction as fx
 from app.services.candidate_identity import identity_matches, normalize_candidate_values, normalize_passport, normalize_phone, normalized_labels
@@ -45,15 +45,15 @@ SLOT_SPECS = (
     ("resume", "Resume", "The latest resume. It is read to fill the form.", None, True, True, False),
     ("passport", "Passport", "Add the passport front, back and any additional pages. Each file is kept and read to fill the form.", None, True, True, True),
     ("aadhaar", "Aadhaar", "Optional. Add the Aadhaar front, back and any additional pages, then choose Extract details.", None, False, True, True),
-    ("medical", "Medical", "The medical fitness report.", 6, False, False, False),
+    ("medical", "Medical", "The medical fitness report.", 8, False, False, False),
     ("signed_offer", "Signed offer", "The offer letter signed by the candidate.", 5, False, False, False),
-    ("pcc", "Police clearance certificate (PCC)", "The police clearance certificate.", 7, False, False, False),
+    ("pcc", "Police clearance certificate (PCC)", "The police clearance certificate.", 9, False, False, False),
     ("visa", "Visa", "The visa received for the candidate.", 10, False, False, False),
-    ("air_ticket", "Air ticket", "The air ticket.", 12, False, False, False),
-    ("undertaking_letter", "Undertaking letter", "The undertaking letter signed by the candidate, before deployment.", 12, False, False, False),
-    ("emigration", "Emigration", "The emigration clearance, required after the visa stage.", 11, False, False, False),
-    ("insurance", "Insurance", "The candidate's insurance policy, before deployment.", 12, False, False, False),
-    ("invoice", "Invoice", "The candidate's invoice, before deployment.", 12, False, False, False),
+    ("air_ticket", "Air ticket", "The air ticket.", 13, False, False, False),
+    ("undertaking_letter", "Undertaking letter", "The undertaking letter signed by the candidate, before deployment.", 13, False, False, False),
+    ("emigration", "Emigration", "The emigration clearance, required after the visa stage.", 12, False, False, False),
+    ("insurance", "Insurance", "The candidate's insurance policy, before deployment.", 13, False, False, False),
+    ("invoice", "Invoice", "The candidate's invoice, before deployment.", 13, False, False, False),
     ("photo", "Photo", "Optional. A recent passport-size photo (an image).", None, False, False, False),
     ("education_certificate", "Education certificate", "Optional. The highest qualification certificate.", None, False, True, False),
     ("experience_certificate", "Experience certificate", "Optional. Certificates from previous employers.", None, False, False, False),
@@ -93,18 +93,19 @@ TRACKING = (
     ("interview_scheduling", "Interview scheduling", 3, False),
     ("interview_result", "Interview result / selection", 4, False),
     ("offer_letter", "Offer Letter", 5, True),
-    ("medical", "Medical", 6, True),
-    ("pcc", "PCC", 7, True),
-    ("passport_collection", "Passport collection", 8, False),
-    ("advance_payment", "Advance payment", 9, False),
+    ("advance_payment", "Advance payment", 6, False),
+    ("passport_collection", "Passport collection", 7, False),
+    ("medical", "Medical", 8, True),
+    ("pcc", "PCC", 9, True),
     ("visa", "Visa", 10, True),
-    ("visa_stamping", "Visa Stamping", 11, True),
-    ("ticket", "Ticket", 12, True),
+    ("google_review", "Google review", 11, False),
+    ("visa_stamping", "Visa Stamping", 12, True),
+    ("ticket", "Ticket", 13, True),
     ("invoice_generated", "Invoice", None, True),
 )
-NOT_TRACKED_NOTE: dict[str, str] = {}  # every row but the invoice evidence is a stage now (PCC became stage 7 with migration 0048)
+NOT_TRACKED_NOTE: dict[str, str] = {}  # every row but the invoice evidence is a stage now (see domain/stages.py for the order)
 # Outcomes after which the candidate stopped at that stage: the older negative exits plus the stopping exit every stage offers.
-_FAILED_BASE = {1: {"Failed"}, 2: {"Not forwarded"}, 4: {"Rejected"}, 5: {"Declined", "Not received"}, 6: {"Unfit"}}
+_FAILED_BASE = {1: {"Failed"}, 2: {"Not forwarded"}, 4: {"Rejected"}, 5: {"Declined", "Not received"}, MEDICAL_STAGE: {"Unfit"}}
 FAILED_OUTCOMES = {no: _FAILED_BASE.get(no, set()) | STOP_OUTCOMES[no] for no in range(1, TOTAL_STAGES + 1)}
 CLOSURE_LABELS = {
     "prescreen_failed": "Failed prescreening", "not_interested": "Candidate not interested",

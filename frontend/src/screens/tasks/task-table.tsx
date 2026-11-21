@@ -6,7 +6,8 @@ import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { useAutoGrow } from '@/shared/ui/use-auto-grow'
 import { RecordIdentity } from '@/shared/ui/workspace'
-import { agencyLabel, clockTime, countryCell, isClosed, nothingYet, noteWhen, notesNewestFirst, PENDING_NOTE, rowAction, sendNote, taskColumnsFor, todayChips, todayPlace, type DailyNote, type TaskRow } from '@/features/daily-work/daily-work-model'
+import { agencyLabel, clockTime, countryCell, isClosed, nothingYet, noteWhen, notesNewestFirst, PENDING_NOTE, rowAction, sendNote, taskColumnsFor, widthsWithSpare, todayChips, todayPlace, type DailyNote, type TaskRow } from '@/features/daily-work/daily-work-model'
+import { getNoteDraft, noteDraftKey, setNoteDraft } from '@/features/daily-work/note-drafts'
 import { DELETE_NOTE_HINT, DELETE_NOTE_LABEL, DELETE_NOTE_TITLE } from '@/features/daily-work/note-delete-model'
 import { OwnerTag } from './task-identity'
 import {
@@ -93,7 +94,10 @@ interface NotesCellProps {
 
 /** The NOTES cell: the input (people who may work the candidate), then every note newest first in a list that scrolls inside the cell. */
 function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: NotesCellProps) {
-  const [text, setText] = useState('')
+  // What was typed stays in the box when the table is drawn again (see note-drafts.ts); it goes when the note is saved or cleared.
+  const draftKey = noteDraftKey(authorName, row.candidateId)
+  const [text, setTextState] = useState(() => getNoteDraft(draftKey))
+  const setText = (value: string) => { setTextState(value); setNoteDraft(draftKey, value) }
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [pending, setPending] = useState<DailyNote[]>([])
@@ -105,12 +109,13 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
     if (!onAdd || saving) return
     const typed = text
     if (!typed.trim()) return
-    setSaving(true); setError(''); setText('')
+    // The box empties at once, but the saved copy of the draft stays until the server has the note: a failure (or a table redrawn meanwhile) gives it back.
+    setSaving(true); setError(''); setTextState('')
     const result = await sendNote(typed, (body) => onAdd(row, body), {
       pending: (note) => setPending((list) => [note, ...list]),
       settled: (note) => setPending((list) => list.filter((item) => item.id !== note.id)),
     }, authorName)
-    if (result.error) { setError(result.error); setText(result.body) }
+    if (result.error) { setError(result.error); setText(result.body) } else setNoteDraft(draftKey, '')
     setSaving(false)
     if (result.error) window.setTimeout(() => box.current?.focus(), 0)
   }
@@ -169,11 +174,14 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
   const ask = (row: TaskRow, note: DailyNote) => () => setAsking({ row, note })
   const place = todayPlace(supervisor, panelWidth)
   const columns = taskColumnsFor(supervisor, place !== 'stage')
-  const layout = columnLayout(columns)
+  // REMARKS and NOTES take the room the panel has beyond the minimum plan (widthsWithSpare); every other column keeps its measured width.
+  const widths = widthsWithSpare(columns, panelWidth)
+  const effective = columns.map((c) => ({ ...c, width: widths[c.key] }))
+  const layout = columnLayout(effective)
   return (
     <ScrollEdges label="Candidates, scroll sideways for more columns" labelledBy={labelledBy} busy={busy}>
       <table ref={measure} className="dw-table dw-main tw-table" aria-label="Candidates">
-        <colgroup>{columns.map((c) => <col key={c.key} style={{ width: layout.share(c) }} />)}</colgroup>
+        <colgroup>{effective.map((c) => <col key={c.key} style={{ width: layout.share(c) }} />)}</colgroup>
         <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn(c.key === 'actions' && 'is-actions')}>{c.quiet ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
         <tbody>
           {rows.map((row, index) => {

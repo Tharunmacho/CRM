@@ -1,0 +1,45 @@
+/*
+ * Reports tables (Lead sheet monitoring, Candidate monitoring, Daily report figures, Lead status now).
+ * What was wrong: the lines between columns were almost the same colour as the page (they could not be seen), every figure was pushed
+ * to the right edge of a wide column, far from its heading and from the name it belongs to, and the status table stretched two small
+ * numbers across a full-width page. Now: clear 1px lines between columns and rows, names on the left, every figure and its heading
+ * centred in the same column, a light stripe on alternate rows, and the status table keeps its numbers next to its labels.
+ * Names (and the name column heading) are left, every other heading and figure is centred, in the wide table; the stacked cards below 1080px centre the figures too.
+ * Same widths and the same blue header as before; only alignment and lines change. Specificity beats the older sheets
+ * (daily-report.css, daily-work.css, tasks-table.css), which each styled these tables on their own.
+ */
+.dwr { --rt-line: color-mix(in srgb, var(--border-control) 78%, var(--bg-card)); --rt-stripe: color-mix(in srgb, var(--primary) 3.5%, var(--bg-card)); }
+
+@container dw (min-width: 1080px) {
+  /* lines: one clear line under every row and between every pair of columns (not after the last) */
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main :is(tbody, tfoot) :is(td, th) { border-bottom: 1px solid var(--rt-line); }
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main :is(tbody, tfoot) :is(td, th):not(:last-child) { border-right: 1px solid var(--rt-line); }
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main thead th:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--on-primary) 28%, var(--primary)); }
+  /* the figures: heading and number share one centre line */
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main :is(th, td).is-num,
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main :is(th, td).is-tail { padding: 8px 10px; text-align: center; }
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main td.is-num > :is(.dw-none, .dwr-plain, .dwr-link),
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main td.is-tail .dw-none { display: block; margin-inline: auto; text-align: center; }
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main td.is-num > .dwr-link { width: fit-content; }
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main td.is-tail .dwr-pct { justify-content: center; }
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main td.is-num .dwr-pct { justify-content: center; width: 100%; }
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main td.is-num .dwr-pct.is-share .dwb-meter { flex: 1 1 0; max-width: 120px; }
+  /* names: left, with room to breathe */
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main :is(thead th.is-left, th.dwr-name, th.dwr-name-head) { padding-left: 16px; text-align: left; }
+  /* the closing Total row of the section tables (stages, lead status): bold, the name left */
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main tfoot .dwr-total th.dwr-name { font-weight: 700; }
+  /* a light stripe so a row can be followed across the page */
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main tbody .dw-staff-row.is-alt > :is(td, th) { background: var(--rt-stripe); }
+  html:root:root:root:root .dwr .dwr-table.dw-table.dw-main tbody .dw-staff-row:hover > :is(td, th) { background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
+}
+
+/* Lead status now: always a table; keep it compact and the same centre lines */
+html:root:root:root:root .dwr .dwr-status > table.dw-table { width: 100%; max-width: 760px; }
+html:root:root:root:root .dwr .dwr-status > table.dw-table col:nth-child(n + 2) { width: 150px !important; }
+html:root:root:root:root .dwr .dwr-status > table.dw-table :is(thead th, tbody td).is-num { padding: 8px 10px; text-align: center; }
+html:root:root:root:root .dwr .dwr-status > table.dw-table thead th.is-left, html:root:root:root:root .dwr .dwr-status > table.dw-table tbody th.dwr-status-name { padding-left: 16px; text-align: left; }
+html:root:root:root:root .dwr .dwr-status > table.dw-table tbody :is(td, th) { border-bottom: 1px solid var(--rt-line); }
+html:root:root:root:root .dwr .dwr-status > table.dw-table tbody :is(td, th):not(:last-child) { border-right: 1px solid var(--rt-line); }
+html:root:root:root:root .dwr .dwr-status > table.dw-table thead th:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--on-primary) 28%, var(--primary)); }
+html:root:root:root:root .dwr .dwr-status > table.dw-table tbody tr:nth-child(even) > :is(td, th) { background: var(--rt-stripe); }
+html:root:root:root:root .dwr .dwr-status > table.dw-table tbody tr:last-child > :is(td, th) { border-bottom: 0; }

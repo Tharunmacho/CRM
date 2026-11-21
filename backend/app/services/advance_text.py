@@ -3,7 +3,7 @@
 Pure functions, no database: they turn the facts of a stage-9 record into the words of the sheet's Advance cell and read
 the record's status. The owner's style is kept exactly: no spaces around the slash, `k` for round thousands.
 
-Stage 9 stores (in the stage record's JSON, `crm_application_stages.data`):
+Stage 6 stores (in the stage record's JSON, `crm_application_stages.data`):
   advanceStatus       "collected" | "pending"   (records saved before it existed have none, see `advance_status`)
   amount              the advance collected, or the advance expected while the status is pending
   amountCurrency      its currency (the agency's default advance currency when none was chosen)

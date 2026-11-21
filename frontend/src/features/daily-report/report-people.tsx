@@ -21,6 +21,8 @@ export function PeopleBoard({ staff, single, todayOnly, selected, onSelect }: {
 }) {
   const sorted = staffByAttention(staff, single)
   const teamTotal = staff.reduce((all, row) => all + actionsOf(row), 0)
+  // A lone picked person is 100% of nothing: their card shows the count only, no share.
+  const alone = staff.length === 1 && selected !== 'all'
   return <section className="dw-panel dwb-board" aria-label="Team">
     <div className="dw-panel-head dwb-head">
       <div><h2><Users size={16} aria-hidden="true" /> Team</h2></div>
@@ -48,8 +50,8 @@ export function PeopleBoard({ staff, single, todayOnly, selected, onSelect }: {
             {n === 0
               ? <span className="dwb-card-empty">{single ? 'Nothing recorded today' : 'Nothing recorded in this period'}</span>
               : <>
-                <span className="dwb-card-numbers tnum"><span><b>{n.toLocaleString('en-IN')}</b> {n === 1 ? 'action' : 'actions'}{todayOnly ? ' today' : ''}</span><em>{share}%</em></span>
-                <span className="dwb-stack" aria-hidden="true"><i className="is-todo" style={{ flex: '0 0 auto', width: `${Math.max(4, share)}%` }} /></span>
+                <span className="dwb-card-numbers tnum"><span><b>{n.toLocaleString('en-IN')}</b> {n === 1 ? 'action' : 'actions'}{todayOnly ? ' today' : ''}</span>{!alone && <em>{share}%</em>}</span>
+                {!alone && <span className="dwb-stack" aria-hidden="true"><i className="is-todo" style={{ flex: '0 0 auto', width: `${Math.max(4, share)}%` }} /></span>}
               </>}
           </button>
         </li>

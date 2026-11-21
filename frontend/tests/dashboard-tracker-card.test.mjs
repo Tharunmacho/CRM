@@ -10,18 +10,18 @@ const { summarizeTracker, trackerLink, WAITING_STAGES } = await import(`data:tex
 const row = (stageNo, travelled = false) => ({ stageNo, travelled })
 
 test('in progress and travelled are counted from the rows, and they add up to the total', () => {
-  const summary = summarizeTracker([row(5), row(5), row(12), row(12, true), row(12, true)])
+  const summary = summarizeTracker([row(5), row(5), row(13), row(13, true), row(13, true)])
   assert.equal(summary.total, 5)
   assert.equal(summary.inProgress, 3)
   assert.equal(summary.travelled, 2)
 })
 
 test('the waiting chips run Offer to Air ticket, count only placements still in progress, and show zero when nobody waits', () => {
-  const summary = summarizeTracker([row(5), row(5), row(6), row(7), row(7), row(10), row(12), row(12, true), row(2), row(4)])
+  const summary = summarizeTracker([row(5), row(5), row(8), row(9), row(9), row(10), row(13), row(13, true), row(2), row(4)])
   assert.deepEqual(summary.waiting.map(stage => [stage.no, stage.label, stage.count]), [
-    [5, 'Offer', 2], [6, 'Medical', 1], [7, 'PCC', 2], [8, 'Passport', 0], [9, 'Advance', 0], [10, 'Visa', 1], [11, 'Stamp', 0], [12, 'Air ticket', 1],
+    [5, 'Offer', 2], [6, 'Advance', 0], [7, 'Passport', 0], [8, 'Medical', 1], [9, 'PCC', 2], [10, 'Visa', 1], [11, 'Review', 0], [12, 'Stamp', 0], [13, 'Air ticket', 1],
   ])
-  assert.equal(WAITING_STAGES.length, 8)
+  assert.equal(WAITING_STAGES.length, 9)
 })
 
 test('earlier stages are in progress but have no chip', () => {
@@ -33,7 +33,7 @@ test('earlier stages are in progress but have no chip', () => {
 test('an empty tracker is all zeros', () => {
   const summary = summarizeTracker([])
   assert.deepEqual([summary.total, summary.inProgress, summary.travelled], [0, 0, 0])
-  assert.equal(summary.waiting.length, 8)
+  assert.equal(summary.waiting.length, 9)
 })
 
 test('links open the tracker tab; the stage is added only when the tracker reads it', () => {

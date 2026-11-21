@@ -197,3 +197,14 @@ def test_the_real_validators_work_through_the_veris_hand_off(monkeypatch):
     check = clash["coverage"]["kinds"]["passport"]["crossCheck"]
     assert "passport_number" in check["conflicts"] and clash["status"] == "needs_review"
     assert "K1111111" not in str(clash["coverage"]) + str(clash["warnings"])
+
+
+def test_a_review_flag_of_the_reader_is_never_taken_for_the_aadhaar_number():
+    # The reader found no number on the card and flagged the field for review ("field_review": {"aadhaar_number": true}).
+    # That flag is not a value: it must not read as a number that disagrees with the one read locally.
+    number = hard.valid_aadhaar(14)
+    local = V.local_patterns("aadhaar", f"{number[:4]} {number[4:8]} {number[8:]}")
+    nothing = {"aadhaar": {"aadhaar_number": None, "masked_aadhaar_number": None},
+               "field_review": {"aadhaar_number": True, "name": None}, "needs_review": True}
+    out = V.cross_check(local, nothing)
+    assert out["conflicts"] == [] and out["local_only"] == ["aadhaar_number"]

@@ -46,8 +46,11 @@ globalThis.__dailyTable = {
 globalThis.__strip = await compile('screens/tasks/daily-stat-strip.tsx', { cn: 'globalThis.__cn', 'lucide-react': 'globalThis.__lucide' })
 const G = { 'daily-report-view': 'globalThis.__view', react: 'globalThis.__react', cn: 'globalThis.__cn', format: 'globalThis.__format', 'lucide-react': 'globalThis.__lucide', 'report-parts': 'globalThis.__parts', 'daily-table': 'globalThis.__dailyTable' }
 globalThis.__table = await compile('features/daily-report/report-table.tsx', G)
+globalThis.__sections = await compile('features/daily-report/report-sections.tsx', G)
+// The attendance panel is another file's job (it reads the server): a recognisable stand-in that records what it was given.
+globalThis.__attendance = { AttendancePanel: props => h('aside', { 'data-attendance': JSON.stringify(props, (key, value) => (typeof value === 'function' ? 'fn' : value)) }) }
 globalThis.__people = await compile('features/daily-report/report-people.tsx', G)
-const views = await compile('features/daily-report/report-views.tsx', { ...G, display: 'globalThis.__display', primitives: 'globalThis.__primitives', 'daily-stat-strip': 'globalThis.__strip', 'report-table': 'globalThis.__table', 'report-people': 'globalThis.__people' })
+const views = await compile('features/daily-report/report-views.tsx', { ...G, display: 'globalThis.__display', primitives: 'globalThis.__primitives', 'daily-stat-strip': 'globalThis.__strip', 'report-table': 'globalThis.__table', 'report-people': 'globalThis.__people', 'report-sections': 'globalThis.__sections', 'report-attendance': 'globalThis.__attendance' })
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/daily-work-report.json', import.meta.url), 'utf8'))
 const report = fixture.team
@@ -61,9 +64,11 @@ function render(View, overrides = {}) {
 const count = (html, pattern) => (html.match(pattern) || []).length
 const text = html => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim()
 const tileLabels = html => [...html.matchAll(/class="dwb-stat-label">([^<]*)</g)].map(m => m[1])
-const headings = html => [...html.slice(0, html.indexOf('Lead status now') < 0 ? html.length : html.indexOf('Lead status now')).matchAll(/<th scope="col"[^>]*>([^<]*)</g)].map(m => m[1])
+/** The two section tables of the Daily report (stages, lead status) have their own tests: the figure-table helpers below leave them out. */
+const withoutSections = html => html.replace(/<section[^>]*aria-label="(?:Task progress by stage|Lead sheet by status)"[\s\S]*?<\/section>/g, '')
+const headings = html => [...withoutSections(html).slice(0, html.indexOf('Lead status now') < 0 ? html.length : html.indexOf('Lead status now')).matchAll(/<th scope="col"[^>]*>([^<]*)</g)].map(m => m[1])
 /** The cells of every person row: the row heading plus its td cells. */
-const personRows = html => html.split('<tr class="dw-staff-row').slice(1).map(row => row.split('</tr>')[0]).map(row => count(row, /<th scope="row"/g) + count(row, /<td\b/g))
+const personRows = html => withoutSections(html).split('<tr class="dw-staff-row').slice(1).map(row => row.split('</tr>')[0]).map(row => count(row, /<th scope="row"/g) + count(row, /<td\b/g))
 
 test('Daily report: the client wording as tiles, in the client order, then Day closed; nothing printed under a number', () => {
   const html = render(views.DailyView)
@@ -73,7 +78,7 @@ test('Daily report: the client wording as tiles, in the client order, then Day c
   ])
   assert.equal(count(html, /class="dwb-stats has-4"/g), 2) // two rows of four, like the Tasks strip
   assert.equal(count(html, /class="dwb-stat-detail"/g), 0) // no caption line under any card
-  const t = text(html)
+  const t = text(html.slice(0, html.indexOf('aria-label="Task progress by stage"'))) // the tiles and the Team board: the sections below have their own tests
   assert.match(t, /Day closed 1 of 3/) // the value text stays in the number line, with its progress bar
   assert.ok(html.includes('class="dwb-meter"'))
   assert.ok(!/vs yesterday|no change|of 5 interviews|staff have submitted|Not submitted yet —/.test(t.replace(/\bNot submitted\b/g, '')), 'the captions are not printed')
@@ -109,7 +114,7 @@ test('Daily report table: short headings (full wording in the title), groups, av
   assert.equal(count(html, /data-tone="green"/g), 1) // Meera submitted
   assert.equal(count(html, /data-tone="amber"/g), 2) // Anil and Zoya have not
   assert.match(t, /Submitted 18:42/)
-  assert.ok(!/<th scope="row"[^>]*>Total/.test(html)) // the tiles are the total: no Total row
+  assert.ok(!/<th scope="row"[^>]*>Total/.test(withoutSections(html))) // the tiles are the total: no Total row
 })
 
 test('no footer sentences: the day-close names, the interviews note and the legends are not printed; two small links sit in the card header', () => {
@@ -117,7 +122,8 @@ test('no footer sentences: the day-close names, the interviews note and the lege
   const t = text(html)
   assert.ok(!/Day close:|were recorded without a mode|Counted when a stage|not submitted yet/i.test(t.replace(/Not submitted/g, '')), 'no footer notes')
   assert.equal(count(html, /<footer/g), 0)
-  const head = html.slice(html.indexOf('aria-label="Everyone&#x27;s figures"'), html.indexOf('<table'))
+  const from = html.indexOf('aria-label="Everyone&#x27;s figures"')
+  const head = html.slice(from, html.indexOf('<table', from))
   assert.match(head, /Show the interviews/)
   assert.match(head, /Submitted reports/)
   assert.match(head, /class="dwr-textlink" title="2 interviews were recorded without a mode and are not counted as online\."/)
@@ -348,7 +354,7 @@ test('By client card: below Everyone\'s figures, the same table style, hidden wh
   assert.match(t, /By client/)
   assert.ok(!/What was done for each client/.test(t), 'no subtitle')
   assert.ok(html.indexOf("aria-label=\"By client\"") > html.indexOf("aria-label=\"Everyone's figures\""))
-  const card = html.slice(html.indexOf('aria-label="By client"'))
+  const card = html.slice(html.indexOf('aria-label="By client"'), html.indexOf('aria-label="Lead sheet by status"'))
   assert.deepEqual([...card.matchAll(/<th scope="col"[^>]*>([^<]*)</g)].map(m => m[1]), ['Client', 'Forwarded', 'Prescreened', 'Shortlisted', 'Online interviews', 'Offers', 'Visas', 'Travelled', 'Total'])
   assert.match(text(card), /Al Noor Contracting[^G]*22/) // busiest first with its total
   assert.ok(text(card).indexOf('Al Noor') < text(card).indexOf('Gulf Build'))

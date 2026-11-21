@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { CalendarPlus, ChevronsDownUp, ChevronsUpDown, Download, FileCheck2, ListChecks, PhoneOff, RefreshCw, Search, ThumbsUp, Users, Upload, BellRing } from 'lucide-react'
+import { CalendarPlus, ChevronsDownUp, ChevronsUpDown, Download, FileCheck2, ListChecks, PhoneOff, RefreshCw, Search, ThumbsUp, Users, Upload } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { createFirstValueFilter } from '@/shared/lib/first-value'
 import { useStore } from '@/shared/state/crm-store'
@@ -237,11 +237,10 @@ export default function LeadsPage() {
 
   const fmt = (value?: number) => (value === undefined ? '–' : value.toLocaleString())
   const kpis = [
-    { label: 'Total leads', value: fmt(summary?.total), hint: summary?.scope === 'mine' ? 'Assigned to you' : 'Everyone who answered your ads', icon: Users, active: card === 'total', onSelect: () => pickCard('total') },
-    { label: NEW_CARD_LABEL, value: fmt(summary?.newToday), hint: NEW_CARD_DETAIL, icon: CalendarPlus, active: card === 'new_today', onSelect: () => pickCard('new_today') },
-    { label: 'Not contacted', value: fmt(summary?.uncontacted), hint: 'Nobody has called yet', icon: PhoneOff, tone: 'warn' as const, active: card === 'not_contacted', onSelect: () => pickCard('not_contacted') },
-    { label: 'Interested', value: fmt(summary ? summary.interested + summary.resumeReceived : undefined), hint: 'Said yes, or sent a resume', icon: ThumbsUp, tone: 'ok' as const, active: card === 'interested', onSelect: () => pickCard('interested') },
-    { label: 'Follow-ups due', value: fmt(summary?.followUpsDueMine), hint: 'Yours, due today or overdue', icon: BellRing, tone: 'warn' as const, active: card === 'follow_ups', onSelect: () => pickCard('follow_ups') },
+    { label: 'Total leads', value: fmt(summary?.total), detail: summary?.scope === 'mine' ? 'Assigned to you' : 'Everyone who answered your ads', icon: Users, active: card === 'total', onSelect: () => pickCard('total') },
+    { label: NEW_CARD_LABEL, value: fmt(summary?.newToday), detail: NEW_CARD_DETAIL, icon: CalendarPlus, active: card === 'new_today', onSelect: () => pickCard('new_today') },
+    { label: 'Not contacted', value: fmt(summary?.uncontacted), detail: 'Nobody has called yet', icon: PhoneOff, tone: 'warn' as const, active: card === 'not_contacted', onSelect: () => pickCard('not_contacted') },
+    { label: 'Interested', value: fmt(summary ? summary.interested + summary.resumeReceived : undefined), detail: 'Said yes, or sent a resume', icon: ThumbsUp, tone: 'ok' as const, active: card === 'interested', onSelect: () => pickCard('interested') },
   ]
 
   const neverUploaded = !data.loading && !data.error && total === 0 && !hasFilters && (summary?.total ?? 0) === 0
@@ -304,7 +303,6 @@ export default function LeadsPage() {
                 <button type="button" className="db-refresh" title="Refresh the list" aria-label="Refresh the list" onClick={refreshAll}><RefreshCw size={15} /></button>
                 {!showCards && <>
                   <button type="button" className="db-refresh" title={allOpen ? 'Collapse every row' : 'Expand every row to see all fields'} aria-label={allOpen ? 'Collapse all rows' : 'Expand all rows'} onClick={() => setExpanded(allOpen ? [] : rows.map((row) => row.id))}>{allOpen ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}</button>
-                  {fit.hidden > 0 && <span className="ld-hidden-pill" title={`${fit.hidden} ${fit.hidden === 1 ? 'column is' : 'columns are'} hidden to fit the screen. Choose Columns to show ${fit.hidden === 1 ? 'it' : 'them'}, or open a row to see every field.`}>+{fit.hidden} hidden</span>}
                   <ColumnMenu columns={menuColumns} groups={FIELD_GROUPS} hidden={fit.hidden} shown={shownKeys} choices={choices} onChange={setChoices} />
                 </>}
                 {!forceCards && <ViewToggle view={view} onChange={changeView} />}

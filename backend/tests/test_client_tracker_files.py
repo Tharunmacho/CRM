@@ -42,19 +42,19 @@ def _rows() -> list[dict]:
         app_id, candidate = f"a{n:03d}", f"c{n:03d}"
         found.append((app_id, candidate, stage, Status("deployed" if deployed else "active"), name, agency, client, country, f"o{client}",
                       "REF", country, job))
-        if status or amount or total:    # the placement's stage-9 record: advance status, amount, total service charge
+        if status or amount or total:    # the placement's stage-6 record: advance status, amount, total service charge
             data = {k: v for k, v in (("advanceStatus", status), ("amount", amount), ("serviceChargeTotal", total)) if v is not None}
-            stages.append((app_id, 9, 1, None, amount, "INR" if amount else None, data))
+            stages.append((app_id, 6, 1, None, amount, "INR" if amount else None, data))
         if remark:
             remarks.append((app_id, candidate, remark))
         if travel:
-            stages.append((app_id, 12, 1, None, None, None, {"travelDate": travel}))
+            stages.append((app_id, 13, 1, None, None, None, {"travelDate": travel}))
 
-    add("Aldhow", "Kabil", "Rigger", "Asian tech", 11, True, travel="2026-11-11", remark="Travelled")
-    add("Aldhow", "Elumalai", "Helper", "Admire", 11, True, travel="2026-11-22")
-    add("Aldhow", "Sanjay", "Elect engineer", "care", 11, True, travel="2026-11-01")
-    add("Aldhow", "Sakthi", "Fitter", "Admire", 11, True, travel="2026-11-03")
-    add("Aldhow", "Durgeshwaran", "Fitter", "Admire", 11, True)
+    add("Aldhow", "Kabil", "Rigger", "Asian tech", 13, True, travel="2026-11-11", remark="Travelled")
+    add("Aldhow", "Elumalai", "Helper", "Admire", 13, True, travel="2026-11-22")
+    add("Aldhow", "Sanjay", "Elect engineer", "care", 13, True, travel="2026-11-01")
+    add("Aldhow", "Sakthi", "Fitter", "Admire", 13, True, travel="2026-11-03")
+    add("Aldhow", "Durgeshwaran", "Fitter", "Admire", 13, True)
     add(LONG_CLIENT, "Ahmed Al-Qahtani", "Senior Heavy Equipment Maintenance Supervisor (Diesel & Hydraulics)", "Shajahan", 3,
         remark=TRICKY, country="Saudi Arabia")
     add("Ammachi", "Tarun", "ITC Chef", "Shajahan", 10, status="collected", amount=20000, total=55000, remark='=HYPERLINK("http://x","y")+1', country="Sri lanka")

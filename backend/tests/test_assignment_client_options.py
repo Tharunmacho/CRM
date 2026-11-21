@@ -53,7 +53,7 @@ def test_one_client_option_combines_every_company_and_retains_unavailable_job_st
 def test_deployed_placement_of_inactive_client_is_retained_with_empty_active_clients(desk):
     application_id = mapped(desk)
     with desk.sessions() as db:
-        db.execute(update(Application).where(Application.id == application_id).values(status=ApplicationStatus.deployed, current_stage=12))
+        db.execute(update(Application).where(Application.id == application_id).values(status=ApplicationStatus.deployed, current_stage=13))
         db.execute(update(Order).values(status=OrderStatus.filled))
         db.execute(update(Client).where(Client.id == "client").values(status="inactive"))
         db.add(Client(id="empty", name="Empty active client"))

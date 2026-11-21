@@ -162,10 +162,10 @@ test('the input: always visible for people who may work the candidate, Enter sav
   assert.match(table, /\{typing && \(/, 'a read-only person sees the notes without the input')
 })
 
-test('the styles: no second line under the remark, the list is at most 168px and scrolls, the card variant is larger', async () => {
+test('the styles: no second line under the remark, the list is at most 260px and scrolls, the card variant is larger', async () => {
   const css = await read('../src/styles/tasks-table.css')
   assert.doesNotMatch(css, /has-notes|tw-remark-notes|tw-notes-more/)
-  assert.match(css, /\.tw-note-list \{[^}]*max-height: 168px[^}]*overflow-y: auto/)
+  assert.match(css, /\.tw-note-list \{[^}]*max-height: 260px[^}]*overflow-y: auto/)
   assert.match(css, /\.tw-note-input \{[^}]*min-height: 32px/)
   assert.match(css, /\.tw-note-body \{[^}]*overflow-wrap: break-word/)
   assert.match(css, /td\[data-label='NOTES'\] \{ grid-column: 1 \/ -1; \}/)

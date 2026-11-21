@@ -9,7 +9,7 @@
 .cp :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* ================================================================== 12-stage tracker */
-.sr { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
+.sr { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; margin: 0; padding: 0; list-style: none; }
 .sr-seg { min-width: 0; height: 6px; border-radius: 3px; background: var(--tint-3); transition: background-color .14s; }
 .sr-seg.is-done { background: color-mix(in srgb, var(--primary) 42%, var(--bg-card)); }
 .sr-seg.is-now { background: var(--primary); }

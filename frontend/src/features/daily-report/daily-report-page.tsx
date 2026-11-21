@@ -75,9 +75,12 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error])
 
-  // The Team cards and the recruiter filter always list everyone: the last answer for all recruiters is kept while one person is picked.
+  // The recruiter filter always lists everyone (the Team board and the table show only the picked person): the last answer for all recruiters is kept
+  // while one person is picked. Opened straight on one person (a link), there is none yet, so everyone is read once, quietly, for the filter's list.
   const everyone = useRef<StaffRow[]>([])
   if (data && state.current && query.staff === 'all' && scope === 'team') everyone.current = data.staff
+  const rosterRead = useDailyReport({ ...query, staff: 'all', client: 'all' }, store.me.id, supervisor && query.staff !== 'all' && everyone.current.length === 0)
+  if (rosterRead.data && rosterRead.current && rosterRead.data.scope === 'team' && everyone.current.length === 0) everyone.current = rosterRead.data.staff
   const roster = everyone.current.length ? everyone.current : data?.staff ?? []
   const clients = useRef(new Map<string, string>())
   if (data) for (const row of data.clients) clients.current.set(row.id, row.name)

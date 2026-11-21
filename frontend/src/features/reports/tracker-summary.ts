@@ -1,9 +1,9 @@
 import type { TrackerRow } from './client-tracker-model'
 
-/** The stages a recruiter waits on, as the Dashboard card names them (stage numbers are those of the Client tracker, 1 to 12). */
+/** The stages a recruiter waits on, as the Dashboard card names them (stage numbers are those of the Client tracker, 1 to 13). */
 export const WAITING_STAGES: readonly { no: number; label: string }[] = [
-  { no: 5, label: 'Offer' }, { no: 6, label: 'Medical' }, { no: 7, label: 'PCC' }, { no: 8, label: 'Passport' }, { no: 9, label: 'Advance' },
-  { no: 10, label: 'Visa' }, { no: 11, label: 'Stamp' }, { no: 12, label: 'Air ticket' },
+  { no: 5, label: 'Offer' }, { no: 6, label: 'Advance' }, { no: 7, label: 'Passport' }, { no: 8, label: 'Medical' }, { no: 9, label: 'PCC' },
+  { no: 10, label: 'Visa' }, { no: 11, label: 'Review' }, { no: 12, label: 'Stamp' }, { no: 13, label: 'Air ticket' },
 ]
 
 export interface TrackerSummary { total: number; inProgress: number; travelled: number; waiting: { no: number; label: string; count: number }[] }

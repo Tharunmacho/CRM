@@ -19,13 +19,13 @@ from test_database_naming import schema_database  # noqa: F401
 ADVANCE = [
     (4, {"result": "selected", "remarks": "Client approved"}, "Selected"),
     (5, {"result": "agreed"}, "Agreed"),
-    (6, {"applied": "yes", "result": "fit"}, "Fit"),
+    (8, {"applied": "yes", "result": "fit"}, "Fit"),
 ]
 STOP = [
     (4, {"result": "rejected", "remarks": "Client chose someone else"}, "Rejected", "interview_rejected"),
     (5, {"result": "declined"}, "Declined", "offer_declined"),
     (5, {"result": "not_received"}, "Not received", "offer_not_received"),
-    (6, {"applied": "yes", "result": "unfit"}, "Unfit", "medical_unfit"),
+    (8, {"applied": "yes", "result": "unfit"}, "Unfit", "medical_unfit"),
 ]
 
 
@@ -80,13 +80,13 @@ def test_every_other_answer_stops_the_candidate_at_that_stage(workflow, stage, d
     assert mapped(env, order="other-order") != app_id
 
 
-@pytest.mark.parametrize(("stage", "label"), [(4, "Interview result"), (5, "Offer letter result"), (6, "Medical result")])
+@pytest.mark.parametrize(("stage", "label"), [(4, "Interview result"), (5, "Offer letter result"), (8, "Medical result")])
 def test_the_api_refuses_to_move_a_decision_stage_without_the_choice(workflow, stage, label):
     env = workflow
     app_id = mapped(env)
     reach(env, app_id, stage)
     lock = version(env, app_id)
-    for data in ({"feedback": "Recruiter note."}, {"feedback": "Recruiter note.", "applied": "yes"} if stage == 6 else {"feedback": "Recruiter note."}):
+    for data in ({"feedback": "Recruiter note."}, {"feedback": "Recruiter note.", "applied": "yes"} if stage == 8 else {"feedback": "Recruiter note."}):
         response = post_complete(env, app_id, data)
         assert response.status_code == 422
         detail = response.json()["detail"]
@@ -106,7 +106,7 @@ def test_an_older_offer_answer_cannot_move_the_stage(workflow):
 
 @pytest.mark.parametrize(("stage", "data"), [(4, {"result": "selected"}), (4, {"result": "rejected"}), (5, {"result": "agreed"}),
                                              (5, {"result": "declined"}), (5, {"result": "not_received"}),
-                                             (6, {"result": "fit"}), (6, {"result": "unfit"})])
+                                             (8, {"result": "fit"}), (8, {"result": "unfit"})])
 @pytest.mark.parametrize("feedback", [None, "", "   \n"])
 def test_each_choice_needs_written_feedback(workflow, stage, data, feedback):
     env = workflow
@@ -121,7 +121,7 @@ def test_each_choice_needs_written_feedback(workflow, stage, data, feedback):
         assert db.get(Application, app_id).status == ApplicationStatus.active and db.get(Application, app_id).current_stage == stage
 
 
-@pytest.mark.parametrize(("stage", "data"), [(4, {"result": "maybe"}), (5, {"result": "accepted"}), (5, {"result": "obtained"}), (6, {"result": "pending"})])
+@pytest.mark.parametrize(("stage", "data"), [(4, {"result": "maybe"}), (5, {"result": "accepted"}), (5, {"result": "obtained"}), (8, {"result": "pending"})])
 def test_only_the_listed_choices_are_accepted(workflow, stage, data):
     env = workflow
     app_id = mapped(env)
@@ -133,16 +133,16 @@ def test_only_the_listed_choices_are_accepted(workflow, stage, data):
 def test_unfit_with_a_planned_retest_stays_on_the_stage_and_never_advances(workflow):
     env = workflow
     app_id = mapped(env)
-    reach(env, app_id, 6)
+    reach(env, app_id, 8)
     result = complete(env, app_id, {"applied": "yes", "appliedDate": "2026-11-02", "result": "unfit", "reapplying": "yes", "retestDate": "2026-11-09"})
-    assert result["status"] == "active" and result["currentStage"] == 6
+    assert result["status"] == "active" and result["currentStage"] == 8
     # A retest without its date is not a decision to wait.
     assert post_complete(env, app_id, {"feedback": "Retest.", "result": "unfit", "reapplying": "yes"}).status_code == 422
     # Unfit again, this time stopping.
     assert complete(env, app_id, {"applied": "yes", "result": "unfit"})["closureReason"] == "medical_unfit"
 
 
-@pytest.mark.parametrize(("stage", "data"), [(4, {"result": "rejected"}), (5, {"result": "declined"}), (6, {"result": "unfit"})])
+@pytest.mark.parametrize(("stage", "data"), [(4, {"result": "rejected"}), (5, {"result": "declined"}), (8, {"result": "unfit"})])
 def test_only_the_assigned_recruiter_manager_or_admin_can_record_a_decision(workflow, stage, data):
     env = workflow
     app_id = mapped(env)
@@ -163,7 +163,7 @@ def test_only_the_assigned_recruiter_manager_or_admin_can_record_a_decision(work
     (4, {"result": "rejected"}, {"result": "selected"}, "Selected"),
     (5, {"result": "not_received"}, {"result": "agreed"}, "Agreed"),
     (5, {"result": "declined"}, {"result": "agreed"}, "Agreed"),
-    (6, {"result": "unfit"}, {"result": "fit"}, "Fit"),
+    (8, {"result": "unfit"}, {"result": "fit"}, "Fit"),
 ])
 def test_only_an_admin_can_reopen_a_stopped_stage_and_it_needs_a_fresh_answer(workflow, stage, data, again, outcome):
     env = workflow

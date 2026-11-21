@@ -133,16 +133,16 @@ class ClosureReason(str, enum.Enum):
     offer_declined = "offer_declined"  # stage 5: the candidate declined the offer (migration 0042)
     offer_not_received = "offer_not_received"  # stage 5: the offer letter never came (migration 0042)
     # The stopping exit every stage offers (migration 0043): Rejected / Declined at any of stages 1-11 and the stage-specific ones.
-    # Migration 0048 inserted PCC as stage 7, so the stages named below are the numbers after it.
+    # Stage numbers named below are those of the current order (see domain/stages.py; migration 0056 reordered them).
     stage_rejected = "stage_rejected"
     stage_declined = "stage_declined"
     interview_not_possible = "interview_not_possible"  # stage 3
-    passport_not_available = "passport_not_available"  # stage 8
-    advance_not_paid = "advance_not_paid"  # stage 9
+    passport_not_available = "passport_not_available"  # stage 7
+    advance_not_paid = "advance_not_paid"  # stage 6
     visa_rejected = "visa_rejected"  # stage 10
-    visa_stamping_refused = "visa_stamping_refused"  # stage 11
-    not_travelling = "not_travelling"  # stage 12: cancelled or declined before departure; never deploys
-    pcc_not_cleared = "pcc_not_cleared"  # stage 7 (migration 0048): the police clearance certificate was refused or cannot be had
+    visa_stamping_refused = "visa_stamping_refused"  # stage 12
+    not_travelling = "not_travelling"  # stage 13: cancelled or declined before departure; never deploys
+    pcc_not_cleared = "pcc_not_cleared"  # stage 9 (migration 0048): the police clearance certificate was refused or cannot be had
 
 
 class TaskKind(str, enum.Enum):
@@ -545,7 +545,7 @@ class Attachment(Base, PkMixin):
     Every uploaded file, for any record.
 
     One table rather than one per owner: a client agreement, a candidate's passport scan
-    and a stage 9 receipt differ only in what they hang off. Nothing is overwritten —
+    and a stage 6 receipt differ only in what they hang off. Nothing is overwritten —
     replacing a file writes the next version and the history stays readable.
     """
 
@@ -648,7 +648,7 @@ class ApplicationStage(Base, PkMixin):
     data: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
     outcome: Mapped[str | None] = mapped_column(String(60))
-    amount: Mapped[float | None] = mapped_column(Numeric(12, 2))  # stage 9 (advance), for reports
+    amount: Mapped[float | None] = mapped_column(Numeric(12, 2))  # stage 6 (advance), for reports
     # The advance has its own currency — it is collected in India while the salary is
     # paid abroad, so it cannot be assumed to match the order's.
     amount_currency: Mapped[str | None] = mapped_column(String(8))

@@ -11,26 +11,26 @@ const load = async (path) => {
 const { stageByNo, fieldVisible } = await load('../src/shared/workflow/stages.ts')
 const { advanceStatusOf, advanceSummary, shortAmount, withAdvanceStatus } = await load('../src/shared/workflow/advance.ts')
 const feedback = 'Spoke to the candidate about the advance.'
-const stage9 = stageByNo(9)
+const stage6 = stageByNo(6)
 
-test('stage 9 offers the status, the amount and an optional total service charge, in that order', () => {
-  const names = stage9.fields.map((field) => field.name)
+test('stage 6 offers the status, the amount and an optional total service charge, in that order', () => {
+  const names = stage6.fields.map((field) => field.name)
   assert.deepEqual(names.slice(0, 4), ['feedback', 'advanceStatus', 'amount', 'serviceChargeTotal'])
-  const status = stage9.fields.find((field) => field.name === 'advanceStatus')
+  const status = stage6.fields.find((field) => field.name === 'advanceStatus')
   assert.deepEqual(status.options, [{ value: 'collected', label: 'Collected' }, { value: 'pending', label: 'Pending' }])
-  assert.equal(stage9.fields.find((field) => field.name === 'serviceChargeTotal').label, 'Total service charge (optional)')
-  assert.equal(stage9.fields.find((field) => field.name === 'serviceChargeTotal').required, false)
+  assert.equal(stage6.fields.find((field) => field.name === 'serviceChargeTotal').label, 'Total service charge (optional)')
+  assert.equal(stage6.fields.find((field) => field.name === 'serviceChargeTotal').required, false)
 })
 
 test('the amounts show for both statuses, the payment details only for a collected advance', () => {
-  const shown = (data) => stage9.fields.filter((field) => fieldVisible(field, data)).map((field) => field.name)
+  const shown = (data) => stage6.fields.filter((field) => fieldVisible(field, data)).map((field) => field.name)
   assert.deepEqual(shown({}), ['feedback', 'advanceStatus'])
   assert.deepEqual(shown({ advanceStatus: 'pending' }), ['feedback', 'advanceStatus', 'amount', 'serviceChargeTotal', 'amountCurrency'])
   assert.deepEqual(shown({ advanceStatus: 'collected' }), ['feedback', 'advanceStatus', 'amount', 'serviceChargeTotal', 'amountCurrency', 'date', 'mode', 'receiptNo', 'receipt'])
 })
 
-test('nothing new is required to complete stage 9, and the outcome names the status', () => {
-  const run = (data) => stage9.evaluate({ feedback, ...data })
+test('nothing new is required to complete stage 6, and the outcome names the status', () => {
+  const run = (data) => stage6.evaluate({ feedback, ...data })
   assert.equal(run({}).outcome, 'Completed manually')
   assert.equal(run({ collected: 'yes', amount: 20 }).outcome, 'Collected')
   assert.equal(run({ advanceStatus: 'collected' }).outcome, 'Collected')
@@ -40,7 +40,7 @@ test('nothing new is required to complete stage 9, and the outcome names the sta
 })
 
 test('the amounts must be positive, and the total can never be below the advance', () => {
-  const run = (data) => stage9.evaluate({ feedback, ...data })
+  const run = (data) => stage6.evaluate({ feedback, ...data })
   for (const data of [{ serviceChargeTotal: -5 }, { serviceChargeTotal: 0.001 }, { serviceChargeTotal: true }, { advanceStatus: 'later' }]) {
     assert.equal(run(data).canComplete, false, JSON.stringify(data))
   }

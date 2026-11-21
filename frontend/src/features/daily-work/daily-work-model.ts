@@ -50,7 +50,7 @@ export interface DailyItem {
   advanceAmount: number | null
   /** The currency the advance was recorded in (INR unless another was chosen); null with no advance. */
   advanceCurrency: string | null
-  /** Stage 10 Google review: obtained, pending (stage 10 or later, not obtained yet) or null (not applicable yet). */
+  /** Stage 11 Google review: obtained, pending (stage 11 or later, not obtained yet) or null (not applicable yet). */
   googleReview: GoogleReview
   referral: { source: string; label: string; detail: string | null }
   /** The recorded agency, or null. Older servers may omit this field. */
@@ -150,7 +150,7 @@ export interface FollowUpItem {
   advanceAmount: number | null
   /** The currency the advance was recorded in (INR unless another was chosen); null with no advance. */
   advanceCurrency: string | null
-  /** Stage 10 Google review: obtained, pending (stage 10 or later, not obtained yet) or null (not applicable yet). */
+  /** Stage 11 Google review: obtained, pending (stage 11 or later, not obtained yet) or null (not applicable yet). */
   googleReview: GoogleReview
   /** ALL the candidate's notes (typed in the NOTES column; every day, newest first, at most 100). A note is never the remark. Older servers send none. */
   notes?: DailyNote[]
@@ -557,6 +557,28 @@ export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
 /** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own); `roomForToday` keeps the TODAY column. */
 export const taskColumnsFor = (supervisor: boolean, roomForToday = true): TaskColumn[] =>
   TASK_LIST_COLUMNS.filter((column) => (supervisor || !column.supervisor) && (roomForToday || !column.roomy))
+
+/**
+ * Remarks and Notes are what people read and write on this list, so they get ALL the room the panel has beyond the minimum plan (the columns above
+ * are each their longest word and no less): the spare pixels go to REMARKS and NOTES (2 : 3), up to REMARKS_MAX / NOTES_MAX px, and only what is
+ * left after that is spread over every column. On a panel at or below the plan nothing changes: every column keeps its measured width.
+ * Returns each column's width in px for a panel `panelWidth` px wide (0 = not measured yet: the plan as it is).
+ */
+export const REMARKS_MAX = 240
+export const NOTES_MAX = 330
+export function widthsWithSpare(columns: readonly TaskColumn[], panelWidth: number): Record<string, number> {
+  const widths: Record<string, number> = Object.fromEntries(columns.map((column) => [column.key, column.width]))
+  const plan = columns.reduce((total, column) => total + column.width, 0)
+  const spare = panelWidth > plan ? panelWidth - plan : 0
+  if (spare <= 0) return widths
+  const hasRemarks = 'remarks' in widths
+  const hasNotes = 'notes' in widths
+  if (hasRemarks && hasNotes) {
+    widths.remarks += Math.min(Math.floor(spare * 0.4), REMARKS_MAX - widths.remarks)
+    widths.notes += Math.min(Math.floor(spare * 0.6), NOTES_MAX - widths.notes)
+  } else if (hasNotes) widths.notes += Math.min(spare, NOTES_MAX - widths.notes)
+  return widths
+}
 
 /** The plan's width in px for one person's columns: the panel width from which they all keep their measured room. */
 export const taskPlanWidth = (supervisor: boolean, roomForToday: boolean): number => taskColumnsFor(supervisor, roomForToday).reduce((total, column) => total + column.width, 0)

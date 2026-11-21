@@ -521,8 +521,10 @@ def test_a_chunk_that_does_not_cover_its_pages_needs_review_and_is_restarted_on_
 
     output = world.extract(data)
 
-    assert output["status"] == "needs_review" and output["extractions"] == {}
-    assert any("did not cover every selected page" in w for w in output["warnings"])
+    # What the chunks that were read gave is kept and applied (never the whole answer thrown away); the file is flagged.
+    assert output["status"] == "needs_review" and output["extractions"]["resume"]["fields"]
+    assert any("answered for only part of the resume pages" in w for w in output["warnings"])
+    assert not any("No fields from it were applied" in w for w in output["warnings"])
     state = world.saved[-1]
     assert state["provider_jobs"]["resume"]["chunks"][1]["coverage_status"] == "needs_review"
     # Automatic retries leave a paid but incomplete result for an operator; an explicit retry resends that chunk only.

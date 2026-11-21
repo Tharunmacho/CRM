@@ -161,7 +161,7 @@ class CandidateOut(Wire):
     id: str
     ref: str
     care_id: str | None = None
-    # Second, separate series: CI-T-001, set when the candidate travels (stage 12 completed). Null until then.
+    # Second, separate series: CI-T-001, set when the candidate travels (stage 13, the air ticket, completed). Null until then.
     traveller_id: str | None = None
     name: str
     phone: str

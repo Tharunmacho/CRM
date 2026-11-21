@@ -76,10 +76,10 @@ class World:
         return candidate
 
     def stage8(self, key, amount=None, attempt=1, currency="INR", reopened=None, status="collected", total=None, **extra):
-        """A stage-9 record the way the form saves it; `status=None` leaves advanceStatus out (a record from before it existed)."""
+        """A stage-6 record the way the form saves it; `status=None` leaves advanceStatus out (a record from before it existed)."""
         data = {k: v for k, v in (("advanceStatus", status), ("amount", None if amount is None else float(amount)),
                                   ("serviceChargeTotal", total)) if v is not None}
-        self.db.add(ApplicationStage(application_id=f"a-{key}", stage=9, attempt=attempt, completed_by="admin", amount=amount,
+        self.db.add(ApplicationStage(application_id=f"a-{key}", stage=6, attempt=attempt, completed_by="admin", amount=amount,
                                      amount_currency=currency if amount else None, reopened_reason=reopened, data={**data, **extra}))
 
     def remark(self, key, body, when, kind=TaskKind.stage, application=True, task=None):
@@ -91,7 +91,7 @@ class World:
         self.db.add(Remark(task_id=task_id, body=body, author_id="staff", created_at=when))
 
     def travel(self, key, travel_date, attempt=1, reopened=None):
-        self.db.add(ApplicationStage(application_id=f"a-{key}", stage=12, attempt=attempt, completed_by="admin", reopened_reason=reopened,
+        self.db.add(ApplicationStage(application_id=f"a-{key}", stage=13, attempt=attempt, completed_by="admin", reopened_reason=reopened,
                                      data={"travelDate": travel_date}))
 
     def commit(self):
@@ -140,8 +140,8 @@ def test_only_the_right_placements_one_row_each_in_sheet_order(world):
     w.place("notint", "Not Interested", company="Alpha", cand_status=CandidateStatus.not_interested)         # excluded
     w.place("declined", "Declined Person", company="Alpha", status="closed", reason=ClosureReason.stage_declined)
     w.place("rejected", "Rejected Person", company="Alpha", status="closed", reason=ClosureReason.stage_rejected)
-    w.place("notrav", "Not Travelling", company="Alpha", status="closed", reason=ClosureReason.not_travelling, stage=12)
-    w.place("dep", "Deployed Person", company="Alpha", status="deployed", stage=12, cand_status=CandidateStatus.deployed)
+    w.place("notrav", "Not Travelling", company="Alpha", status="closed", reason=ClosureReason.not_travelling, stage=13)
+    w.place("dep", "Deployed Person", company="Alpha", status="deployed", stage=13, cand_status=CandidateStatus.deployed)
     w.place("nullowner", "Ownerless", company="Alpha", owner=None)
     # a candidate with an old closed placement and a current one: one row for the current only
     old = w.place("hist-new", "History Person", company="Alpha", ref="ORD-5", stage=6)
@@ -213,8 +213,8 @@ def test_advance_cells_through_the_database(world):
     w.stage8("reopened", 20000, attempt=2, total=40000)
     w.place("reopened_only", "reopened_only")    # the only record was reopened: nothing recorded
     w.stage8("reopened_only", 10000, attempt=1, reopened="redo")
-    w.place("norecord", "norecord")              # no stage-9 record at all
-    w.place("invoiced", "invoiced")              # an invoice or receipt does not count: only stage 9 speaks
+    w.place("norecord", "norecord")              # no stage-6 record at all
+    w.place("invoiced", "invoiced")              # an invoice or receipt does not count: only stage 6 speaks
     w.db.execute(text("INSERT INTO crm_candidate_invoices (id, candidate_id, application_id, scope_key, service_fee, status, lock_version, created_at, updated_at) "
                       "VALUES ('i1', 'c-invoiced', 'a-invoiced', 'a-invoiced', 20000, 'pending_fee', 0, now(), now())"))
     w.db.execute(text("INSERT INTO crm_invoice_payments (id, invoice_id, amount, paid_on, method, idempotency_key, reference, note, created_at) "
@@ -261,7 +261,7 @@ def test_travelled_wording_for_every_ordinal(world):
     days = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 11: "11th", 12: "12th", 13: "13th", 21: "21st", 22: "22nd", 23: "23rd", 30: "30th", 31: "31st"}
     for day in days:
         w = world
-        w.place(f"d{day}", f"Day {day:02d}", status="deployed", stage=12, ref=f"ORD-{day:02d}")
+        w.place(f"d{day}", f"Day {day:02d}", status="deployed", stage=13, ref=f"ORD-{day:02d}")
         w.travel(f"d{day}", f"2026-12-{day:02d}")
     world.commit()
     rows = world.rows()
@@ -271,22 +271,22 @@ def test_travelled_wording_for_every_ordinal(world):
 
 def test_travel_date_rules_in_the_database(world):
     w = world
-    w.place("none", "No Stage 12", status="deployed", stage=12)                          # deployed with no stage-12 record at all
-    w.place("bad", "Bad Date", status="deployed", stage=12, ref="ORD-2")
+    w.place("none", "No Stage 13", status="deployed", stage=13)                          # deployed with no stage-13 record at all
+    w.place("bad", "Bad Date", status="deployed", stage=13, ref="ORD-2")
     w.travel("bad", "2026-02-30")                                                         # not a real day
-    w.place("garbage", "Garbage Date", status="deployed", stage=12, ref="ORD-3")
+    w.place("garbage", "Garbage Date", status="deployed", stage=13, ref="ORD-3")
     w.travel("garbage", "11/11/2026")
-    w.place("redo", "Reopened Travel", status="deployed", stage=12, ref="ORD-4")
+    w.place("redo", "Reopened Travel", status="deployed", stage=13, ref="ORD-4")
     w.travel("redo", "2026-01-01", attempt=1, reopened="redo")
     w.travel("redo", "2026-03-04", attempt=2)
-    w.place("number", "Number Date", status="deployed", stage=12, ref="ORD-5")
-    w.db.add(ApplicationStage(application_id="a-number", stage=12, attempt=1, completed_by="admin", data={"travelDate": 20261111}))
+    w.place("number", "Number Date", status="deployed", stage=13, ref="ORD-5")
+    w.db.add(ApplicationStage(application_id="a-number", stage=13, attempt=1, completed_by="admin", data={"travelDate": 20261111}))
     w.commit()
     rows = w.rows()
-    assert rows["No Stage 12"]["stage"] == "Travelled" and rows["Bad Date"]["stage"] == "Travelled"
+    assert rows["No Stage 13"]["stage"] == "Travelled" and rows["Bad Date"]["stage"] == "Travelled"
     assert rows["Garbage Date"]["stage"] == "Travelled" and rows["Number Date"]["stage"] == "Travelled"
     assert rows["Reopened Travel"]["stage"] == "Travelled on 4th MAR 2026"
-    assert rows["No Stage 12"]["remarks"] == "Travelled"
+    assert rows["No Stage 13"]["remarks"] == "Travelled"
 
 
 def test_remarks_one_line_newest_wins_and_unicode(world):
@@ -294,7 +294,7 @@ def test_remarks_one_line_newest_wins_and_unicode(world):
     w.place("r", "Tamil Name தமிழ்", agency="Ünï Agency")
     w.remark("r", "older", datetime(2026, 11, 1, tzinfo=timezone.utc))
     w.remark("r", "  line one\r\nline two,\t\"quoted\"  \n\n  =SUM(A1)  வணக்கம்  ", datetime(2026, 11, 9, tzinfo=timezone.utc))
-    w.place("dep", "Deployed Remark", status="deployed", stage=12, ref="ORD-2")
+    w.place("dep", "Deployed Remark", status="deployed", stage=13, ref="ORD-2")
     w.travel("dep", "2026-11-03")
     w.remark("dep", "Landed safely", datetime(2026, 11, 8, tzinfo=timezone.utc))
     w.place("first", "First Stage", stage=1, ref="ORD-3")
@@ -337,23 +337,23 @@ def test_filters_in_the_database(world):
     w = world
     w.place("a", "Aa", company="Alpha", agency="Sigma", stage=3, country="UAE")
     w.place("b", "Bb", company="Alpha Two", agency="sigma ", stage=3, ref="ORD-2")
-    w.place("c", "Cc", company="Beta", agency="Sigma Group", stage=12, ref="ORD-3")
-    w.place("d", "Dd", company="Beta", status="deployed", stage=12, ref="ORD-3", agency="Sigma")
+    w.place("c", "Cc", company="Beta", agency="Sigma Group", stage=13, ref="ORD-3")
+    w.place("d", "Dd", company="Beta", status="deployed", stage=13, ref="ORD-3", agency="Sigma")
     w.commit()
     assert sorted(w.rows(client="ALPHA")) == ["Aa"]                       # exact, not a prefix
     assert sorted(w.rows(client="  alpha  ")) == ["Aa"]
     assert sorted(w.rows(agency="SIGMA")) == ["Aa", "Bb", "Dd"]
     assert sorted(w.rows(country="uae")) == ["Aa"]
     assert sorted(w.rows(country="Kuwait")) == ["Bb", "Cc", "Dd"]
-    assert sorted(w.rows(stage=12)) == ["Cc"]                              # in progress at the ticket stage, not the travelled one
+    assert sorted(w.rows(stage=13)) == ["Cc"]                              # in progress at the ticket stage, not the travelled one
     assert sorted(w.rows(stage=3)) == ["Aa", "Bb"]
     assert sorted(w.rows(include_travelled="false")) == ["Aa", "Bb", "Cc"]
     assert [r["sNo"] for r in w.get(stage=3)["rows"]] == [1, 2]
-    for bad in (0, 13, -1, 99):
+    for bad in (0, 14, -1, 99):
         assert w.client.get("/api/reports/client-tracker", params={"stage": bad}).status_code == 422, bad
     assert w.client.get("/api/reports/client-tracker", params={"stage": "x"}).status_code == 422
     assert w.client.get("/api/reports/client-tracker", params={"format": "pdf"}).status_code == 422
-    for number in range(1, 13):
+    for number in range(1, 14):
         assert w.client.get("/api/reports/client-tracker", params={"stage": number}).status_code == 200
     # the pickers do not shrink with the filter
     assert w.get(client="Alpha")["options"]["clients"] == ["Alpha", "Alpha Two", "Beta"]
@@ -396,19 +396,19 @@ def test_kept_answers_never_cross_roles_and_every_source_drops_them(world, kept)
             connection.execute(text(sql), params)
         return w.rows()
 
-    assert changed("UPDATE crm_applications SET current_stage = 6 WHERE id = 'a-p'")["Kept Person"]["stage"] == "Medical in progress"
-    # a stage-9 record
+    assert changed("UPDATE crm_applications SET current_stage = 8 WHERE id = 'a-p'")["Kept Person"]["stage"] == "Medical in progress"
+    # a stage-6 record
     with w.engine.begin() as connection:
         connection.execute(text("UPDATE crm_application_stages SET data = '{\"advanceStatus\": \"collected\", \"amount\": 3000, \"serviceChargeTotal\": 12500}', amount = 3000 "
-                                "WHERE application_id = 'a-p' AND stage = 9"))
+                                "WHERE application_id = 'a-p' AND stage = 6"))
     assert w.rows()["Kept Person"]["advance"] == "3k collected/12.5k"
     # a remark
     with w.engine.begin() as connection:
         connection.execute(text("INSERT INTO workflow_tasks (id, kind, title, candidate_id, application_id, stage, owner_id, escalated) "
-                                "VALUES ('tt', 'stage', 'T', 'c-p', 'a-p', 6, 'staff', false)"))
+                                "VALUES ('tt', 'stage', 'T', 'c-p', 'a-p', 8, 'staff', false)"))
         connection.execute(text("INSERT INTO workflow_task_remarks (id, task_id, body, author_id, created_at) VALUES ('rr', 'tt', 'fresh note', 'staff', now())"))
     assert w.rows()["Kept Person"]["remarks"] == "fresh note"
-    # a stage-9 record, a company rename, the candidate's agency
+    # a stage-6 record, a company rename, the candidate's agency
     with w.engine.begin() as connection:
         connection.execute(text("UPDATE crm_employer_companies SET name = 'Renamed' WHERE id = 'co0'"))
     assert w.rows()["Kept Person"]["client"] == "Renamed"

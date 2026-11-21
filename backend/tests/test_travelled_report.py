@@ -1,5 +1,6 @@
 """Travelled candidates report: filters, totals, agency, visibility, undated placements and the export (disposable PostgreSQL)."""
 import csv
+from datetime import date
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -23,7 +24,7 @@ SETTINGS = SimpleNamespace(database_url="postgresql+psycopg://unused@127.0.0.1:1
 with patch("app.core.config.get_settings", return_value=SETTINGS):
     from app.api.routers import travelled as subject
 
-# (candidate, company, order country, travel date or None, source, agency, recruiter, status, extra stage-11 data)
+# (candidate, company, order country, travel date or None, source, agency, recruiter, status, extra stage-13 data)
 PLACEMENTS = [
     ("Akash Murugesan", "cms", "UAE", "2026-05-09", Source.referral, "Star Agency", "staff", "deployed", {"airline": "Air Arabia G9472", "pnr": "6ZA8JH"}),
     ("Arun Kumar", "cms", "UAE", "2026-05-12", Source.referral, "Star Agency", "staff", "deployed", {}),
@@ -57,15 +58,16 @@ def env(schema_database):
                                   care_id=f"CI-{number:03d}", traveller_id="CI-T-001" if number == 1 else None)
             db.add_all([order, candidate])
             db.flush()
-            application = Application(id=f"a{number}", candidate_id=candidate.id, order_id=order.id, owner_id=recruiter, current_stage=12,
-                                      status=ApplicationStatus(status))
+            application = Application(id=f"a{number}", candidate_id=candidate.id, order_id=order.id, owner_id=recruiter, current_stage=13,
+                                      status=ApplicationStatus(status),
+                                      commencement_date=date(2026, 6, 1) if number == 1 else None)
             db.add(application)
             db.flush()
             if extra is not None:
                 data = {**({"travelDate": when} if when else {}), **extra}
                 # an earlier attempt of the ticket stage must not be read: only the latest attempt counts
-                db.add(ApplicationStage(application_id=application.id, stage=12, attempt=1, data={"travelDate": "2001-01-01"}, completed_by=recruiter))
-                db.add(ApplicationStage(application_id=application.id, stage=12, attempt=2, data=data, completed_by=recruiter))
+                db.add(ApplicationStage(application_id=application.id, stage=13, attempt=1, data={"travelDate": "2001-01-01"}, completed_by=recruiter))
+                db.add(ApplicationStage(application_id=application.id, stage=13, attempt=2, data=data, completed_by=recruiter))
         # Akash has all eleven checklist documents. Arun has four required documents and retained optional evidence;
         # an application-stage file does not fill a candidate slot.
         for slot, _label in required_for_deployment():
@@ -109,11 +111,12 @@ def test_every_travelled_placement_is_listed_newest_first_with_its_client_and_ag
     assert akash == {
         "applicationId": "a1", "candidateId": "c1", "ref": "CND-00001", "travellerId": "CI-T-001", "careId": "CI-001", "name": "Akash Murugesan", "client": "Century Mechanical Systems Factory LLC",
         "clientId": "client", "country": "UAE", "job": "Machine Operator", "orderRef": "ORD-1", "orderId": "o1", "passportNumber": "P7654321", "agency": "Star Agency",
-        "travelDate": "2026-05-09", "airline": "Air Arabia G9472", "pnr": "6ZA8JH", "recruiter": "Staff", "status": "deployed",
+        "travelDate": "2026-05-09", "commencementDate": "2026-06-01", "airline": "Air Arabia G9472", "pnr": "6ZA8JH", "recruiter": "Staff", "status": "deployed",
         "documents": {"have": 11, "required": 11, "missing": []}}
     by_name = {row["name"]: row for row in body["rows"]}
     assert by_name["Selvam Balraj"]["agency"] is None      # "Bulk import" is provenance, not an agency
     assert by_name["Visakh Kumar"]["travelDate"] is None and by_name["Visakh Kumar"]["agency"] is None
+    assert by_name["Arun Kumar"]["commencementDate"] is None      # no date of commencement on file: null, never a made-up date
     assert all(row["status"] == "deployed" for row in body["rows"])
 
 
@@ -176,7 +179,7 @@ def test_a_reopened_ticket_is_no_longer_travelled(env):
     with env.sessions() as db:
         application_id = db.scalar(select(Application.id).join(Candidate, Candidate.id == Application.candidate_id).where(Candidate.name == "=Formula Name"))
         db.get(Application, application_id).status = ApplicationStatus.active
-        for stage in db.scalars(select(ApplicationStage).where(ApplicationStage.application_id == application_id, ApplicationStage.stage == 11)):
+        for stage in db.scalars(select(ApplicationStage).where(ApplicationStage.application_id == application_id, ApplicationStage.stage == 13)):
             stage.reopened_reason = "Ticket cancelled"
         db.commit()
     after = names(get(env))
@@ -185,7 +188,7 @@ def test_a_reopened_ticket_is_no_longer_travelled(env):
 
 def test_an_active_booking_does_not_count_as_confirmed_travel(env):
     with env.sessions() as db:
-        db.add(ApplicationStage(application_id="a7", stage=12, attempt=1, data={"travelDate": "2026-05-01"}, completed_by="staff"))
+        db.add(ApplicationStage(application_id="a7", stage=13, attempt=1, data={"travelDate": "2026-05-01"}, completed_by="staff"))
         db.commit()
     assert "Shijo" not in names(get(env))
 
@@ -337,11 +340,11 @@ def test_csv_export_follows_the_filters_and_is_safe_for_spreadsheets(env):
     assert response.headers["content-disposition"] == 'attachment; filename="travelled-candidates.csv"'
     text = response.content.decode("utf-8-sig")
     rows = list(csv.reader(StringIO(text)))
-    assert rows[0] == ["Traveller ID", "Travel date", "Candidate", "Client", "Country", "Job", "Order", "Referral agency", "Airline and flight",
+    assert rows[0] == ["Traveller ID", "Date of travel", "Candidate", "Client", "Country", "Job", "Order", "Referral agency", "Airline and flight",
                        "PNR", "Recruiter", "Status", "Missing documents", "Passport"]
     col = rows[0].index
     assert [r[col("Candidate")] for r in rows[1:]] == ["'=Formula Name", "Arun Kumar"]       # a name starting with "=" is not run as a formula
-    assert rows[2][col("Travel date"):col("Travel date") + 4] == ["2026-05-12", "Arun Kumar", "Century Mechanical Systems Factory LLC", "UAE"]
+    assert rows[2][col("Date of travel"):col("Date of travel") + 4] == ["2026-05-12", "Arun Kumar", "Century Mechanical Systems Factory LLC", "UAE"]
     assert "CND-00002" not in text and "CI-002" not in text      # the export shows the Traveller ID only, never the CND reference or the Care India ID
     assert rows[2][col("Referral agency")] == "Star Agency"
     assert rows[2][col("Missing documents")] == "Signed offer, Police clearance certificate (PCC), Air ticket, Undertaking letter, Emigration, Insurance, Invoice"

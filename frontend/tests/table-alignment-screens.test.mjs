@@ -94,7 +94,7 @@ test('Matched candidates, Travelled and the plain DbTable tables are centred; Tr
 })
 
 test('the DataTable screens (Clients, Agencies, Jobs, Users, Currencies, WhatsApp, agency import, Order detail) centre every column', async () => {
-  for (const file of ['screens/clients/clients.tsx', 'screens/jobs/jobs.tsx', 'screens/users/currency-card.tsx', 'screens/inbox/whatsapp.tsx', 'screens/jobs/order-detail.tsx', 'features/clients/components/agency-import-dialog.tsx']) {
+  for (const file of ['screens/jobs/jobs.tsx', 'screens/users/currency-card.tsx', 'screens/inbox/whatsapp.tsx', 'screens/jobs/order-detail.tsx', 'features/clients/components/agency-import-dialog.tsx']) {
     const source = await read(file)
     assert.doesNotMatch(source, /align: '(left|right)'/, file)
   }

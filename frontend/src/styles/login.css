@@ -59,7 +59,7 @@ html:has(.lg-page), body:has(.lg-page) { height: 100dvh; overflow: hidden; backg
 .lg-j-now-text { min-width: 0; line-height: 1.25; }
 .lg-j-now-text small { display: block; font-size: 11px; color: var(--text-light); letter-spacing: .02em; }
 .lg-j-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; letter-spacing: -.01em; animation: lg-swap .45s ease both; }
-.lg-tracker { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
+.lg-tracker { grid-column: 1 / -1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; margin: 0; padding: 0; list-style: none; }
 .lg-tracker li { height: 6px; border-radius: 99px; background: var(--tint-3); transition: background-color .35s; }
 .lg-tracker li.is-done { background: linear-gradient(90deg, var(--lg-blue), color-mix(in srgb, var(--lg-blue) 55%, var(--lg-green))); }
 .lg-tracker li.is-now { background: color-mix(in srgb, var(--lg-blue) 55%, var(--tint-3)); }

@@ -1,5 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useMemo, useState } from 'react'
 import { AlertTriangle, CalendarDays, Download, KeyRound, LogOut, Pencil, Plus, RefreshCw, RotateCw, ScrollText, Trash2, UserCheck, UserCog, UserX, Users } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
@@ -16,7 +15,6 @@ import type { StaffAvailability } from '@/features/staff/availability-model'
 import { useWorkspaceRead } from '@/features/staff/use-workspace-read'
 import { availabilityWords } from '@/features/staff-directory/model'
 import { autoAssignValue, receivesFlagText } from '@/features/candidates/assignment-labels'
-import { AgencySettingsTab } from './agency-settings'
 import { AuditHistory } from './audit-sheet'
 import { SecurityDialog } from './security-dialog'
 import { UserDialog } from './user-dialog'
@@ -38,27 +36,16 @@ const STATUS_TABS: { key: StatusFilter; label: string }[] = [
   { key: 'in_rotation', label: 'Getting candidates' }, { key: 'on_leave', label: 'On leave' },
 ]
 
-const PAGE_TABS = [{ key: 'team', label: 'Team' }, { key: 'agency', label: 'Agency settings' }]
-
-/** User Management has two tabs under the page header: the team (default) and the agency settings (`?tab=agency`). */
+/** User Management: the team list. (The Agency settings tab was removed; its screen is no longer linked from here.) */
 export default function UsersPage() {
-  const [params, setParams] = useSearchParams()
-  const view = params.get('tab') === 'agency' ? 'agency' : 'team'
-  const tabs = <Tabs tabs={PAGE_TABS} active={view} className="uv-page-tabs"
-    onChange={(key) => setParams(key === 'agency' ? { tab: 'agency' } : {}, { replace: true })} />
-  if (view === 'agency') return <div className="uv">
-    <PageHeader title="User Management" eyebrow="People & permissions" description="Set your agency's name, defaults and currencies.">{tabs}</PageHeader>
-    <AgencySettingsTab />
-  </div>
-  return <TeamPage tabs={tabs} />
+  return <TeamPage />
 }
 
-function TeamPage({ tabs }: { tabs: ReactNode }) {
+function TeamPage() {
   const store = useStore()
   // A person deleted a moment ago leaves the list at once; the store catches up with its own refresh.
   const [goneIds, setGoneIds] = useState<ReadonlySet<string>>(new Set())
   const people = useMemo(() => store.users.filter((u) => !goneIds.has(u.id)), [store.users, goneIds])
-  const [, setParams] = useSearchParams()
   const accountRead = useWorkspaceRead()
   const [editing, setEditing] = useState<{ user: User | null; deactivate?: boolean } | null>(null)
   const [security, setSecurity] = useState<{ user: User; kind: 'password' | 'logout' } | null>(null)
@@ -138,7 +125,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
   const header = (actions?: boolean) => <PageHeader title="User Management" eyebrow="People & permissions"
     description="Add your team, choose what each person can do, and choose who gets new candidates."
     actions={actions ? <><Button icon={<RefreshCw className="h-4 w-4" />} onClick={() => { accountRead.refresh(); availability.refresh() }}>Refresh</Button>
-      <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ user: null })}>Add user</Button></> : undefined}>{tabs}</PageHeader>
+      <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ user: null })}>Add user</Button></> : undefined} />
 
   if (accountRead.loading) return <div className="uv"><PageSkeleton label="Loading team directory" /></div>
   if (accountRead.error) return <div className="uv">
@@ -219,8 +206,8 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
 
     <Panel flush className="uv-panel uv-rotation">
       <PanelHead id="uv-rotation-title" title="Candidate assignment"
-        description={autoOn ? 'Automatic assignment is on. New candidates are shared out one after another among active recruiters who can be given new candidates and are not on leave. Approved leave and the On leave switch both pause this.' : 'Automatic assignment is off. New candidates wait until an admin or an MD assigns a recruiter. An admin can switch it on in Agency settings.'}
-        actions={autoOn ? <><span className="uv-chip-label"><RotateCw size={13} aria-hidden="true" />One by one</span><Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} disabled={availability.loading} onClick={availability.refresh}>Refresh</Button></> : <Button size="sm" onClick={() => setParams({ tab: 'agency' }, { replace: true })}>Agency settings</Button>} />
+        description={autoOn ? 'Automatic assignment is on. New candidates are shared out one after another among active recruiters who can be given new candidates and are not on leave. Approved leave and the On leave switch both pause this.' : 'Automatic assignment is off. New candidates wait until an admin or an MD assigns a recruiter.'}
+        actions={autoOn ? <><span className="uv-chip-label"><RotateCw size={13} aria-hidden="true" />One by one</span><Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} disabled={availability.loading} onClick={availability.refresh}>Refresh</Button></> : undefined} />
       {autoOn && <div className="uv-rotation-body" role="group" aria-labelledby="uv-rotation-title">
         {availability.loading ? <p role="status" className="uv-note">Checking who is free…</p>
           : availability.error ? <p role="alert" className="uv-error">{availability.error}</p>

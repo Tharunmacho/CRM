@@ -37,7 +37,7 @@ def dataset():
     for index, (initial, current, source, stage, status) in enumerate([
         ("a", "b", "email", 10, "active"), ("b", "b", "whatsapp", 4, "closed"),
         ("a", "a", "walk_in", 2, "active"), ("a", "a", "referral", 2, "closed"),
-        ("a", "a", "other", 12, "deployed"), ("a", "a", "email", 9, "active")], 1):
+        ("a", "a", "other", 13, "deployed"), ("a", "a", "email", 6, "active")], 1):
         candidates.append({"id": f"c{index}", "ref": f"C{index}", "name": f"Candidate {index}", "phone": str(index),
                            "owner_id": current, "intake_owner_id": initial, "created_at": NOW - timedelta(hours=5),
                            "source": source, "source_detail": "alpha@example.test" if initial == "a" else "hidden@example.test"})
@@ -49,11 +49,11 @@ def dataset():
         return {"id": id, "application_id": app, "stage": number, "attempt": 1, "data": {"result": "selected"} if number == 4 else {},
                 "outcome": "Done", "amount": amount, "amount_currency": currency, "owner_id": "b" if app == "app2" else "a",
                 "completed_by": "admin", "completed_at": NOW - timedelta(hours=1), "reopened_reason": reopened}
-    stages = [stage("receipt-inr", "app1", 9, "100.25", "INR"), stage("receipt-aed", "app5", 9, "70.00", "AED"),
-              stage("void-receipt", "app6", 9, "999.00", "INR", "Admin correction"),
+    stages = [stage("receipt-inr", "app1", 6, "100.25", "INR"), stage("receipt-aed", "app5", 6, "70.00", "AED"),
+              stage("void-receipt", "app6", 6, "999.00", "INR", "Admin correction"),
               stage("selected", "app5", 4), stage("rejected", "app2", 4), stage("closed", "app4", 2)]
     stages[-2]["data"] = {"result": "rejected"}
-    tasks = [{"id": "t1", "title": "Advance", "candidate_id": "c1", "application_id": "app1", "stage": 9,
+    tasks = [{"id": "t1", "title": "Advance", "candidate_id": "c1", "application_id": "app1", "stage": 6,
               "owner_id": "a", "created_at": NOW - timedelta(hours=13), "completed_at": NOW - timedelta(hours=1), "cancelled_at": None,
               "due_at": NOW + timedelta(hours=35), "sla_started_at": None, "escalated": False, "escalated_at": None},
              {"id": "t2", "title": "Resume", "candidate_id": "c3", "application_id": "app3", "stage": 2,
@@ -136,7 +136,7 @@ def test_dashboard_current_ownership_deadlines_and_roles(dataset):
     own = dashboard_data(dataset, STAFF, now=NOW)
     assert own["today"]["total"] == 4  # c1 is now B's operational candidate.
     assert own["taskCounts"] == {"open": 1, "dueToday": 1, "overdue": 0, "escalated": 0, "notUpdated": 0}
-    assert len(own["pipeline"]) == 12
+    assert len(own["pipeline"]) == 13
     assert own["tasks"][0]["id"] == "t2"  # reset due_at wins over original creation+48h.
     # A manager sees the whole team, like the admin; only the private to-do card and "my tasks" stay personal.
     manager = dashboard_data(dataset, MANAGER, now=NOW)
@@ -176,10 +176,10 @@ def test_late_stage_labels_identify_work_still_due_not_deployment(dataset):
     dataset["applications"][0]["created_at"] = NOW
     dashboard = dashboard_data(dataset, ADMIN, now=NOW)
     report = report_data(dataset, ADMIN, FILTERS, now=NOW)
-    expected = ["Visa arrival + Google review", "Visa stamping", "Air ticket"]
+    expected = ["Visa arrival", "Google review", "Visa stamping", "Air ticket"]
     assert [row["label"] for row in dashboard["pipeline"][9:]] == expected
     assert [row["label"] for row in report["pipeline"][9:]] == expected
-    assert [row["label"] for row in report["pipeline"][5:8]] == ["Medical", "PCC", "Passport"]
+    assert [row["label"] for row in report["pipeline"][5:9]] == ["Advance payment", "Passport", "Medical", "PCC"]
     assert dashboard["pipeline"][10]["count"] == 1
     assert report["pipeline"][10]["active"] == 1
 
@@ -327,7 +327,7 @@ def test_pipeline_reports_drop_off_between_consecutive_stages(dataset):
     assert pipeline[-1]["lostToNext"] is None and pipeline[-1]["lostToNextPercent"] is None
     assert all("dropOffPercent" in row and "closed" in row for row in pipeline)
     assert (pipeline[1]["reached"], pipeline[1]["lostToNext"], pipeline[1]["lostToNextPercent"]) == (4, 2, 50.0)
-    assert (pipeline[8]["reached"], pipeline[8]["lostToNext"], pipeline[8]["lostToNextPercent"]) == (2, 1, 50.0)
+    assert (pipeline[5]["reached"], pipeline[5]["lostToNext"], pipeline[5]["lostToNextPercent"]) == (2, 1, 50.0)
 
 
 def test_funnel_export_carries_stage_to_stage_drop_off(dataset):

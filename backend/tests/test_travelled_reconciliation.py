@@ -61,12 +61,12 @@ def test_existing_candidate_becomes_deployed_without_invented_milestones_and_rer
         candidate = db.get(Candidate, "candidate")
         assert candidate.status == CandidateStatus.deployed and candidate.current_address == "Manually confirmed address"
         stages = list(db.scalars(select(ApplicationStage)))
-        assert len(stages) == 1 and stages[0].stage == 12
+        assert len(stages) == 1 and stages[0].stage == 13
         assert stages[0].data == ({"travelDate": "2026-01-02"} if dated else {})
         assert stages[0].completed_at.year >= 2026  # recording time is not a fabricated travel date
         assert db.get(Task, "existing-call").cancelled_at and db.get(Remark, "retained-note").body == "Retain genuine history"
         application = db.scalar(select(Application))
-        assert application.status == ApplicationStatus.deployed and application.current_stage == 12
+        assert application.status == ApplicationStatus.deployed and application.current_stage == 13
         contact = db.scalar(select(Client))
         assert contact.phone is None and contact.email is None and "not recorded" in contact.notes
         after = counts(db)
@@ -82,9 +82,9 @@ def test_existing_untouched_import_application_corrected_in_place_preserving_old
         base = subject.build_plan(db, placements, documents, {})
         orders = subject.ensure_masters(db, base)
         old = next(iter(orders.values()))
-        application = Application(id="existing-app", candidate_id="candidate", order_id=old.id, owner_id="owner", current_stage=9, lock_version=0)
+        application = Application(id="existing-app", candidate_id="candidate", order_id=old.id, owner_id="owner", current_stage=6, lock_version=0)
         db.add(application); db.flush()
-        db.add(ApplicationStage(id="retained-stage", application_id=application.id, stage=8, attempt=1, data={"collected": "yes"}, outcome="Collected"))
+        db.add(ApplicationStage(id="retained-stage", application_id=application.id, stage=6, attempt=1, data={"collected": "yes"}, outcome="Collected"))
         db.add(AuditEntry(action="Imported candidate with documents and stage history", entity_type="application", entity_id=application.id, meta={"bulk_import": True}))
         db.commit()
         placements[0]["client"] = "Correct Employer"
@@ -95,7 +95,7 @@ def test_existing_untouched_import_application_corrected_in_place_preserving_old
         assert db.scalar(select(func.count()).select_from(Application)) == 1
         assert application.order_id != old.id and application.status == ApplicationStatus.deployed
         assert db.get(ApplicationStage, "retained-stage").data == {"collected": "yes"}
-        assert sorted(db.scalars(select(ApplicationStage.stage))) == [8, 12]
+        assert sorted(db.scalars(select(ApplicationStage.stage))) == [6, 13]
 
 
 def test_changed_source_identity_rejects_a_stale_reviewed_plan(workspace, tmp_path):

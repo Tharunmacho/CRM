@@ -30,16 +30,16 @@ COLUMNS = ["S.No", "Client", "Country", "Name", "Position", "Ref", "Advance", "S
 
 # key, candidate, company key, job, source, agency, owner, status, current stage, closure reason
 PLACEMENTS = [
-    ("benny", "Benny Test", "tawseel", "Driver", Source.referral, "Sigma", "staff", "active", 11, None),
+    ("benny", "Benny Test", "tawseel", "Driver", Source.referral, "Sigma", "staff", "active", 12, None),
     ("mahmood", "Mahmood Sample", "finesco", "Electrician", Source.referral, "Airport Agency", "staff", "active", 10, None),
     ("rama", "Rama Example", "gurair", "Rigger", Source.other, None, "other", "active", 5, None),
-    ("vikram", "Vikram Invented", "thinnai", "Waiter", Source.referral, "Care", "staff", "deployed", 12, None),
+    ("vikram", "Vikram Invented", "thinnai", "Waiter", Source.referral, "Care", "staff", "deployed", 13, None),
     ("closed", "Closed Person", "tawseel", "Driver", Source.referral, "Sigma", "staff", "closed", 4, ClosureReason.interview_rejected),
     ("call", "Call Stage Person", "tawseel", "Cook", Source.referral, "Sigma", "staff", "active", 1, None),
-    ("dollar", "Dollar Person", "finesco", "Welder", Source.referral, "Sigma", "other", "active", 9, None),
-    ("voided", "Voided Receipt Person", "gurair", "Fitter", Source.other, None, "other", "active", 8, None),
+    ("dollar", "Dollar Person", "finesco", "Welder", Source.referral, "Sigma", "other", "active", 6, None),
+    ("voided", "Voided Receipt Person", "gurair", "Fitter", Source.other, None, "other", "active", 7, None),
     ("plain", "Plain Person", "gurair", "Helper", Source.other, None, "other", "active", 3, None),
-    ("late", "Late Traveller", "thinnai", "Cleaner", Source.referral, "Care", "other", "deployed", 12, None),
+    ("late", "Late Traveller", "thinnai", "Cleaner", Source.referral, "Care", "other", "deployed", 13, None),
 ]
 KEYS = [p[0] for p in PLACEMENTS]
 
@@ -74,22 +74,22 @@ def env(schema_database):
                                status=ApplicationStatus(status), closure_reason=reason))
         db.flush()
 
-        def stage8(key, amount=None, currency="INR", status="collected", total=None, **extra):
+        def advance(key, amount=None, currency="INR", status="collected", total=None, **extra):
             data = {k: v for k, v in (("advanceStatus", status), ("amount", amount), ("amountCurrency", currency if amount else None),
                                       ("serviceChargeTotal", total)) if v is not None}
-            db.add(ApplicationStage(application_id=f"a-{key}", stage=9, attempt=1, completed_by="admin", amount=amount,
+            db.add(ApplicationStage(application_id=f"a-{key}", stage=6, attempt=1, completed_by="admin", amount=amount,
                                     amount_currency=currency if amount else None, data={**data, **extra}))
 
-        stage8("benny", 10000, total=25000)                                          # collected and the total service charge
-        stage8("mahmood", 7500, total=20000)
-        stage8("vikram", 60000)                                                       # collected only
+        advance("benny", 10000, total=25000)                                          # collected and the total service charge
+        advance("mahmood", 7500, total=20000)
+        advance("vikram", 60000)                                                       # collected only
         for attempt, when in ((1, "2001-01-01"), (2, "2026-11-11")):                 # the latest attempt's date is the travel date
-            db.add(ApplicationStage(application_id="a-vikram", stage=12, attempt=attempt, data={"travelDate": when}, completed_by="admin"))
-        db.add(ApplicationStage(application_id="a-late", stage=12, attempt=1, data={}, completed_by="admin"))   # travelled, no date on file
-        stage8("call", None, status="pending", total=15000)                          # pending, the total service charge only
-        stage8("dollar", 500, "USD")                                                 # a collected amount in another currency
-        stage8("voided", 12500, status="pending")                                    # pending, the advance expected only
-        stage8("closed", 99000)                                                      # a closed placement never appears
+            db.add(ApplicationStage(application_id="a-vikram", stage=13, attempt=attempt, data={"travelDate": when}, completed_by="admin"))
+        db.add(ApplicationStage(application_id="a-late", stage=13, attempt=1, data={}, completed_by="admin"))   # travelled, no date on file
+        advance("call", None, status="pending", total=15000)                          # pending, the total service charge only
+        advance("dollar", 500, "USD")                                                 # a collected amount in another currency
+        advance("voided", 12500, status="pending")                                    # pending, the advance expected only
+        advance("closed", 99000)                                                      # a closed placement never appears
         # remarks: the newest one of the placement's tasks; the first stage falls back on the initial call's
         stage = Task(id="t-rama", kind=TaskKind.stage, title="Offer", candidate_id="c-rama", application_id="a-rama", stage=5, owner_id="other")
         call = Task(id="t-call", kind=TaskKind.initial_call, title="Call", candidate_id="c-call", owner_id="staff")
@@ -144,7 +144,7 @@ def test_each_column_comes_from_the_placement_for_the_admin(env):
     assert {k: rows["Benny Test"][k] for k in ("client", "country", "name", "position", "referral", "advance", "stage", "remarks")} == {
         "client": "Tawseel Test", "country": "Kuwait", "name": "Benny Test", "position": "Driver", "referral": "Sigma",
         "advance": "10k collected/25k", "stage": "Waiting for stamp", "remarks": ""}
-    assert rows["Mahmood Sample"]["advance"] == "7.5k collected/20k"            # collected and the total service charge, from stage 9
+    assert rows["Mahmood Sample"]["advance"] == "7.5k collected/20k"            # collected and the total service charge, from stage 6
     assert rows["Mahmood Sample"]["stage"] == "Waiting for visa" and rows["Mahmood Sample"]["referral"] == "Airport Agency"
     assert rows["Call Stage Person"]["advance"] == "Pending/15k"               # pending, the total service charge only
     assert rows["Call Stage Person"]["stage"] == "Prescreening"
@@ -199,10 +199,10 @@ def test_filters_narrow_the_sheet_and_the_numbers_start_again_at_one(env):
     no_travel = get(env, include_travelled="false")
     assert no_travel["total"] == 7 and not any(r["travelled"] for r in no_travel["rows"])
     assert [r["sNo"] for r in no_travel["rows"]] == list(range(1, 8))
-    assert get(env, stage=12)["rows"] == []                                    # travelled ones are not "in progress at stage 12"
-    assert [r["name"] for r in get(env, stage=11)["rows"]] == ["Benny Test"]   # Waiting for stamp
+    assert get(env, stage=13)["rows"] == []                                    # travelled ones are not "in progress at stage 13"
+    assert [r["name"] for r in get(env, stage=12)["rows"]] == ["Benny Test"]   # Waiting for stamp
     assert get(env, client="Nobody")["rows"] == []
-    assert env.client.get("/api/reports/client-tracker", params={"stage": 13}).status_code == 422
+    assert env.client.get("/api/reports/client-tracker", params={"stage": 14}).status_code == 422
 
 
 def test_the_pickers_list_what_exists(env):
@@ -210,7 +210,7 @@ def test_the_pickers_list_what_exists(env):
     assert options["clients"] == ["Finesco Test", "Gurair Test", "Tawseel Test", "Thinnai Test"]
     assert options["countries"] == ["Kuwait", "Malaysia", "UAE"]
     assert options["agencies"] == ["Airport Agency", "Care", "Sigma"]
-    assert [s["no"] for s in options["stages"]] == list(range(1, 13))
+    assert [s["no"] for s in options["stages"]] == list(range(1, 14))
 
 
 def test_the_excel_download_is_the_clients_sheet(env):
@@ -244,7 +244,7 @@ def test_the_csv_download_has_the_same_columns_and_guards_formulas(env):
     assert call == ["7", "Tawseel Test", "Kuwait", "Call Stage Person", "Cook", "Sigma", "Pending/15k", "Prescreening", "'=Call back after Diwali"]
 
 
-def test_the_advance_wording_comes_from_the_stage_8_rules():
+def test_the_advance_wording_comes_from_the_stage_6_rules():
     from app.services.advance_text import advance_cell
     facts = {"advance": (10000.0, "INR"), "status": "collected", "total": 50000.0, "expected": None, "currency": "INR", "review": False}
     assert advance_cell(facts, "INR") == "10k collected/50k" and advance_cell(None, "INR") is None
@@ -254,8 +254,9 @@ def test_the_advance_wording_comes_from_the_stage_8_rules():
     assert [tracker.ordinal(d) for d in (1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 30, 31)] == [
         "1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "30th", "31st"]
     assert tracker.travel_words("2026-10-15") == "Travelled on 15th OCT 2026" and tracker.travel_words(None) == "Travelled"
-    assert sorted(tracker.STAGE_WORDS) == list(range(1, 13))
-    assert tracker.STAGE_WORDS[6] == "Medical in progress" and tracker.STAGE_WORDS[7] == "Waiting for PCC" and tracker.STAGE_WORDS[8] == "Waiting for passport"
+    assert sorted(tracker.STAGE_WORDS) == list(range(1, 14))
+    assert tracker.STAGE_WORDS[6] == "Waiting for advance" and tracker.STAGE_WORDS[7] == "Waiting for passport" and tracker.STAGE_WORDS[8] == "Medical in progress"
+    assert tracker.STAGE_WORDS[9] == "Waiting for PCC" and tracker.STAGE_WORDS[11] == "Waiting for Google review" and tracker.STAGE_WORDS[13] == "Waiting for air ticket"
 
 
 def test_the_sheet_costs_a_fixed_number_of_statements(env):

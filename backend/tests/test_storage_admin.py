@@ -147,12 +147,12 @@ def test_legacy_stage_keys_follow_verified_migration_without_rewriting_ids_urls_
         db.add(Attachment(id="candidate-passport", entity_type="candidate", entity_id="candidate",
                           slot="passport", file_name="passport.pdf", object_key=key))
         modern = {"id": "legacy-offer", "url": "/api/files/legacy-offer", "name": "offer.pdf"}
-        stages = [(5, 1, {"file": key, "notes": key}), (8, 1, {"copy": key, "heldBy": "owner"}),
-                  (9, 1, {"receipt": key}), (10, 1, {"file": modern}),
+        stages = [(5, 1, {"file": key, "notes": key}), (7, 1, {"copy": key, "heldBy": "owner"}),
+                  (6, 1, {"receipt": key}), (10, 1, {"file": modern}),
                   (11, 1, {"file": "/api/files/legacy-offer"}), (12, 1, {"file": "legacy-offer"}),
-                  (6, 1, {"file": key}), (5, 2, {"file": "other/not-owned.pdf"})]
+                  (8, 1, {"file": key}), (5, 2, {"file": "other/not-owned.pdf"})]
         db.add(Attachment(id="receipt", entity_type="application", entity_id=application.id,
-                          slot="stage_9_receipt", file_name="receipt.pdf", object_key=key))
+                          slot="stage_6_receipt", file_name="receipt.pdf", object_key=key))
         foreign_key = put_bytes(settings, "other/not-owned.pdf", b"other-owner")
         db.add(Attachment(id="foreign", entity_type="application", entity_id="another-application",
                           slot="stage_5_file", file_name="other.pdf", object_key=foreign_key))
@@ -168,8 +168,8 @@ def test_legacy_stage_keys_follow_verified_migration_without_rewriting_ids_urls_
         normalized = {"id": "legacy-offer", "url": "/api/files/legacy-offer", "name": "offer.pdf", "sizeKb": None, "version": 1}
         assert application.draft == {"file": normalized, "notes": key, "nested": {"object_key": key}}
         assert db.get(ApplicationStage, "stage-5-1").data == {"file": normalized, "notes": key}
-        assert db.get(ApplicationStage, "stage-8-1").data["copy"]["id"] == "candidate-passport"
-        assert db.get(ApplicationStage, "stage-9-1").data["receipt"]["id"] == "receipt"
+        assert db.get(ApplicationStage, "stage-7-1").data["copy"]["id"] == "candidate-passport"
+        assert db.get(ApplicationStage, "stage-6-1").data["receipt"]["id"] == "receipt"
         for stage, attempt, data in stages[3:]:
             assert db.get(ApplicationStage, f"stage-{stage}-{attempt}").data == data
         assert db.get(Attachment, "legacy-offer").object_key == destination

@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -22,7 +22,7 @@ from app.db.models import (
     Candidate, CandidateStatus, ClosureReason, Order, OrderStatus, Role, Task, TaskKind, User,
 )
 from app.domain.orders import reopen_blocker
-from app.domain.stages import ADVANCE_STAGE, FILE_FIELDS, PASSPORT_STAGE, PCC_STAGE, TOTAL_STAGES, blocked_message, stage_by_no, validate_payload
+from app.domain.stages import ADVANCE_STAGE, FILE_FIELDS, PASSPORT_STAGE, PCC_STAGE, REVIEW_STAGE, TOTAL_STAGES, blocked_message, stage_by_no, validate_payload
 from app.services import agency_settings
 from app.services import document_storage
 from app.services.traveller_id import assign_traveller_id
@@ -223,7 +223,7 @@ def _sync_order(db: Session, order: Order):
 
 
 def _stage_options(db: Session, stage: int):
-    """Reference data a stage checks its values against; only the advance (stage 9) has any: the active currencies."""
+    """Reference data a stage checks its values against; only the advance (stage 6) has any: the active currencies."""
     return agency_settings.stage_options(db) if stage == ADVANCE_STAGE else None
 
 
@@ -247,10 +247,13 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
             or (app.current_stage == PASSPORT_STAGE and field == "copy" and attachment.entity_type == "candidate"
                 and attachment.entity_id == app.candidate_id and attachment.slot == "passport")
             # The candidate-document checklist is the canonical home for a
-            # ticket.  Stage 12 may reference that exact stored file rather
+            # ticket.  Stage 13 may reference that exact stored file rather
             # than making staff upload a second copy merely to deploy.
             or (app.current_stage == TOTAL_STAGES and field == "file" and attachment.entity_type == "candidate"
                 and attachment.entity_id == app.candidate_id and attachment.slot == "air_ticket")
+            # The same for the Google review: the candidate's own Google review document is the canonical copy.
+            or (app.current_stage == REVIEW_STAGE and field == "file" and attachment.entity_type == "candidate"
+                and attachment.entity_id == app.candidate_id and attachment.slot == "google_review")
             # The same for the police clearance certificate: the candidate's PCC document is the canonical copy.
             or (app.current_stage == PCC_STAGE and field == "file" and attachment.entity_type == "candidate"
                 and attachment.entity_id == app.candidate_id and attachment.slot == "pcc")
@@ -534,6 +537,13 @@ def complete_stage(application_id: str, body: CompleteIn,
             assign_traveller_id(db, candidate)
         else:
             app.current_stage += 1
+            # A stage the candidate has already completed (live record, not the medical retest marker) is skipped: this only happens to
+            # an application that was moved when the stage order changed (migration 0056) and had finished stages that now come later.
+            while app.current_stage < TOTAL_STAGES and db.scalar(select(func.count()).select_from(ApplicationStage).where(
+                    ApplicationStage.application_id == app.id, ApplicationStage.stage == app.current_stage,
+                    or_(ApplicationStage.reopened_reason.is_(None), ApplicationStage.reopened_reason == ""),
+                    ApplicationStage.outcome != "Unfit: reapplying")):
+                app.current_stage += 1
             if app.current_stage == PASSPORT_STAGE:
                 passport = db.scalar(select(Attachment).where(
                     Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,

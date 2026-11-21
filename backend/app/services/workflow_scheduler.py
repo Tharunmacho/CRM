@@ -59,6 +59,30 @@ def deliver_due_todos(db, *, now=None):
     return count
 
 
+_DAY_REPORT_COOLDOWN_SECONDS = 600
+_day_report_retry_at = 0.0
+
+
+def scan_day_end_report(db, *, now=None, agency_timezone=None):
+    """The owner's end-of-day recruiter report as one more independent pass; the caller commits.
+
+    It runs in its own savepoint and never raises: a failure is logged, leaves the other passes' work alone, and is retried
+    after a short pause (the report itself is idempotent, so a retry or a restart can never duplicate it)."""
+    import logging
+    import time as clock
+    global _day_report_retry_at
+    if clock.monotonic() < _day_report_retry_at:
+        return {"sent": 0, "days": []}
+    from app.services.day_end_report import deliver_day_end_report
+    try:
+        with db.begin_nested():
+            return deliver_day_end_report(db, now=now, agency_timezone=agency_timezone)
+    except Exception as exc:
+        _day_report_retry_at = clock.monotonic() + _DAY_REPORT_COOLDOWN_SECONDS
+        logging.getLogger("day_end_report").error("Day-end report failed (%s); the other scans continue.", type(exc).__name__)
+        return {"sent": 0, "days": [], "failed": True}
+
+
 def scan_daily_work_only(db, *, now=None, agency_timezone=None):
     """The daily-work clean-up pass between the 15-minute task scans (the daily list itself is computed live); the caller commits."""
     from app.services.daily_work import scan_daily_work

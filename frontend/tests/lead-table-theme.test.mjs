@@ -85,9 +85,10 @@ test('captions that are not data are gone', () => {
   assert.doesNotMatch(model, /Search any detail as you type/)
   assert.doesNotMatch(screen, /are hidden to fit the screen\. Open a row \(the arrow/)
   assert.match(screen, /placeholder="Search name, phone, job… \(use commas to combine\)"/, 'the placeholder is the only search hint')
-  // the hidden columns are a small pill whose tooltip explains
-  assert.match(screen, /className="ld-hidden-pill" title=\{`\$\{fit\.hidden\}/)
-  assert.match(screen, /\+\{fit\.hidden\} hidden/)
+  // the "+N hidden" pill is gone: opening a row (or the expand-all button) shows every field, so the count adds nothing
+  assert.doesNotMatch(screen, /ld-hidden-pill|\+\{fit\.hidden\} hidden/)
+  // the Follow-ups due card is gone from the Lead sheet's number cards
+  assert.doesNotMatch(screen, /Follow-ups due/)
   // the experience question caption and the (i) icon are gone; the question stays in the tooltip and the dialog
   assert.doesNotMatch(cells, /experienceQuestionSummary|<Info /)
   assert.match(cells, /const title = `\$\{question \|\| label\}: \$\{value\}`/)

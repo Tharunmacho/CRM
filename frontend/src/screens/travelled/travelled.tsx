@@ -13,13 +13,13 @@ import { downloadTravelled, useTravelled } from '@/features/travelled/travelled-
 import {
   EMPTY_FILTERS, MONTH_NAMES, PAGE_SIZE_CHOICES, activeChips, agencyToday, barPercent, choosePeriod, chooseTravelDate, clearChip, dateBarLabel, dateLevel,
   dateSummary, documentsLabel, documentsTitle, drillTo, filterCount, filtersFromParams, formatTravelDay, monthName, moreFilterCount, pageRows, periodValue, queryFor, quickRanges,
-  setFilter, startingPageSize, toggleFilter, toggleIncomplete, withChosen,
+  serialNumber, setFilter, startingPageSize, toggleFilter, toggleIncomplete, withChosen,
   type PeriodValue, type TravelledFilterKey, type TravelledFilters, type TravelledResult, type TravelledRow,
 } from '@/features/travelled/travelled-model'
 import '@/styles/data-bank-v2.css'
 import '@/styles/travelled.css'
 import '@/styles/touch-targets.css'
-import { TravellerIdChip } from '@/features/candidates/components/candidate-id-chip'
+import { docToText } from '@/screens/tasks/doc-input'
 
 const SHOWN = 6
 const BREAKDOWN_KEY = 'crm-travelled-breakdown'
@@ -175,7 +175,7 @@ export default function TravelledPage() {
               </>}
               <Field label="Year"><Select aria-label="Year" searchable value={filters.year} onChange={event => set('year', event.target.value)}><option value="">All years</option><optgroup label="Current and recorded years">{years.map(year => <option key={year} value={year}>{year}</option>)}</optgroup><optgroup label="Other years">{otherYears.map(year => <option key={year} value={year}>{year}</option>)}</optgroup></Select></Field>
               <Field label="Month"><Select aria-label="Travel month" value={filters.month} disabled={!filters.year} onChange={event => set('month', event.target.value)}><option value="">{filters.year ? 'All months' : 'Choose a year'}</option>{MONTH_NAMES.map((name, index) => <option key={name} value={String(index + 1).padStart(2, '0')}>{name}</option>)}</Select></Field>
-              <Field label="Travel date"><Input type="date" aria-label="Travel date" min="1990-01-01" max="2100-12-31" value={travelDate} onChange={event => apply(chooseTravelDate(filters, event.target.value))} /></Field>
+              <Field label="Date of travel"><Input type="date" aria-label="Date of travel" min="1990-01-01" max="2100-12-31" value={travelDate} onChange={event => apply(chooseTravelDate(filters, event.target.value))} /></Field>
               <Field label="Job / order"><Select aria-label="Job or order" value={filters.order} onChange={event => set('order', event.target.value)}><option value="">All jobs / orders</option>{filters.order && !orders.some(order => order.id === filters.order) && <option value={filters.order}>Selected order</option>}{orders.map(order => <option key={order.id} value={order.id}>{order.job || 'Job'} · {order.ref || order.client}{!filters.client ? ` · ${order.client}` : ''}</option>)}</Select></Field>
               <button type="button" className={filters.incomplete ? 'tv-toggle is-on' : 'tv-toggle'} aria-pressed={!!filters.incomplete} onClick={() => apply(toggleIncomplete(filters))}>
                 {filters.incomplete && <Check size={14} aria-hidden="true" />}Missing documents only
@@ -296,21 +296,23 @@ function TravelTable({ rows, total, page, pageSize, filtered, onPage, onPageSize
   return <section className="tv-card tv-table-card" aria-label="Travelled candidates">
     <div ref={wrap} className="tv-table-wrap">
       <table className="tv-table">
-        <colgroup><col className="tv-c-date" /><col className="tv-c-who" /><col className="tv-c-client" /><col className="tv-c-country" /><col className="tv-c-job" /><col className="tv-c-agency" /><col className="tv-c-docs" /><col className="tv-c-recruiter" /></colgroup>
-        <thead><tr><th>Travel date</th><th>Candidate</th><th>Client</th><th>Country</th><th>Job</th><th>Agency</th><th>Documents</th><th>Recruiter</th></tr></thead>
+        <colgroup><col className="tv-c-sno" /><col className="tv-c-doc" /><col className="tv-c-date" /><col className="tv-c-who" /><col className="tv-c-client" /><col className="tv-c-country" /><col className="tv-c-job" /><col className="tv-c-agency" /><col className="tv-c-docs" /><col className="tv-c-recruiter" /></colgroup>
+        <thead><tr><th>S NO</th><th>DOC</th><th className="tv-th-wrap">Date of travel</th><th>Candidate</th><th>Client</th><th>Country</th><th>Job</th><th>Agency</th><th className="tv-th-wrap">Uploaded documents</th><th>Recruiter</th></tr></thead>
         <tbody>
-          {shown.map(row => <tr key={row.applicationId}>
-            <td data-label="Travel date" className="tnum tv-c-when">{row.travelDate ? formatTravelDay(row.travelDate) : <span className="tv-muted">Not recorded</span>}</td>
+          {shown.map((row, index) => <tr key={row.applicationId}>
+            <td data-label="S NO" className="tnum">{serialNumber(page, pageSize, index)}</td>
+            <td data-label="DOC" className="tnum">{docToText(row.commencementDate) || <span className="tv-muted">—</span>}</td>
+            <td data-label="Date of travel" className="tnum tv-c-when">{row.travelDate ? formatTravelDay(row.travelDate) : <span className="tv-muted">Not recorded</span>}</td>
             <td data-label="Candidate" className="tv-who">
               <Link to={`/candidates/${row.candidateId}`}>{row.name}</Link>
-              <TravellerIdChip candidate={row} />
+              <small className="tv-passport tnum">{row.passportNumber || <span className="tv-muted">Passport not added</span>}</small>
               {row.status && row.status !== 'deployed' && <StatusPill status={row.status} />}
             </td>
             <td data-label="Client">{row.clientId ? <Link to={`/clients/${row.clientId}`}>{row.client}</Link> : row.client || <span className="tv-muted">—</span>}</td>
             <td data-label="Country">{row.country || <span className="tv-muted">—</span>}</td>
-            <td data-label="Job">{row.orderId ? <Link to={`/orders/${row.orderId}`}>{row.job || 'Open job'}</Link> : row.job || <span className="tv-muted">—</span>}{row.orderRef && <small className="ident">{row.orderRef}</small>}</td>
+            <td data-label="Job">{row.orderId ? <Link to={`/orders/${row.orderId}`}>{row.job || 'Open job'}</Link> : row.job || <span className="tv-muted">—</span>}</td>
             <td data-label="Agency">{row.agency ? row.agency : <Link className="tv-hint" to={`/candidates/${row.candidateId}/application`}>Add agency</Link>}</td>
-            <td data-label="Documents">{row.documents
+            <td data-label="Uploaded documents">{row.documents
               ? row.documents.missing.length ? <details className="tv-doc-details"><summary className="tv-docs is-short" title={documentsTitle(row)}>{documentsLabel(row)}<ChevronDown size={13} aria-hidden="true" /><span className="sr-only"> documents on file, {row.documents.missing.length} missing</span></summary><ul>{row.documents.missing.map(label => <li key={label}>{label}</li>)}</ul><Link to={`/candidates/${row.candidateId}/application`}>Review documents</Link></details>
                 : <span className="tv-docs is-done" title={documentsTitle(row)}><Check size={13} aria-hidden="true" />{documentsLabel(row)}<span className="sr-only"> documents on file, none missing</span></span>
               : <span className="tv-muted">—</span>}</td>

@@ -1,0 +1,33 @@
+/* Reports > Report > Attendance monitor (features/daily-report/report-attendance.tsx). Table geometry comes from report-tables.css; only the extras are here. */
+.dwa .dwa-tools { gap: 8px 16px; }
+.dwa .dwa-tools .dwr-textlink { display: inline-flex; align-items: center; gap: 4px; }
+.dwa-strip { padding: 0 20px 4px; }
+.dwa-strip .dwb-stats { margin-bottom: 12px; }
+.dwa-strip .dwb-stat-text { text-align: center; }
+.dwa-strip .dwb-stat-figure { justify-content: center; }
+.dwa .dw-state { display: grid; justify-items: center; gap: 6px; text-align: center; }
+
+.dwa-pill { display: inline-flex; align-items: center; justify-content: center; max-width: 100%; padding: 3px 10px; border: 1px solid transparent; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.35; text-align: center; }
+.dwa-pill.tone-green { background: var(--success-fill); border-color: var(--success-edge); color: var(--success-ink); }
+.dwa-pill.tone-amber { background: var(--warning-fill); border-color: var(--warning-edge); color: var(--warning-ink); }
+.dwa-pill.tone-red { background: var(--error-fill); border-color: var(--error-edge); color: var(--error-ink); }
+.dwa-pill.tone-blue { background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); border-color: color-mix(in srgb, var(--primary) 30%, var(--bg-card)); color: var(--primary); }
+.dwa-pill.tone-neutral { background: var(--tint-1, var(--bg-card)); border-color: var(--border-control); color: var(--text-muted); }
+
+.dwa-warn { color: var(--warning-ink); font-weight: 600; }
+.dwa-live { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--success-ink); }
+.dwa-live > i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--success-ink); animation: dwa-pulse 1.8s ease-in-out infinite; }
+@keyframes dwa-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success-ink) 45%, transparent); } 60% { box-shadow: 0 0 0 5px transparent; } }
+@media (prefers-reduced-motion: reduce) { .dwa-live > i { animation: none; } }
+
+.dwa-sessions { display: inline-block; text-align: center; }
+.dwa-sessions > summary { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; padding: 2px 8px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--primary); cursor: pointer; list-style: none; }
+.dwa-sessions > summary::-webkit-details-marker { display: none; }
+.dwa-sessions > summary::after { content: '\25BE'; font-size: 10px; }
+.dwa-sessions[open] > summary::after { content: '\25B4'; }
+.dwa-sessions > summary:hover { text-decoration: underline; text-underline-offset: 3px; }
+.dwa-sessions > ol { display: grid; gap: 4px; margin: 6px 0 2px; padding: 0; list-style: none; font-size: 12.5px; color: var(--text-main); }
+.dwa-sessions > ol > li { display: grid; gap: 1px; }
+.dwa-sessions > ol small { font-size: 11.5px; color: var(--text-muted); }
+
+@media (max-width: 720px) { .dwa-strip { padding-inline: 12px; } }

@@ -200,13 +200,13 @@ def test_deployed_candidates_remain_in_their_order_stage_and_counts_even_when_fl
         identifier = f'travelled-{index:02d}'
         add(bank, identifier, status=m.CandidateStatus.deployed, needs_review=index < 7)
         bank.add(m.Application(id=f'placement-{index}', candidate_id=identifier, order_id='o-1', owner_id='asha',
-                               current_stage=12, status=m.ApplicationStatus.deployed))
+                               current_stage=13, status=m.ApplicationStatus.deployed))
     add(bank, 'unplaced-1')
     add(bank, 'unplaced-2')
     bank.commit()
     deployed = {f'travelled-{index:02d}' for index in range(26)}
     assert ids(bank, '', column_filters='{"status":"deployed"}') == deployed
-    assert ids(bank, '', column_filters='{"stage":"12"}') == deployed
+    assert ids(bank, '', column_filters='{"stage":"13"}') == deployed
     assert ids(bank, '', column_filters='{"order":"ORD-WELD"}') == deployed
     assert ids(bank, '', order_id='o-1') == deployed
     assert ids(bank, 'al noor, welder') == deployed
@@ -228,16 +228,16 @@ def test_displayed_placement_prefers_active_then_latest_deployed_and_never_dupli
         bank.add(m.Application(id=identifier, candidate_id=candidate, order_id=order, owner_id='asha', current_stage=stage,
                                status=state, created_at=datetime(year, 1, 1, tzinfo=timezone.utc)))
 
-    placement('history-old', 'history', 'o-1', m.ApplicationStatus.deployed, 2024, 12)
-    placement('history-new', 'history', 'o-2', m.ApplicationStatus.deployed, 2025, 12)
+    placement('history-old', 'history', 'o-1', m.ApplicationStatus.deployed, 2024, 13)
+    placement('history-new', 'history', 'o-2', m.ApplicationStatus.deployed, 2025, 13)
     placement('history-closed', 'history', 'o-1', m.ApplicationStatus.closed, 2026, 2)
     placement('active-current', 'active', 'o-1', m.ApplicationStatus.active, 2023, 4)
-    placement('active-travelled', 'active', 'o-2', m.ApplicationStatus.deployed, 2025, 12)
+    placement('active-travelled', 'active', 'o-2', m.ApplicationStatus.deployed, 2025, 13)
     placement('closed-only', 'closed', 'o-2', m.ApplicationStatus.closed, 2026, 1)
     bank.commit()
     assert ids(bank, '', order_id='o-1') == {'active'}
     assert ids(bank, '', order_id='o-2') == {'history'}
-    assert ids(bank, '', column_filters='{"stage":"12"}') == {'history'}
+    assert ids(bank, '', column_filters='{"stage":"13"}') == {'history'}
     assert ids(bank, '', column_filters='{"stage":"4"}') == {'active'}
     assert ids(bank, '', order_id='none') == {'closed', 'unplaced'}
     assert ids(bank, '', matchable=True) == {'closed', 'unplaced'}
@@ -250,7 +250,7 @@ def test_displayed_placement_prefers_active_then_latest_deployed_and_never_dupli
     header = rows[0]
     body = {row[header.index('Name')]: row for row in rows[1:]}
     assert len(body) == 4
-    for identifier, order, stage in [('history', 'ORD-ELEC', '12'), ('active', 'ORD-WELD', '4'), ('closed', '', ''), ('unplaced', '', '')]:
+    for identifier, order, stage in [('history', 'ORD-ELEC', '13'), ('active', 'ORD-WELD', '4'), ('closed', '', ''), ('unplaced', '', '')]:
         assert body[identifier][header.index('Mapped order')] == order
         assert body[identifier][header.index('Stage')] == stage
     assert body['history'][header.index('Status')] == 'deployed'
@@ -303,15 +303,15 @@ def _travel_fixture(bank):
                                created_at=datetime(year, 1, 1, tzinfo=timezone.utc)))
 
     deployed, active, closed = m.ApplicationStatus.deployed, m.ApplicationStatus.active, m.ApplicationStatus.closed
-    placement('p-id', 'flown-id', 'o-1', deployed, 12)
-    placement('p-legacy', 'flown-legacy', 'o-1', deployed, 12)
-    placement('p-old', 'flown-and-active', 'o-1', deployed, 12, 2024)
+    placement('p-id', 'flown-id', 'o-1', deployed, 13)
+    placement('p-legacy', 'flown-legacy', 'o-1', deployed, 13)
+    placement('p-old', 'flown-and-active', 'o-1', deployed, 13, 2024)
     placement('p-new', 'flown-and-active', 'o-2', active, 3, 2026)
-    placement('p-twice-1', 'flown-twice', 'o-1', deployed, 12, 2023)
-    placement('p-twice-2', 'flown-twice', 'o-2', deployed, 12, 2025)
+    placement('p-twice-1', 'flown-twice', 'o-1', deployed, 13, 2023)
+    placement('p-twice-2', 'flown-twice', 'o-2', deployed, 13, 2025)
     placement('p-working', 'working', 'o-1', active, 4)
     placement('p-closed', 'closed', 'o-1', closed, 2)
-    placement('p-reopened', 'reopened', 'o-1', active, 12)   # stage 12 reopened: no longer deployed
+    placement('p-reopened', 'reopened', 'o-1', active, 13)   # stage 13 reopened: no longer deployed
     bank.get(m.Candidate, 'marked-only').status = m.CandidateStatus.deployed
     bank.commit()
     return {'flown-id', 'flown-legacy', 'flown-and-active', 'flown-twice'}
@@ -328,7 +328,7 @@ def test_travelled_filter_splits_the_bank_into_travelled_and_not_travelled(bank)
     page = search_candidates(bank, Search(travelled='yes'), 0, 50)
     assert page['total'] == len(page['items']) == 4
     # It combines with the other filters and carries into every read that shares the search.
-    assert ids(bank, 'flown', travelled='yes', column_filters='{"stage":"12"}') == {'flown-id', 'flown-legacy', 'flown-twice'}
+    assert ids(bank, 'flown', travelled='yes', column_filters='{"stage":"13"}') == {'flown-id', 'flown-legacy', 'flown-twice'}
     assert ids(bank, '', travelled='no', pool='unmapped') == {'fresh', 'closed', 'marked-only'}
     assert ids(bank, '', travelled='yes', order_id='o-2') == {'flown-and-active', 'flown-twice'}
     assert position_groups(bank, Search(travelled='yes'))['resumes'] == 4

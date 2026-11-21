@@ -5,31 +5,52 @@ import ts from 'typescript'
 
 const source = await readFile(new URL('../src/shared/workflow/stages.ts', import.meta.url), 'utf8')
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
-const { stageByNo, parseStageNumber, stopExits, STAGES, TOTAL_STAGES, PCC_STAGE, ADVANCE_STAGE, PASSPORT_STAGE, closureLabels } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
+const { stageByNo, parseStageNumber, stopExits, STAGES, TOTAL_STAGES, ADVANCE_STAGE, PASSPORT_STAGE, MEDICAL_STAGE, PCC_STAGE, VISA_STAGE, REVIEW_STAGE, STAMPING_STAGE, TICKET_STAGE, closureLabels } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 const file = { id: 'stored-file' }
 const feedback = 'Reviewed with the candidate and approved moving to the next stage.'
 
-test('the workflow has twelve stages, in order, with Medical at 6 and the new PCC at 7', () => {
-  assert.equal(TOTAL_STAGES, 12)
-  assert.deepEqual(STAGES.map((stage) => stage.no), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
-  assert.deepEqual(STAGES.map((stage) => stage.key), ['prescreening', 'forwarded', 'interview_scheduling', 'interview_result', 'offer_letter', 'medical', 'pcc',
-    'passport', 'advance', 'visa_arrival', 'visa_stamping', 'air_ticket'])
-  assert.deepEqual(STAGES.map((stage) => stage.title), ['Prescreening', 'Forwarded to client', 'Interview scheduling', 'Interview result', 'Offer letter', 'Medical', 'PCC',
-    'Passport', 'Advance payment', 'Visa arrival + Google review', 'Visa stamping', 'Air ticket'])
-  assert.equal(new Set(STAGES.map((stage) => stage.taskTitle)).size, 12, 'every stage names its own task')
-  assert.equal(stageByNo(6).taskTitle, 'Complete the medical')
-  assert.equal(stageByNo(7).taskTitle, 'Collect the police clearance (PCC)')
-  assert.equal(stageByNo(8).taskTitle, 'Collect original passport')
-  assert.equal(stageByNo(9).taskTitle, 'Collect the advance')
-  assert.equal(stageByNo(12).taskTitle, 'Book the air ticket')
-  assert.deepEqual([PCC_STAGE, PASSPORT_STAGE, ADVANCE_STAGE], [7, 8, 9])
+test('the workflow has thirteen stages, in order, with the advance at 6, Medical at 8, PCC at 9 and the optional Google review at 11', () => {
+  assert.equal(TOTAL_STAGES, 13)
+  assert.deepEqual(STAGES.map((stage) => stage.no), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+  assert.deepEqual(STAGES.map((stage) => stage.key), ['prescreening', 'forwarded', 'interview_scheduling', 'interview_result', 'offer_letter', 'advance',
+    'passport', 'medical', 'pcc', 'visa_arrival', 'google_review', 'visa_stamping', 'air_ticket'])
+  assert.deepEqual(STAGES.map((stage) => stage.title), ['Prescreening', 'Forwarded to client', 'Interview scheduling', 'Interview result', 'Offer letter', 'Advance payment',
+    'Passport', 'Medical', 'PCC', 'Visa arrival', 'Google review', 'Visa stamping', 'Air ticket'])
+  assert.equal(new Set(STAGES.map((stage) => stage.taskTitle)).size, 13, 'every stage names its own task')
+  assert.equal(stageByNo(6).taskTitle, 'Collect the advance')
+  assert.equal(stageByNo(7).taskTitle, 'Collect original passport')
+  assert.equal(stageByNo(8).taskTitle, 'Complete the medical')
+  assert.equal(stageByNo(9).taskTitle, 'Collect the police clearance (PCC)')
+  assert.equal(stageByNo(11).taskTitle, 'Get the Google review')
+  assert.equal(stageByNo(13).taskTitle, 'Book the air ticket')
+  assert.deepEqual([ADVANCE_STAGE, PASSPORT_STAGE, MEDICAL_STAGE, PCC_STAGE, VISA_STAGE, REVIEW_STAGE, STAMPING_STAGE, TICKET_STAGE], [6, 7, 8, 9, 10, 11, 12, 13])
+  assert.equal(TICKET_STAGE, TOTAL_STAGES)
+})
+
+test('the Google review stage is optional: it completes with or without the review, and the visa stage no longer offers it', () => {
+  const review = stageByNo(11)
+  assert.deepEqual(review.fields.map((field) => field.name), ['feedback', 'googleReview', 'file'])
+  assert.equal(review.fields.find((field) => field.name === 'googleReview').type, 'checkbox')
+  assert.equal(review.fields.find((field) => field.name === 'file').type, 'file')
+  assert.ok(review.fields.filter((field) => field.name !== 'feedback').every((field) => field.required === false), 'the review is never a gate')
+  assert.equal(review.decision, undefined)
+  const run = (data) => review.evaluate({ feedback, ...data })
+  assert.equal(run({}).outcome, 'Completed manually')
+  assert.equal(run({}).canComplete, true)
+  assert.equal(run({ googleReview: true }).outcome, 'Obtained')
+  assert.equal(run({ googleReview: true, file }).outcome, 'Obtained')
+  assert.equal(run({ file }).outcome, 'Obtained')
+  assert.equal(run({ googleReview: true }).closes, undefined)
+  assert.equal(review.evaluate({ googleReview: true }).canComplete, false, 'no feedback')
+  assert.ok(!stageByNo(10).fields.some((field) => field.name === 'googleReview'), 'the visa stage has no Google review field')
+  assert.equal(stageByNo(10).title, 'Visa arrival')
 })
 
 test('Medical keeps only the medical fields and PCC has only the PCC fields, both rendered from the config like every stage', () => {
   const names = (no) => stageByNo(no).fields.map((field) => field.name)
-  assert.deepEqual(names(6), ['feedback', 'applied', 'appliedDate', 'result', 'reapplying', 'retestDate'])
-  assert.deepEqual(names(7), ['feedback', 'pccStatus', 'pccAppliedDate', 'pccReceivedDate', 'file'])
-  const pcc = stageByNo(7)
+  assert.deepEqual(names(8), ['feedback', 'applied', 'appliedDate', 'result', 'reapplying', 'retestDate'])
+  assert.deepEqual(names(9), ['feedback', 'pccStatus', 'pccAppliedDate', 'pccReceivedDate', 'file'])
+  const pcc = stageByNo(9)
   assert.deepEqual(pcc.fields.find((field) => field.name === 'pccStatus').options.map((option) => option.value), ['received', 'pending'])
   assert.equal(pcc.fields.find((field) => field.name === 'file').type, 'file')
   assert.equal(pcc.fields.find((field) => field.name === 'feedback').required, true)
@@ -39,28 +60,28 @@ test('Medical keeps only the medical fields and PCC has only the PCC fields, bot
 })
 
 test('PCC records Received, Pending or a manual move, and needs only the feedback', () => {
-  const run = (data) => stageByNo(7).evaluate({ feedback, ...data })
+  const run = (data) => stageByNo(9).evaluate({ feedback, ...data })
   assert.equal(run({}).outcome, 'Completed manually')
   assert.equal(run({ pccStatus: 'received' }).outcome, 'Received')
   assert.equal(run({ pccStatus: 'pending' }).outcome, 'PCC pending')
   assert.equal(run({ pccStatus: 'received', pccAppliedDate: '2026-11-01', pccReceivedDate: '2026-11-10', file }).canComplete, true)
   for (const data of [{ pccStatus: 'done' }, { pccStatus: 'received', pccReceivedDate: '2026-02-30' }, { file: 'fake.pdf' }]) assert.equal(run(data).canComplete, false, JSON.stringify(data))
-  assert.equal(stageByNo(7).evaluate({ pccStatus: 'received' }).canComplete, false, 'no feedback')
+  assert.equal(stageByNo(9).evaluate({ pccStatus: 'received' }).canComplete, false, 'no feedback')
   for (const result of [run({}), run({ pccStatus: 'pending' })]) {
     assert.equal(result.closes, undefined)
     assert.equal(result.repeats, undefined)
   }
 })
 
-test('all twelve stages retain their recorded outcomes with feedback', () => {
+test('all thirteen stages retain their recorded outcomes with feedback', () => {
   const values = [{ result: 'passed' }, { forwarded: 'yes' }, { scheduled: 'yes', date: '2026-11-02' },
-    { result: 'selected', remarks: 'Approved' }, { result: 'agreed', file }, { result: 'fit' }, { pccStatus: 'received', file },
-    { collected: 'yes' }, { collected: 'yes', amount: 20, receipt: file }, { arrived: 'yes' }, { done: 'yes', file }, { file, travelDate: '2026-11-15' }]
+    { result: 'selected', remarks: 'Approved' }, { result: 'agreed', file }, { advanceStatus: 'collected', amount: 20, receipt: file }, { collected: 'yes' },
+    { result: 'fit' }, { pccStatus: 'received', file }, { arrived: 'yes' }, { googleReview: true, file }, { done: 'yes', file }, { file, travelDate: '2026-11-15' }]
   assert.equal(values.length, TOTAL_STAGES)
   values.forEach((data, index) => assert.equal(stageByNo(index + 1).evaluate({ ...data, feedback }).canComplete, true, `stage ${index + 1}`))
 })
 
-test('the first eleven stages can be moved manually except the three decisions, while deployment needs an actual ticket and travel date', () => {
+test('the first twelve stages can be moved manually except the three decisions, while deployment needs an actual ticket and travel date', () => {
   for (let stage = 1; stage < TOTAL_STAGES; stage++) {
     if (stageByNo(stage).decision) continue
     const result = stageByNo(stage).evaluate({ feedback })
@@ -70,12 +91,13 @@ test('the first eleven stages can be moved manually except the three decisions, 
     assert.equal(result.repeats, undefined)
     assert.ok(stageByNo(stage).fields.every((field) => field.type !== 'file' || !field.required))
   }
-  const missing = stageByNo(12).evaluate({ feedback })
+  assert.deepEqual(STAGES.filter((stage) => stage.decision).map((stage) => stage.no), [4, 5, 8])
+  const missing = stageByNo(13).evaluate({ feedback })
   assert.equal(missing.canComplete, false)
   assert.deepEqual(missing.missing, ['Air ticket', 'Travel date'])
-  assert.equal(stageByNo(12).evaluate({ feedback, file }).canComplete, false)
-  assert.equal(stageByNo(12).evaluate({ feedback, travelDate: '2026-11-15' }).canComplete, false)
-  assert.equal(stageByNo(12).evaluate({ feedback, file, travelDate: '2026-11-15' }).outcome, 'Booked')
+  assert.equal(stageByNo(13).evaluate({ feedback, file }).canComplete, false)
+  assert.equal(stageByNo(13).evaluate({ feedback, travelDate: '2026-11-15' }).canComplete, false)
+  assert.equal(stageByNo(13).evaluate({ feedback, file, travelDate: '2026-11-15' }).outcome, 'Booked')
 })
 
 test('every stage requires new written feedback even when every other detail is filled', () => {
@@ -95,7 +117,7 @@ test('explicit negative outcomes still close or repeat, never silently advance',
   assert.equal(stageByNo(4).evaluate({ feedback, result: 'rejected' }).closes.reason, 'interview_rejected')
   assert.equal(stageByNo(5).evaluate({ feedback, result: 'declined' }).closes.reason, 'offer_declined')
   assert.equal(stageByNo(5).evaluate({ feedback, result: 'not_received' }).closes.reason, 'offer_not_received')
-  assert.equal(stageByNo(6).evaluate({ feedback, result: 'unfit' }).closes.reason, 'medical_unfit')
+  assert.equal(stageByNo(8).evaluate({ feedback, result: 'unfit' }).closes.reason, 'medical_unfit')
 })
 
 // Interview result, Offer letter and Medical: each choice is explicit, needs feedback, and only the positive one moves on.
@@ -105,8 +127,8 @@ const decisions = [
   [5, { result: 'agreed' }, 'Agreed', null],
   [5, { result: 'declined' }, 'Declined', 'offer_declined'],
   [5, { result: 'not_received' }, 'Not received', 'offer_not_received'],
-  [6, { result: 'fit' }, 'Fit', null],
-  [6, { result: 'unfit' }, 'Unfit', 'medical_unfit'],
+  [8, { result: 'fit' }, 'Fit', null],
+  [8, { result: 'unfit' }, 'Unfit', 'medical_unfit'],
 ]
 
 test('each decision records its outcome and only Selected, Agreed and Fit let the candidate go on', () => {
@@ -120,9 +142,9 @@ test('each decision records its outcome and only Selected, Agreed and Fit let th
 })
 
 test('a decision stage cannot be moved until the choice is made, whatever else is filled in', () => {
-  const labels = { 4: 'Interview result', 5: 'Offer letter result', 6: 'Medical result' }
-  const details = { 4: { remarks: 'Went well' }, 5: { obtained: 'yes', file }, 6: { applied: 'yes', appliedDate: '2026-11-02' } }
-  for (const stage of [4, 5, 6]) {
+  const labels = { 4: 'Interview result', 5: 'Offer letter result', 8: 'Medical result' }
+  const details = { 4: { remarks: 'Went well' }, 5: { obtained: 'yes', file }, 8: { applied: 'yes', appliedDate: '2026-11-02' } }
+  for (const stage of [4, 5, 8]) {
     for (const data of [{}, details[stage]]) {
       const result = stageByNo(stage).evaluate({ feedback, ...data })
       assert.equal(result.canComplete, false, `stage ${stage}`)
@@ -144,8 +166,8 @@ test('every choice on a decision stage still needs written feedback', () => {
 })
 
 test('the decision is a required field of its stage, offered as listed choices only', () => {
-  const offers = { 4: ['selected', 'rejected'], 5: ['agreed', 'declined', 'not_received'], 6: ['fit', 'unfit'] }
-  for (const stage of [4, 5, 6]) {
+  const offers = { 4: ['selected', 'rejected'], 5: ['agreed', 'declined', 'not_received'], 8: ['fit', 'unfit'] }
+  for (const stage of [4, 5, 8]) {
     const def = stageByNo(stage)
     const field = def.fields.find((f) => f.name === def.decision.field)
     assert.equal(field.required, true)
@@ -158,19 +180,19 @@ test('the decision is a required field of its stage, offered as listed choices o
 })
 
 test('medical retry records an attempt without closing or advancing', () => {
-  const result = stageByNo(6).evaluate({ feedback, result: 'unfit', reapplying: 'yes', retestDate: '2026-11-02' })
+  const result = stageByNo(8).evaluate({ feedback, result: 'unfit', reapplying: 'yes', retestDate: '2026-11-02' })
   assert.equal(result.canComplete, true)
   assert.equal(result.repeats, true)
   assert.equal(result.closes, undefined)
-  assert.equal(stageByNo(6).evaluate({ feedback, result: 'unfit', reapplying: 'yes' }).canComplete, false)
-  assert.equal(stageByNo(6).evaluate({ feedback, result: 'unfit', reapplying: 'no' }).closes.reason, 'medical_unfit')
-  assert.equal(stageByNo(6).evaluate({ feedback, result: 'unfit' }).repeats, undefined)
+  assert.equal(stageByNo(8).evaluate({ feedback, result: 'unfit', reapplying: 'yes' }).canComplete, false)
+  assert.equal(stageByNo(8).evaluate({ feedback, result: 'unfit', reapplying: 'no' }).closes.reason, 'medical_unfit')
+  assert.equal(stageByNo(8).evaluate({ feedback, result: 'unfit' }).repeats, undefined)
 })
 
 test('a Fit result is not blocked by a retained date from a previous re-medical selection', () => {
   const data = { feedback, applied: 'yes', appliedDate: '2026-11-03', result: 'unfit', reapplying: 'yes', retestDate: '2026-11-02' }
-  assert.equal(stageByNo(6).evaluate(data).canComplete, false)
-  const result = stageByNo(6).evaluate({ ...data, result: 'fit' })
+  assert.equal(stageByNo(8).evaluate(data).canComplete, false)
+  const result = stageByNo(8).evaluate({ ...data, result: 'fit' })
   assert.equal(result.canComplete, true)
   assert.equal(result.outcome, 'Fit')
   assert.equal(result.repeats, undefined)
@@ -191,17 +213,18 @@ test('stage route filters accept existing stages and ignore malformed or out-of-
 test('malformed enum, dates, money and fabricated attachment strings cannot complete', () => {
   const cases = [[1, { result: 'anything' }], [3, { scheduled: 'yes', date: '2026-02-30' }],
     [3, { scheduled: 'yes', date: '2026-11-02', time: '25:00' }],
-    [5, { result: 'agreed', file: 'fake.pdf' }], [5, { result: 'accepted' }], [9, { collected: 'yes', amount: -1, receipt: file }],
-    [9, { collected: 'yes', amount: 1.111, receipt: file }], [10, { arrived: 'yes', googleReview: 'yes' }], [7, { pccStatus: 'maybe' }],
-    [6, { result: 'unfit', reapplying: 'yes', appliedDate: '2026-11-03', retestDate: '2026-11-02' }]]
+    [5, { result: 'agreed', file: 'fake.pdf' }], [5, { result: 'accepted' }], [6, { collected: 'yes', amount: -1, receipt: file }],
+    [6, { collected: 'yes', amount: 1.111, receipt: file }], [11, { googleReview: 'yes' }], [9, { pccStatus: 'maybe' }],
+    [8, { result: 'unfit', reapplying: 'yes', appliedDate: '2026-11-03', retestDate: '2026-11-02' }]]
   for (const [stage, data] of cases) assert.equal(stageByNo(stage).evaluate({ ...data, feedback }).canComplete, false, JSON.stringify(data))
 })
 
 test('every stage offers a stopping exit that closes the application and needs feedback', () => {
   const expected = {
     1: ['rejected', 'declined'], 2: ['rejected', 'declined'], 3: ['rejected', 'declined', 'not_possible'], 4: ['rejected', 'declined'],
-    5: ['rejected', 'declined'], 6: ['rejected', 'declined'], 7: ['rejected', 'declined', 'not_cleared'], 8: ['rejected', 'declined', 'not_available'],
-    9: ['rejected', 'declined', 'not_paid'], 10: ['rejected', 'declined', 'visa_rejected'], 11: ['rejected', 'declined', 'refused'], 12: ['not_travelling'],
+    5: ['rejected', 'declined'], 6: ['rejected', 'declined', 'not_paid'], 7: ['rejected', 'declined', 'not_available'], 8: ['rejected', 'declined'],
+    9: ['rejected', 'declined', 'not_cleared'], 10: ['rejected', 'declined', 'visa_rejected'], 11: ['rejected', 'declined'], 12: ['rejected', 'declined', 'refused'],
+    13: ['not_travelling'],
   }
   for (let stage = 1; stage <= TOTAL_STAGES; stage++) {
     const def = stageByNo(stage)
@@ -220,24 +243,25 @@ test('every stage offers a stopping exit that closes the application and needs f
 
 test('the stopping exit uses the same closure reasons as the server and wins over the stage answers', () => {
   assert.equal(stageByNo(3).evaluate({ feedback, stop: 'not_possible' }).closes.reason, 'interview_not_possible')
-  assert.equal(stageByNo(7).evaluate({ feedback, stop: 'not_cleared' }).closes.reason, 'pcc_not_cleared')
+  assert.equal(stageByNo(9).evaluate({ feedback, stop: 'not_cleared' }).closes.reason, 'pcc_not_cleared')
   assert.equal(closureLabels.pcc_not_cleared, 'PCC not cleared')
-  assert.equal(stageByNo(8).evaluate({ feedback, stop: 'not_available' }).closes.reason, 'passport_not_available')
-  assert.equal(stageByNo(9).evaluate({ feedback, stop: 'not_paid' }).closes.reason, 'advance_not_paid')
+  assert.equal(stageByNo(7).evaluate({ feedback, stop: 'not_available' }).closes.reason, 'passport_not_available')
+  assert.equal(stageByNo(6).evaluate({ feedback, stop: 'not_paid' }).closes.reason, 'advance_not_paid')
   assert.equal(stageByNo(10).evaluate({ feedback, stop: 'visa_rejected' }).closes.reason, 'visa_rejected')
-  assert.equal(stageByNo(11).evaluate({ feedback, stop: 'refused' }).closes.reason, 'visa_stamping_refused')
-  assert.equal(stageByNo(12).evaluate({ feedback, stop: 'not_travelling' }).closes.reason, 'not_travelling')
-  // Each exit stayed with its own stage when PCC was inserted: the old Passport exit is not offered at the new stage 7, nor at Medical.
-  assert.deepEqual(stopExits(7).map((exit) => exit.value), ['rejected', 'declined', 'not_cleared'])
-  assert.ok(!stopExits(6).some((exit) => exit.value === 'not_available'))
-  assert.equal(stageByNo(7).evaluate({ feedback, stop: 'not_available' }).canComplete, false)
+  assert.equal(stageByNo(12).evaluate({ feedback, stop: 'refused' }).closes.reason, 'visa_stamping_refused')
+  assert.equal(stageByNo(13).evaluate({ feedback, stop: 'not_travelling' }).closes.reason, 'not_travelling')
+  // Each exit stayed with its own stage when the stages were reordered: the Passport exit is not offered at PCC, Medical or the Google review, nor the PCC exit at Medical.
+  assert.deepEqual(stopExits(9).map((exit) => exit.value), ['rejected', 'declined', 'not_cleared'])
+  assert.ok(!stopExits(8).some((exit) => exit.value === 'not_available' || exit.value === 'not_cleared'))
+  assert.ok(!stopExits(11).some((exit) => exit.value === 'refused'))
+  assert.equal(stageByNo(9).evaluate({ feedback, stop: 'not_available' }).canComplete, false)
   assert.equal(stageByNo(2).evaluate({ feedback, stop: 'declined' }).closes.reason, 'stage_declined')
   assert.equal(stageByNo(4).evaluate({ feedback, stop: 'rejected' }).closes.reason, 'interview_rejected')
   assert.equal(stageByNo(5).evaluate({ feedback, stop: 'declined' }).closes.reason, 'offer_declined')
   assert.equal(stageByNo(4).evaluate({ feedback, result: 'selected', stop: 'declined' }).closes.reason, 'stage_declined')
-  assert.equal(stageByNo(6).evaluate({ feedback, result: 'unfit', reapplying: 'yes', retestDate: '2026-12-01', stop: 'declined' }).repeats, undefined)
-  // Not offered at the stage: refused. Stage 12 has no Rejected or Declined, and deployment still needs the ticket and date.
-  assert.equal(stageByNo(12).evaluate({ feedback, stop: 'declined' }).canComplete, false)
+  assert.equal(stageByNo(8).evaluate({ feedback, result: 'unfit', reapplying: 'yes', retestDate: '2026-12-01', stop: 'declined' }).repeats, undefined)
+  // Not offered at the stage: refused. Stage 13 has no Rejected or Declined, and deployment still needs the ticket and date.
+  assert.equal(stageByNo(13).evaluate({ feedback, stop: 'declined' }).canComplete, false)
   assert.equal(stageByNo(5).evaluate({ feedback, stop: 'not_paid' }).canComplete, false)
-  assert.equal(stageByNo(12).evaluate({ feedback }).canComplete, false)
+  assert.equal(stageByNo(13).evaluate({ feedback }).canComplete, false)
 })

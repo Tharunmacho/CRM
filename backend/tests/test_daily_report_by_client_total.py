@@ -98,7 +98,7 @@ def seed(sessions):
         did("c8", 3, "Scheduled", ist(date(2026, 11, 4), 12), "ravi", order=g, data={"mode": "in_person"})
         did("c8", 4, "Rejected", ist(day, 12, 30), "ravi", order=g)
         did("c9", 5, "Agreed", ist(day, 10, 30), "ravi", order=g)
-        did("c10", 12, "Booked", ist(day, 13), "asha", order=g, data={"travelDate": "2026-11-20"})
+        did("c10", 13, "Booked", ist(day, 13), "asha", order=g, data={"travelDate": "2026-11-20"})
 
         did("c11", 2, "Forwarded", ist(day, 10), "ravi", order=d)
         did("c13", 1, "Passed", ist(day, 9, 30), "asha", order=d)

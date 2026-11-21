@@ -197,6 +197,45 @@ def test_merged_read_keeps_its_winning_orientation_for_provider_preparation():
     assert rotations_from(completeness) == {1: 90}
 
 
+def layered_scan_pdf(inks: list[str]) -> bytes:
+    """One page per ink. Each page is a scanner app's layered scan: a plain background picture, with the text stored as a 1-bit
+    black picture (stamped onto the page through its own mask) drawn over it. The background alone is a nearly blank page."""
+    with fitz.open() as doc:
+        for ink in inks:
+            page = doc.new_page(width=A4[0], height=A4[1])
+            page.insert_image(page.rect, stream=png(Image.new("RGB", (620, 877), (250, 244, 250))))
+            text = Image.new("L", (1240, 1754), 255)
+            ImageDraw.Draw(text).rectangle((100, 200, 900, 360), fill=0 if ink == "ink" else 128)
+            page.insert_image(fitz.Rect(0, 0, A4[0], A4[1] / 2), stream=png(text))
+        return doc.tobytes(deflate=True, no_new_id=True)
+
+
+def test_a_layered_scan_is_drawn_with_its_ink_layer_not_cut_down_to_its_background():
+    source = layered_scan_pdf(["ink"])
+    sent = prepare_job(source, [0])
+    assert not sent.fallback and sent.images == [1]
+    with fitz.open(stream=sent.content, filetype="pdf") as doc:
+        pixmap = doc[0].get_pixmap(dpi=40, colorspace=fitz.csGRAY, alpha=False)
+    # The black block of the ink layer is in the picture that is sent (the page is 842 pt: the block is in its upper half).
+    dark = sum(1 for value in pixmap.samples if value < 60)
+    assert dark > 300
+    # What was sent before kept only the picture that covers the page: the background, a page without any ink.
+    with fitz.open(stream=source, filetype="pdf") as doc:
+        info, cover = payload._largest_image(doc[0])
+        assert cover >= 0.85 and info["width"] == 620
+
+
+def test_a_page_of_one_picture_is_still_embedded_as_it_was():
+    source = scan_pdf([scan_image(800, 1100, 3)])
+    sent = prepare_job(source, [0])
+    assert sent.recompressed == 0 and page_images(sent.content) == [[(800, 1100)]]
+
+
+def test_pages_with_one_background_but_different_ink_are_not_duplicates():
+    background = layered_scan_pdf(["ink", "grey"])
+    assert unsendable(background, {1: ("resume",), 2: ("resume",)}, unread=set()) == {}
+
+
 # ------------------------------------------------------------------------------ blank and duplicate pages
 
 

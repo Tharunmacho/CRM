@@ -40,7 +40,7 @@ router = APIRouter(prefix="/api/travelled", tags=["travelled"])
 
 NOT_RECORDED = "Not recorded"   # the label for a placement with no agency (or no country) on file; it can be filtered on too
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-EXPORT_COLUMNS = ("Traveller ID", "Travel date", "Candidate", "Client", "Country", "Job", "Order", "Referral agency", "Airline and flight",
+EXPORT_COLUMNS = ("Traveller ID", "Date of travel", "Candidate", "Client", "Country", "Job", "Order", "Referral agency", "Airline and flight",
                   "PNR", "Recruiter", "Status", "Missing documents", "Passport")
 
 
@@ -170,7 +170,7 @@ def _read_rows(db: Session, user: User) -> list[dict]:
         select(Application.id, Application.status, Candidate.id, Candidate.ref, Candidate.name,
                agency_display_expression().label("agency"), Order.ref, Order.country, Company.name, Company.country, Client.id, Designation.title,
                User.name, travel, ticket.c.data["airline"].as_string(), ticket.c.data["pnr"].as_string(),
-               Candidate.passport_no, Order.id, Candidate.traveller_id, Candidate.care_id)
+               Candidate.passport_no, Order.id, Candidate.traveller_id, Candidate.care_id, Application.commencement_date)
         .select_from(Application)
         .join(Candidate, Candidate.id == Application.candidate_id)
         .join(Order, Order.id == Application.order_id)
@@ -187,7 +187,7 @@ def _read_rows(db: Session, user: User) -> list[dict]:
     found, stored_rows = parallel_reads(db, lambda session: session.execute(statement).all(), lambda session: session.execute(stored_statement).all())
     rows = []
     for (app_id, status, cand_id, ref, name, agency, order_ref, order_country, company, company_country, client_id,
-         job, recruiter, travel_date, airline, pnr, passport, order_id, traveller_id, care_id) in found:
+         job, recruiter, travel_date, airline, pnr, passport, order_id, traveller_id, care_id, commencement) in found:
         day = None
         if isinstance(travel_date, str) and _DAY.fullmatch(travel_date):
             try:
@@ -199,7 +199,7 @@ def _read_rows(db: Session, user: User) -> list[dict]:
             "country": _text(order_country) or _text(company_country), "job": job, "orderRef": order_ref,
             "orderId": order_id, "passportNumber": passport or None,
             "agency": agency,
-            "travelDate": day, "airline": airline or None, "pnr": pnr or None, "recruiter": recruiter,
+            "travelDate": day, "commencementDate": commencement.isoformat() if commencement else None, "airline": airline or None, "pnr": pnr or None, "recruiter": recruiter,
             "status": getattr(status, "value", status),
         })
     _add_documents(rows, stored_rows, user)

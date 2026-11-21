@@ -130,23 +130,25 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
 }
 
 /* Narrow panels (phones, tablets, a 1280px window): each row is a labelled card: the name leads it across the full width, then the figures in
- * two columns, each label over its number, everything left-aligned. One thin 6px-radius border per card (a phone: the panel's own border). */
+ * two columns, each label over its number, the label and the number both centred in their cell (the name stays left). One thin 6px-radius border per card (a phone: the panel's own border). */
 @container dw (max-width: 1079px) {
   :root:root .dwr .dwr-table .dw-staff-row > :is(td, th) { height: auto; padding: 0; border: 0; text-align: left; }
   :root:root .dwr .dwr-table .dw-staff-row > th.dwr-name { grid-column: 1 / -1; font-size: 15px; font-weight: 600; }
-  :root:root .dwr .dwr-table .dw-staff-row > td.is-num { font-size: 15px; font-weight: 600; text-align: left; }
-  :root:root .dwr .dwr-table .dw-staff-row > td.is-num > :is(.dw-none, .dwr-plain, .dwr-link) { display: block; margin: 0; text-align: left; }
-  :root:root .dwr .dwr-table .dw-staff-row > td.is-num > .dwr-link { display: inline-block; padding: 8px 12px 8px 0; margin: -8px 0; }
-  :root:root .dwr .dwr-table .dw-staff-row > td.is-tail { text-align: left; }
-  :root:root .dwr .dwr-table .dw-none { text-align: left; }
+  :root:root .dwr .dwr-table .dw-staff-row > td.is-num { font-size: 15px; font-weight: 600; text-align: var(--table-align, center); }
+  :root:root .dwr .dwr-table .dw-staff-row > td.is-num > :is(.dw-none, .dwr-plain, .dwr-link) { display: block; margin: 0; text-align: var(--table-align, center); }
+  :root:root .dwr .dwr-table .dw-staff-row > td.is-num > .dwr-link { display: inline-block; padding: 8px 12px; margin: -8px 0; }
+  :root:root .dwr .dwr-table .dw-staff-row > td.is-tail { text-align: var(--table-align, center); }
+  :root:root .dwr .dwr-table :is(td.is-num, td.is-tail) .dw-none { text-align: var(--table-align, center); }
+  :root:root .dwr .dwr-table .dw-staff-row > td.is-num .dwr-pct { justify-content: center; width: 100%; }
   .dwr .dwr-table .dwr-person { display: flex; }
   .dwr .dwr-table .dwr-who { display: block; text-align: left; white-space: normal; overflow-wrap: break-word; font-size: 15px; }
   .dwr .dwr-table .dwr-link { min-height: 44px; }
   .dwr .dwr-table tfoot { display: block; }
   .dwr .dwr-table tfoot .dwr-total { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; padding: 14px 16px; background: var(--tint-2); }
-  :root:root .dwr .dwr-table tfoot .dwr-total > :is(td, th) { display: block; height: auto; padding: 0; border: 0; background: transparent; text-align: left; }
+  :root:root .dwr .dwr-table tfoot .dwr-total > :is(td, th) { display: block; height: auto; padding: 0; border: 0; background: transparent; text-align: var(--table-align, center); }
+  :root:root .dwr .dwr-table tfoot .dwr-total > th { text-align: var(--table-align-text, left); }
   :root:root .dwr .dwr-table tfoot .dwr-total > th { grid-column: 1 / -1; }
-  .dwr .dwr-table tfoot .dwr-total > td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
+  .dwr .dwr-table tfoot .dwr-total > td[data-label]::before { content: attr(data-label); display: block; text-align: var(--table-align, center); margin-bottom: 3px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
   .dwr .dwr-table .dw-staff-row > td[data-label]::before { font-size: 12.5px; font-weight: 500; }
 }
 @container dw (min-width: 640px) and (max-width: 1079px) {
@@ -198,7 +200,7 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
   :root .dwr .dwr-table.dw-table.dw-main thead th { box-sizing: border-box; height: 44px; padding: 4px 8px; overflow: visible; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: var(--table-align, center); text-transform: uppercase; text-wrap: wrap; white-space: normal; overflow-wrap: normal; word-break: normal; vertical-align: middle; }
   :root .dwr .dwr-table.dw-table.dw-main thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
   :root .dwr .dwr-table.dw-table.dw-main thead th:is(.is-num, .is-tail) { padding: 4px 8px; text-align: var(--table-align, center); }
-  :root .dwr .dwr-table.dw-table.dw-main thead th.dwr-name-head { padding: 4px 10px; }
+  :root .dwr .dwr-table.dw-table.dw-main thead th.dwr-name-head { padding: 4px 10px 4px 16px; text-align: var(--table-align-text, left); }
 
   :root .dwr .dwr-table.dw-table.dw-main :is(tbody, tfoot) :is(td, th) { box-sizing: border-box; height: 56px; padding: 8px 8px 8px 10px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); background: transparent; font-size: 13px; font-weight: 400; text-align: var(--table-align, center); vertical-align: middle; overflow-wrap: break-word; }
   :root .dwr .dwr-table.dw-table.dw-main :is(tbody, tfoot) :is(td, th):not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
@@ -207,10 +209,10 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
   :root .dwr .dwr-table.dw-table.dw-main tbody .dw-staff-row.is-alt { background: transparent; }
 
   /* the name: centred like everything else; no avatar in the wide table (the avatar is for the cards), the name wraps at spaces, never mid-word */
-  :root .dwr .dwr-table.dw-table.dw-main th.dwr-name { padding: 8px 10px; font-weight: 600; text-align: var(--table-align, center); }
+  :root .dwr .dwr-table.dw-table.dw-main th.dwr-name { padding: 8px 10px 8px 16px; font-weight: 600; text-align: var(--table-align-text, left); }
   .dwr .dwr-table .record-avatar { display: none; }
   .dwr .dwr-table .dwr-person { display: block; }
-  .dwr .dwr-table .dwr-who { display: block; max-width: 100%; margin-inline: auto; overflow: visible; font-size: 13px; font-weight: 600; line-height: 1.35; text-align: var(--table-align, center); text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
+  .dwr .dwr-table .dwr-who { display: block; max-width: 100%; margin-inline: 0; overflow: visible; font-size: 13px; font-weight: 600; line-height: 1.35; text-align: var(--table-align-text, left); text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
 
   /* figures: centred under their centred headings (the same column centre), tabular numerals, one weight */
   :root .dwr .dwr-table.dw-table.dw-main td.is-num { padding: 8px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: var(--table-align, center); color: var(--text-main); }

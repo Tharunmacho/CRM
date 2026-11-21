@@ -465,3 +465,67 @@ test('the reminder is a small component on Tasks and the Dashboard, reading /min
   assert.match(await read('screens/dashboard/dashboard.tsx'), /<ReminderBanner \/>/)
   assert.match(await read('features/daily-report/my-day-card.tsx'), /focus/) // the card takes the focus when opened from the banner
 })
+
+// ------------------------------------------------------------------------------ Task progress by stage, Lead sheet by status, the attendance day
+
+const STAGE_LABELS = ['Prescreening', 'Forwarded', 'Interview scheduling', 'Interview result', 'Offer letter', 'Advance payment', 'Passport', 'Medical', 'PCC', 'Visa arrival', 'Google review', 'Visa stamping', 'Air ticket']
+
+test('stageProgress: 13 rows numbered like "1 · Prescreening", now / completed / stopped, shares of the candidates now at a stage, and a totals row', () => {
+  const totals = [{ no: 0, key: 'none', label: 'Not on an order yet', count: 4 }, ...STAGE_LABELS.map((label, i) => ({ no: i + 1, key: 's' + (i + 1), label, count: i === 0 ? 6 : i === 12 ? 10 : 0 }))]
+  const stageFlow = STAGE_LABELS.map((label, i) => ({ no: i + 1, key: 's' + (i + 1), label, completed: i + 1, stopped: i === 2 ? 1 : 0 }))
+  const p = v.stageProgress({ stages: { totals, perStaff: [] }, stageFlow })
+  assert.equal(p.hasFlow, true)
+  assert.deepEqual(p.rows.map(r => r.name), ['0 · Not on an order yet', ...STAGE_LABELS.map((l, i) => `${i + 1} · ${l}`)])
+  assert.deepEqual(p.rows.map(r => r.no), Array.from({ length: 14 }, (_, i) => i))
+  const one = p.rows[1]
+  assert.deepEqual({ now: one.now, completed: one.completed, stopped: one.stopped, share: one.share, drill: one.drill }, { now: 6, completed: 1, stopped: 0, share: 30, drill: 'stage:1' })
+  assert.equal(p.rows[13].share, 50)
+  assert.equal(p.rows[2].drill, undefined) // nobody there: nothing to open
+  assert.equal(p.rows[3].stopped, 1)
+  assert.deepEqual(p.total, { now: 20, completed: 91, stopped: 1 })
+})
+
+test('stageProgress: the "0 · Not on an order yet" row appears only when candidates are in that group; labels fall back to the 13 stage names', () => {
+  const totals = [{ no: 0, key: 'none', label: 'Not on an order yet', count: 0 }, { no: 1, key: 's1', label: 'Prescreening', count: 2 }]
+  const p = v.stageProgress({ stages: { totals, perStaff: [] }, stageFlow: [] })
+  assert.equal(p.rows.length, 13)
+  assert.equal(p.rows[0].name, '1 · Prescreening')
+  assert.equal(p.rows[12].name, '13 · Air ticket') // no label from the server: the built-in name
+  assert.deepEqual(v.STAGE_NAMES, STAGE_LABELS)
+  // an empty stageFlow list is a real answer (nothing completed): zeros, not dashes
+  assert.equal(p.hasFlow, true)
+  assert.equal(p.rows[0].completed, 0)
+})
+
+test('stageProgress: an older server without stageFlow gives null (a dash) in Completed and Stopped; without stages as well, in Now too; never an error', () => {
+  const totals = [{ no: 1, key: 's1', label: 'Prescreening', count: 3 }]
+  const old = v.stageProgress({ stages: { totals, perStaff: [] } })
+  assert.equal(old.hasFlow, false)
+  assert.equal(old.rows.length, 13)
+  assert.deepEqual([old.rows[0].now, old.rows[0].completed, old.rows[0].stopped], [3, null, null])
+  assert.deepEqual(old.total, { now: 3, completed: null, stopped: null })
+  const bare = v.stageProgress({})
+  assert.equal(bare.rows.length, 13)
+  assert.ok(bare.rows.every(r => r.now == null && r.completed == null && r.stopped == null && r.share === 0 && r.drill === undefined))
+  assert.deepEqual(bare.total, { now: null, completed: null, stopped: null })
+})
+
+test('leadStatusTable: the statuses with count and share, and the total; null without a lead sheet', () => {
+  assert.equal(v.leadStatusTable(undefined), null)
+  const table = v.leadStatusTable(report.leadSheet)
+  assert.equal(table.rows.length, 9)
+  assert.deepEqual(table.rows[0], { key: 'new', label: 'Not contacted', count: 70, pct: 47 })
+  assert.equal(table.total, 150)
+  assert.equal(table.totalPct, 100)
+  assert.deepEqual(v.leadStatusTable({ ...report.leadSheet, byStatus: [] }), { rows: [], total: 0, totalPct: 0 })
+})
+
+test('attendanceDay: the single day of the period, never after today; Total and ranges use today', () => {
+  const day = (from, to, all = false, today = '2026-11-17') => v.attendanceDay({ from, to }, all, today)
+  assert.equal(day('2026-11-17', '2026-11-17'), '2026-11-17')
+  assert.equal(day('2026-11-16', '2026-11-16'), '2026-11-16')
+  assert.equal(day('2026-11-10', '2026-11-17'), '2026-11-17')
+  assert.equal(day('2026-11-10', '2026-11-12'), '2026-11-17') // a range that ended earlier: still today
+  assert.equal(day('2000-01-01', '2026-11-17', true), '2026-11-17')
+  assert.equal(day('2026-11-20', '2026-11-20'), '2026-11-17')
+})

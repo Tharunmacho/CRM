@@ -24,6 +24,8 @@ export interface TravelledRow {
   orderId: string
   agency: string | null
   travelDate: string | null
+  /** Date of commencement (the Tasks list's DOC), ISO yyyy-mm-dd; absent from servers that do not send it yet. */
+  commencementDate?: string | null
   airline: string | null
   pnr: string | null
   recruiter: string | null
@@ -348,7 +350,7 @@ export function choosePeriod(filters: TravelledFilters, value: PeriodValue, toda
 }
 
 /**
- * How many of the filters behind "More filters" are on: Year, Month, exact Travel date, a From / To range (only when the Period select
+ * How many of the filters behind "More filters" are on: Year, Month, exact Date of travel, a From / To range (only when the Period select
  * does not already say it, i.e. a "Custom" date), Job / order and Missing documents only.
  */
 export function moreFilterCount(filters: TravelledFilters, today: string): number {
@@ -382,6 +384,11 @@ export function pageWindow(total: number, page: number, pageSize: number): PageW
   const pageCount = Math.max(1, Math.ceil(count / size))
   const safe = Math.min(Math.max(0, Math.floor(page) || 0), pageCount - 1)
   return { page: safe, pageCount, pageSize: size, total: count, from: count === 0 ? 0 : safe * size + 1, to: Math.min(count, (safe + 1) * size) }
+}
+
+/** The running S NO of a row: page 2 of 25 starts at 26. `index` is the row's position on its page, from 0. */
+export function serialNumber(page: number, pageSize: number, index: number): number {
+  return Math.max(0, page) * Math.max(1, pageSize) + index + 1
 }
 
 export function pageRows<T>(rows: readonly T[], page: number, pageSize: number): T[] {

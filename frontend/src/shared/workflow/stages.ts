@@ -78,7 +78,7 @@ export interface StageDef {
   /** Stage 6 can repeat after an unfit result. */
   repeatable?: boolean
   /**
-   * Stages 4, 5 and 6 are decisions: the recruiter must choose an outcome (it is not an optional detail) and only the
+   * Stages 4, 5 and 8 (interview, offer, medical) are decisions: the recruiter must choose an outcome (it is not an optional detail) and only the
    * positive one moves the candidate on. `fields` are the names shown together as the choice, outside the optional details.
    */
   decision?: DecisionDef
@@ -108,8 +108,8 @@ const manual = (outcome = 'Completed manually'): StageEvaluation => ({ canComple
 
 /**
  * The stopping exit of every stage (mirrors STOP_EXITS in backend/app/domain/stages.py): choice -> closure reason, closure label
- * and the outcome written on the stage record. Rejected and Declined are offered at stages 1-11, each stage adds its own wording,
- * and stage 12 only has Not travelling (completing it is the one way to Deployed). An explicit stop wins over the stage's answers.
+ * and the outcome written on the stage record. Rejected and Declined are offered at stages 1-12, each stage adds its own wording,
+ * and stage 13 (the air ticket) only has Not travelling (completing it is the one way to Deployed). An explicit stop wins over the stage's answers.
  */
 type StopExit = { value: string; label: string; reason: ClosureReason; closure: string; outcome: string }
 const GENERIC_STOPS: StopExit[] = [
@@ -121,15 +121,15 @@ const OWN_STOPS: Record<number, StopExit[]> = {
   3: [{ value: 'not_possible', label: 'Interview not possible', reason: 'interview_not_possible', closure: 'Interview not possible', outcome: 'Interview not possible' }],
   4: [{ value: 'rejected', label: 'Rejected', reason: 'interview_rejected', closure: 'Rejected at interview', outcome: 'Rejected' }],
   5: [{ value: 'declined', label: 'Declined', reason: 'offer_declined', closure: 'Offer declined', outcome: 'Declined' }],
-  7: [{ value: 'not_cleared', label: 'PCC not cleared', reason: 'pcc_not_cleared', closure: 'PCC not cleared', outcome: 'Not cleared' }],
-  8: [{ value: 'not_available', label: 'Passport not available', reason: 'passport_not_available', closure: 'Passport not available', outcome: 'Passport not available' }],
-  9: [{ value: 'not_paid', label: 'Not paid', reason: 'advance_not_paid', closure: 'Advance not paid', outcome: 'Not paid' }],
+  9: [{ value: 'not_cleared', label: 'PCC not cleared', reason: 'pcc_not_cleared', closure: 'PCC not cleared', outcome: 'Not cleared' }],
+  7: [{ value: 'not_available', label: 'Passport not available', reason: 'passport_not_available', closure: 'Passport not available', outcome: 'Passport not available' }],
+  6: [{ value: 'not_paid', label: 'Not paid', reason: 'advance_not_paid', closure: 'Advance not paid', outcome: 'Not paid' }],
   10: [{ value: 'visa_rejected', label: 'Visa rejected', reason: 'visa_rejected', closure: 'Visa rejected', outcome: 'Visa rejected' }],
-  11: [{ value: 'refused', label: 'Visa stamping refused', reason: 'visa_stamping_refused', closure: 'Visa stamping refused', outcome: 'Stamping refused' }],
-  12: [{ value: 'not_travelling', label: 'Not travelling', reason: 'not_travelling', closure: 'Not travelling', outcome: 'Not travelling' }],
+  12: [{ value: 'refused', label: 'Visa stamping refused', reason: 'visa_stamping_refused', closure: 'Visa stamping refused', outcome: 'Stamping refused' }],
+  13: [{ value: 'not_travelling', label: 'Not travelling', reason: 'not_travelling', closure: 'Not travelling', outcome: 'Not travelling' }],
 }
 export const stopExits = (no: number): StopExit[] => {
-  if (no === 12) return OWN_STOPS[12]
+  if (no === 13) return OWN_STOPS[13]
   const own = OWN_STOPS[no] ?? []
   return [...GENERIC_STOPS.map((generic) => own.find((item) => item.value === generic.value) ?? generic), ...own.filter((item) => !GENERIC_STOPS.some((generic) => generic.value === item.value))]
 }
@@ -352,159 +352,6 @@ export const STAGES: StageDef[] = [
   },
   {
     no: 6,
-    key: 'medical',
-    title: 'Medical',
-    taskTitle: 'Complete the medical',
-    summary:
-      'Send the candidate for the medical and record the result. A retest repeats this stage.',
-    closer: true,
-    repeatable: true,
-    decision: {
-      field: 'result',
-      prompt: 'Medical result',
-      message: 'Choose the medical result, Fit or Unfit, before moving this candidate.',
-      fields: ['result', 'reapplying', 'retestDate'],
-      advances: ['fit'],
-    },
-    fields: [
-      { name: 'applied', label: 'Applied for medical', type: 'radio', options: YES_NO },
-      {
-        name: 'appliedDate',
-        label: 'Date applied',
-        type: 'date',
-        width: 'half',
-        showWhen: { field: 'applied', in: ['yes'] },
-      },
-      {
-        name: 'result',
-        required: true,
-        label: 'Medical result',
-        type: 'radio',
-        options: [
-          { value: 'fit', label: 'Fit' },
-          { value: 'unfit', label: 'Unfit' },
-        ],
-      },
-      {
-        name: 'reapplying',
-        label: 'Plan another medical instead of stopping',
-        type: 'radio',
-        options: YES_NO,
-        showWhen: { field: 'result', in: ['unfit'] },
-        help: 'Leave this on No to stop here. Yes keeps the candidate on this stage and raises a follow-up task.',
-      },
-      {
-        name: 'retestDate',
-        required: true,
-        label: 'New medical date',
-        type: 'date',
-        width: 'half',
-        showWhen: { field: 'reapplying', in: ['yes'] },
-      },
-    ],
-    evaluate: (d) => {
-      if (d.result === 'fit') return { canComplete: true, missing: [], outcome: 'Fit' }
-      if (d.result !== 'unfit') return { canComplete: false, missing: ['Medical result'], outcome: '' }
-      if (d.reapplying === 'yes') {
-        const missing = need(d, [['retestDate', 'New medical date']])
-        return {
-          canComplete: missing.length === 0,
-          missing,
-          outcome: 'Unfit: reapplying',
-          repeats: true,
-        }
-      }
-      return {
-        canComplete: true,
-        missing: [],
-        closes: { reason: 'medical_unfit', label: 'Medically unfit' },
-        outcome: 'Unfit',
-      }
-    },
-  },
-  {
-    no: 7,
-    key: 'pcc',
-    title: 'PCC',
-    taskTitle: 'Collect the police clearance (PCC)',
-    summary: 'Apply for the police clearance certificate and record when it is in hand.',
-    closer: false,
-    fields: [
-      // Like the advance, the stage keeps one explicit answer: Received, or Pending (applied for, not in hand yet). Nothing else is required.
-      {
-        name: 'pccStatus',
-        required: true,
-        label: 'PCC status',
-        type: 'radio',
-        options: [
-          { value: 'received', label: 'Received' },
-          { value: 'pending', label: 'Pending' },
-        ],
-      },
-      {
-        name: 'pccAppliedDate',
-        label: 'Date applied',
-        type: 'date',
-        width: 'half',
-        showWhen: { field: 'pccStatus', in: ['received', 'pending'] },
-      },
-      {
-        name: 'pccReceivedDate',
-        label: 'Date received',
-        type: 'date',
-        width: 'half',
-        showWhen: { field: 'pccStatus', in: ['received'] },
-      },
-      {
-        name: 'file',
-        label: 'PCC copy',
-        type: 'file',
-        showWhen: { field: 'pccStatus', in: ['received'] },
-      },
-    ],
-    evaluate: (d) => {
-      // Nothing is required beyond the feedback: a Pending certificate is recorded and the candidate moves on (mirrors _stage7).
-      if (d.pccStatus === 'pending') return manual('PCC pending')
-      return manual(d.pccStatus === 'received' ? 'Received' : undefined)
-    },
-  },
-  {
-    no: 8,
-    key: 'passport',
-    title: 'Passport',
-    taskTitle: 'Collect original passport',
-    summary: 'Take custody of the original passport and record who is holding it.',
-    closer: false,
-    fields: [
-      {
-        name: 'copy',
-        label: 'Passport copy',
-        type: 'file',
-        help: 'Pre-filled from the profile. Replace it if you have a clearer scan.',
-      },
-      { name: 'collected', required: true, label: 'Original passport collected', type: 'radio', options: YES_NO },
-      {
-        name: 'collectedDate',
-        label: 'Date collected',
-        type: 'date',
-        width: 'half',
-        showWhen: { field: 'collected', in: ['yes'] },
-      },
-      {
-        name: 'heldBy',
-        label: 'Held by',
-        type: 'select',
-        optionsSource: 'users',
-        width: 'half',
-        showWhen: { field: 'collected', in: ['yes'] },
-      },
-    ],
-    evaluate: (d) => {
-      return manual(d.collected === 'yes' ? 'Collected' : undefined)
-    },
-  },
-  {
-    no: 9,
     key: 'advance',
     title: 'Advance payment',
     taskTitle: 'Collect the advance',
@@ -594,11 +441,164 @@ export const STAGES: StageDef[] = [
     },
   },
   {
+    no: 7,
+    key: 'passport',
+    title: 'Passport',
+    taskTitle: 'Collect original passport',
+    summary: 'Take custody of the original passport and record who is holding it.',
+    closer: false,
+    fields: [
+      {
+        name: 'copy',
+        label: 'Passport copy',
+        type: 'file',
+        help: 'Pre-filled from the profile. Replace it if you have a clearer scan.',
+      },
+      { name: 'collected', required: true, label: 'Original passport collected', type: 'radio', options: YES_NO },
+      {
+        name: 'collectedDate',
+        label: 'Date collected',
+        type: 'date',
+        width: 'half',
+        showWhen: { field: 'collected', in: ['yes'] },
+      },
+      {
+        name: 'heldBy',
+        label: 'Held by',
+        type: 'select',
+        optionsSource: 'users',
+        width: 'half',
+        showWhen: { field: 'collected', in: ['yes'] },
+      },
+    ],
+    evaluate: (d) => {
+      return manual(d.collected === 'yes' ? 'Collected' : undefined)
+    },
+  },
+  {
+    no: 8,
+    key: 'medical',
+    title: 'Medical',
+    taskTitle: 'Complete the medical',
+    summary:
+      'Send the candidate for the medical and record the result. A retest repeats this stage.',
+    closer: true,
+    repeatable: true,
+    decision: {
+      field: 'result',
+      prompt: 'Medical result',
+      message: 'Choose the medical result, Fit or Unfit, before moving this candidate.',
+      fields: ['result', 'reapplying', 'retestDate'],
+      advances: ['fit'],
+    },
+    fields: [
+      { name: 'applied', label: 'Applied for medical', type: 'radio', options: YES_NO },
+      {
+        name: 'appliedDate',
+        label: 'Date applied',
+        type: 'date',
+        width: 'half',
+        showWhen: { field: 'applied', in: ['yes'] },
+      },
+      {
+        name: 'result',
+        required: true,
+        label: 'Medical result',
+        type: 'radio',
+        options: [
+          { value: 'fit', label: 'Fit' },
+          { value: 'unfit', label: 'Unfit' },
+        ],
+      },
+      {
+        name: 'reapplying',
+        label: 'Plan another medical instead of stopping',
+        type: 'radio',
+        options: YES_NO,
+        showWhen: { field: 'result', in: ['unfit'] },
+        help: 'Leave this on No to stop here. Yes keeps the candidate on this stage and raises a follow-up task.',
+      },
+      {
+        name: 'retestDate',
+        required: true,
+        label: 'New medical date',
+        type: 'date',
+        width: 'half',
+        showWhen: { field: 'reapplying', in: ['yes'] },
+      },
+    ],
+    evaluate: (d) => {
+      if (d.result === 'fit') return { canComplete: true, missing: [], outcome: 'Fit' }
+      if (d.result !== 'unfit') return { canComplete: false, missing: ['Medical result'], outcome: '' }
+      if (d.reapplying === 'yes') {
+        const missing = need(d, [['retestDate', 'New medical date']])
+        return {
+          canComplete: missing.length === 0,
+          missing,
+          outcome: 'Unfit: reapplying',
+          repeats: true,
+        }
+      }
+      return {
+        canComplete: true,
+        missing: [],
+        closes: { reason: 'medical_unfit', label: 'Medically unfit' },
+        outcome: 'Unfit',
+      }
+    },
+  },
+  {
+    no: 9,
+    key: 'pcc',
+    title: 'PCC',
+    taskTitle: 'Collect the police clearance (PCC)',
+    summary: 'Apply for the police clearance certificate and record when it is in hand.',
+    closer: false,
+    fields: [
+      // Like the advance, the stage keeps one explicit answer: Received, or Pending (applied for, not in hand yet). Nothing else is required.
+      {
+        name: 'pccStatus',
+        required: true,
+        label: 'PCC status',
+        type: 'radio',
+        options: [
+          { value: 'received', label: 'Received' },
+          { value: 'pending', label: 'Pending' },
+        ],
+      },
+      {
+        name: 'pccAppliedDate',
+        label: 'Date applied',
+        type: 'date',
+        width: 'half',
+        showWhen: { field: 'pccStatus', in: ['received', 'pending'] },
+      },
+      {
+        name: 'pccReceivedDate',
+        label: 'Date received',
+        type: 'date',
+        width: 'half',
+        showWhen: { field: 'pccStatus', in: ['received'] },
+      },
+      {
+        name: 'file',
+        label: 'PCC copy',
+        type: 'file',
+        showWhen: { field: 'pccStatus', in: ['received'] },
+      },
+    ],
+    evaluate: (d) => {
+      // Nothing is required beyond the feedback: a Pending certificate is recorded and the candidate moves on (mirrors _stage7).
+      if (d.pccStatus === 'pending') return manual('PCC pending')
+      return manual(d.pccStatus === 'received' ? 'Received' : undefined)
+    },
+  },
+  {
     no: 10,
     key: 'visa_arrival',
-    title: 'Visa arrival + Google review',
+    title: 'Visa arrival',
     taskTitle: 'Follow up the visa',
-    summary: 'Record the visa once it arrives, and ask the candidate for a Google review.',
+    summary: 'Record the visa once it arrives.',
     closer: false,
     fields: [
       { name: 'arrived', required: true, label: 'Visa arrived', type: 'radio', options: YES_NO },
@@ -615,7 +615,6 @@ export const STAGES: StageDef[] = [
         type: 'file',
         showWhen: { field: 'arrived', in: ['yes'] },
       },
-      { name: 'googleReview', label: 'Google review obtained', type: 'checkbox' },
     ],
     evaluate: (d) => {
       return manual(d.arrived === 'yes' ? 'Arrived' : undefined)
@@ -623,6 +622,21 @@ export const STAGES: StageDef[] = [
   },
   {
     no: 11,
+    key: 'google_review',
+    title: 'Google review',
+    taskTitle: 'Get the Google review',
+    summary: 'Ask the candidate for a Google review. It is optional: tick it once it is done, or complete the stage without it.',
+    closer: false,
+    fields: [
+      { name: 'googleReview', label: 'Google review obtained', type: 'checkbox' },
+      { name: 'file', label: 'Review screenshot', type: 'file' },
+    ],
+    evaluate: (d) => {
+      return manual(d.googleReview === true || (d.file && d.file.id) ? 'Obtained' : undefined)
+    },
+  },
+  {
+    no: 12,
     key: 'visa_stamping',
     title: 'Visa stamping',
     taskTitle: 'Get the visa stamped',
@@ -650,7 +664,7 @@ export const STAGES: StageDef[] = [
     },
   },
   {
-    no: 12,
+    no: 13,
     key: 'air_ticket',
     title: 'Air ticket',
     taskTitle: 'Book the air ticket',
@@ -730,13 +744,15 @@ for (const definition of STAGES) {
 export const stageByNo = (no: number) => STAGES[no - 1]
 export const TOTAL_STAGES = STAGES.length
 
-/** The stage numbers other code names (stages 8 to 12 were 7 to 11 before PCC became stage 7). */
-export const MEDICAL_STAGE = 6
-export const PCC_STAGE = 7
-export const PASSPORT_STAGE = 8
-export const ADVANCE_STAGE = 9
+/** The stage numbers other code names (the same list as backend/app/domain/stages.py; migration 0056 reordered them). */
+export const ADVANCE_STAGE = 6
+export const PASSPORT_STAGE = 7
+export const MEDICAL_STAGE = 8
+export const PCC_STAGE = 9
 export const VISA_STAGE = 10
-export const STAMPING_STAGE = 11
+export const REVIEW_STAGE = 11
+export const STAMPING_STAGE = 12
+export const TICKET_STAGE = 13
 
 /** Route filters may be edited or linked from outside the application. */
 export function parseStageNumber(value: string | null): number | null {

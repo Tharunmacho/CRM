@@ -88,7 +88,7 @@
 .jv-stage-cell { display: grid; gap: 3px; min-width: 190px; }
 .jv-stage-note { font-size: 12px; color: var(--error-ink); }
 .jv-tracker { display: grid; gap: 6px; }
-.jv-tracker-bar { display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; width: 100%; max-width: 176px; }
+.jv-tracker-bar { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; width: 100%; max-width: 176px; }
 .jv-tracker-bar i { height: 5px; border-radius: 2px; background: var(--tint-3); }
 .jv-tracker-bar i.is-done { background: color-mix(in srgb, var(--primary) 45%, var(--bg-card)); }
 .jv-tracker-bar i.is-now { background: var(--primary); }

@@ -264,7 +264,7 @@ export function StageCell({ candidate, store, onOpenStage }: { candidate: Candid
   if (!app) return <Dash />
   if (!onOpenStage) return <StageChip stage={app.currentStage} />
   return (
-    <button type="button" className="dbt-stage" title={`See the 12 stages for ${store.orderLabel(app.orderId)}`}
+    <button type="button" className="dbt-stage" title={`See the 13 stages for ${store.orderLabel(app.orderId)}`}
       onClick={(event) => { event.stopPropagation(); onOpenStage(app.id) }}
       onKeyDown={(event) => event.stopPropagation()}>
       <StageChip stage={app.currentStage} />

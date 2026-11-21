@@ -283,3 +283,12 @@
   .clients-simple .cs-search { flex: 1 1 100%; order: 2; }
   .clients-simple .cs-layout { order: 3; margin-left: auto; }
 }
+
+/* Clients table: the two columns that start with an avatar (Company and Recruiter) read from the column's left edge, so the avatars and the
+   names line up row after row; centring a cell whose content has a different width in every row made them jump about. The other columns
+   keep the table's centred look. */
+:root:root:root:root:root .ops-clients .ui-data-table :is(th, td):is(:nth-child(1), :nth-child(4)) { text-align: left; }
+:root:root:root:root:root .ops-clients .ui-data-table td:is(:nth-child(1), :nth-child(4)) > :where(div, span, .record-identity, .cs-stack) { margin-inline: 0; width: auto; max-width: 100%; justify-content: flex-start; }
+:root:root:root:root:root .ops-clients .ui-data-table td:nth-child(1) .record-identity { display: flex; align-items: center; justify-content: flex-start; gap: 12px; }
+:root:root:root:root:root .ops-clients .ui-data-table td:nth-child(1) .record-avatar { flex: none; }
+:root:root:root:root:root .ops-clients .ui-data-table td:nth-child(1) :is(.record-name, .record-identity > div) { text-align: left; }

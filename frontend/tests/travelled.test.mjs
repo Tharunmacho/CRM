@@ -12,7 +12,7 @@ async function load(relative) {
 const model = await load('../src/features/travelled/travelled-model.ts')
 const {
   EMPTY_FILTERS, activeChips, activeQuick, agencyToday, barPercent, chooseTravelDate, clearChip, dateBarLabel, dateLevel, dateSummary,
-  daysInMonth, documentsLabel, documentsTitle, drillTo, exportName, filtersFromParams, formatTravelDay,
+  daysInMonth, serialNumber, documentsLabel, documentsTitle, drillTo, exportName, filtersFromParams, formatTravelDay,
   queryFor, quickRanges, setFilter, toggleFilter, toggleIncomplete, toggleQuick, toggleUndated, validIsoDate, withChosen,
 } = model
 
@@ -273,4 +273,11 @@ test('the Documents cell: a count, and what is missing when you point at it', ()
   assert.equal(documentsTitle(all), 'All mandatory documents are on file')
   assert.equal(documentsLabel({}), '')
   assert.equal(documentsTitle({}), '')
+})
+
+test('S NO is a running number across pages: page 2 of 25 starts at 26', () => {
+  assert.equal(serialNumber(0, 25, 0), 1)
+  assert.equal(serialNumber(0, 25, 24), 25)
+  assert.equal(serialNumber(1, 25, 0), 26)
+  assert.equal(serialNumber(3, 50, 7), 158)
 })

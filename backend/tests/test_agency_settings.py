@@ -1,7 +1,7 @@
 """Agency settings and the managed currency list (migration 0017), against the guarded disposable PostgreSQL DB.
 
 The seeds must equal the values that used to be compiled into the code, writes are admin-only and audited,
-the order form and the stage-8 advance accept exactly the ACTIVE currencies, retired codes stay readable on stored
+the order form and the stage-6 advance accept exactly the ACTIVE currencies, retired codes stay readable on stored
 records, and a database without the two tables keeps working on the last-resort defaults.
 """
 import importlib.util
@@ -339,13 +339,13 @@ def test_a_currency_that_is_used_cannot_be_deleted_only_switched_off(desk):
     message = "This currency is used by existing orders. Mark it inactive instead."
     with desk.sessions() as db:
         db.get(Order, "order").currency = "QAR"
-        stage = ApplicationStage(application_id="x", stage=9, attempt=1, data={"amountCurrency": "KWD"}, outcome="Collected")
-        db.add(Application(id="app-1", candidate_id="candidate", order_id="other-order", current_stage=9, status="closed",
+        stage = ApplicationStage(application_id="x", stage=6, attempt=1, data={"amountCurrency": "KWD"}, outcome="Collected")
+        db.add(Application(id="app-1", candidate_id="candidate", order_id="other-order", current_stage=6, status="closed",
                            draft={"amountCurrency": "BHD"}, lock_version=0))
         db.flush()
         stage.application_id = "app-1"
         db.add(stage)
-        db.add(ApplicationStage(application_id="app-1", stage=9, attempt=2, data={}, outcome="Collected", amount=5, amount_currency="OMR"))
+        db.add(ApplicationStage(application_id="app-1", stage=6, attempt=2, data={}, outcome="Collected", amount=5, amount_currency="OMR"))
         db.commit()
     for used in ("QAR", "KWD", "BHD", "OMR"):  # an order, stage JSON, a saved draft, the stage's currency column
         refused = desk.client.delete(f"/api/settings/currencies/{used}")
@@ -398,11 +398,11 @@ def test_an_order_without_a_currency_gets_the_agency_default(desk):
     assert desk.client.post("/api/orders", json=order_body()).json()["currency"] == "SAR"
 
 
-# ------------------------------------------------------------------ stage 9 (the advance)
+# ------------------------------------------------------------------ stage 6 (the advance)
 
-def to_stage_eight(env):
+def to_advance_stage(env):
     app_id = mapped(env)
-    reach(env, app_id, 9)
+    reach(env, app_id, 6)
     return app_id
 
 
@@ -411,18 +411,18 @@ def advance_draft(env, app_id, **values):
 
 
 def test_the_advance_accepts_exactly_the_active_currencies(desk):
-    app_id = to_stage_eight(desk)
+    app_id = to_advance_stage(desk)
     assert set_active(desk, "GBP", False).status_code == 200
     refused = advance_draft(desk, app_id, amountCurrency="GBP")
     assert refused.status_code == 422 and "available currencies" in json.dumps(refused.json())
     assert advance_draft(desk, app_id, amountCurrency="AED").json()["draft"]["amountCurrency"] == "AED"
     assert advance_draft(desk, app_id, amountCurrency="XXX").status_code == 422
     add_currency(desk, "BGN")
-    receipt = attachment(desk, app_id, 9, "receipt")
+    receipt = attachment(desk, app_id, 6, "receipt")
     result = complete(desk, app_id, {"collected": "yes", "amount": "1500", "amountCurrency": "BGN", "receipt": receipt})
-    assert result["currentStage"] == 10
+    assert result["currentStage"] == 7
     with desk.sessions() as db:
-        record = db.scalar(select(ApplicationStage).where(ApplicationStage.application_id == app_id, ApplicationStage.stage == 9))
+        record = db.scalar(select(ApplicationStage).where(ApplicationStage.application_id == app_id, ApplicationStage.stage == 6))
         assert (record.amount_currency, record.data["amountCurrency"]) == ("BGN", "BGN")
     # The retired code stays readable on what was already stored.
     assert set_active(desk, "BGN", False).status_code == 200
@@ -431,17 +431,17 @@ def test_the_advance_accepts_exactly_the_active_currencies(desk):
 
 
 def test_the_advance_currency_defaults_to_the_agency_setting(desk):
-    app_id = to_stage_eight(desk)
+    app_id = to_advance_stage(desk)
     assert advance_draft(desk, app_id).json()["draft"]["amountCurrency"] == "INR"
     assert put(desk).status_code == 200  # default advance currency USD
     assert advance_draft(desk, app_id).json()["draft"]["amountCurrency"] == "USD"
 
 
 def test_stage_validation_is_pure_and_falls_back_without_options():
-    assert validate_payload(9, {"amount": "10"})["amountCurrency"] == "INR"
-    assert validate_payload(9, {"amount": "10"}, StageOptions(frozenset({"BGN"}), "BGN"))["amountCurrency"] == "BGN"
+    assert validate_payload(6, {"amount": "10"})["amountCurrency"] == "INR"
+    assert validate_payload(6, {"amount": "10"}, StageOptions(frozenset({"BGN"}), "BGN"))["amountCurrency"] == "BGN"
     with pytest.raises(Exception):
-        validate_payload(9, {"amount": "10", "amountCurrency": "INR"}, StageOptions(frozenset({"BGN"}), "BGN"))
+        validate_payload(6, {"amount": "10", "amountCurrency": "INR"}, StageOptions(frozenset({"BGN"}), "BGN"))
 
 
 # ------------------------------------------------------------------ database without the tables
@@ -467,7 +467,7 @@ def test_a_database_without_the_tables_keeps_working_on_the_last_resort_defaults
     assert desk.client.post("/api/orders", json=order_body(currency="GBP")).json()["currency"] == "GBP"
     assert desk.client.post("/api/orders", json=order_body()).json()["currency"] == "AED"
     assert desk.client.post("/api/orders", json=order_body(currency="XXX")).status_code == 422
-    app_id = to_stage_eight(desk)
+    app_id = to_advance_stage(desk)
     assert advance_draft(desk, app_id).json()["draft"]["amountCurrency"] == "INR"
     assert advance_draft(desk, app_id, amountCurrency="XXX").status_code == 422
     assert normalize_phone("+91 90000 00001") == "9000000001"

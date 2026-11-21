@@ -96,7 +96,7 @@ def test_apply_renames_the_candidate_every_attachment_and_the_stage_file_referen
         _add_attachment(db, "extra-1", "candidate", cid, "mystery", "Hand made.pdf")
         _add_attachment(db, "extra-2", "application", application_id, "stage_2_file", "Interview note.pdf")
         db.commit()
-    assert {"stage 5", "stage 9", "stage 10", "draft"} <= {where for where, _ in refs}
+    assert {"stage 5", "stage 6", "stage 10", "draft"} <= {where for where, _ in refs}
 
     assert run("--candidate", care, "--apply") == 0
     out = capsys.readouterr().out
@@ -106,7 +106,7 @@ def test_apply_renames_the_candidate_every_attachment_and_the_stage_file_referen
     for key, old in names.items():      # the candidate's own copies AND the stage copies: only the name part changes
         assert after[key] == NEW_PREFIX + old[len(OLD_PREFIX):], key
     assert any(owner == "application" for owner, _, _ in after) and not any(n.startswith(OLD_PREFIX) for n in after.values())
-    assert after[("application", "stage_9_receipt", 1)] == NEW_PREFIX + "Advance_receipt_stage_9.pdf"
+    assert after[("application", "stage_6_receipt", 1)] == NEW_PREFIX + "Advance_receipt_stage_6.pdf"
     with fix.sessions() as db:
         candidate = db.get(m.Candidate, cid)
         assert candidate.name == "Gunavelan R"
@@ -149,8 +149,8 @@ def test_files_that_do_not_follow_the_pattern_get_standard_names_and_a_second_fi
     names = _file_names(fix, cid)
     assert names[("candidate", "passport", 1)] == "Gunavelan_R-Passport.pdf" and names[("candidate", "passport", 2)] == "Gunavelan_R-Passport-2.pdf"
     assert names[("candidate", "resume", 1)] == "Gunavelan_R-Resume.pdf"
-    assert names[("application", "stage_9_receipt", 1)] == "Gunavelan_R-Advance_receipt_stage_9.pdf"
-    assert len(set(n.lower() for n in names.values() if n != names[("application", "stage_9_receipt", 1)])) >= 3
+    assert names[("application", "stage_6_receipt", 1)] == "Gunavelan_R-Advance_receipt_stage_6.pdf"
+    assert len(set(n.lower() for n in names.values() if n != names[("application", "stage_6_receipt", 1)])) >= 3
 
 
 def test_a_second_run_changes_nothing_and_writes_no_audit_entry(fix, capsys):

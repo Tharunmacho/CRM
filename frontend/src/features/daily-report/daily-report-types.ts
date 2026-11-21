@@ -94,6 +94,8 @@ export interface LeadSheetSummary {
   previous?: { assignedInPeriod: number; contacted: number; newInPeriod: number }
 }
 export interface StageTotal { no: number; key: string; label: string; count: number }
+/** One of the 13 stages over the period (additive `stageFlow`): stage records completed in it, and how many of those ended the placement. */
+export interface StageFlow { no: number; key: string; label: string; completed: number; stopped: number }
 export interface StageBreakdown { totals: StageTotal[]; perStaff: { id: string; counts: Record<string, number>; total: number }[] }
 
 export interface DailyReport {
@@ -111,6 +113,8 @@ export interface DailyReport {
   leadSheet?: LeadSheetSummary
   tasks?: { total: number; done: number; pending: number; overdue: number }
   stages?: StageBreakdown
+  /** Additive: per stage 1 to 13, the stage records completed in the period and how many of those ended the placement. */
+  stageFlow?: StageFlow[]
   byClient?: ClientRow[]
 }
 

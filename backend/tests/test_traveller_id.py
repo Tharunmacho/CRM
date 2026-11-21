@@ -1,5 +1,5 @@
 """Care India TRAVELLER IDs (CI-T-001, CI-T-002 ...): one continuous series separate from the Data Bank Care India ID,
-assigned dynamically when the placement is deployed (stage 12), never before, never reused, immutable afterwards."""
+assigned dynamically when the placement is deployed (stage 13), never before, never reused, immutable afterwards."""
 import json
 import re
 from datetime import date, datetime, timezone
@@ -162,12 +162,12 @@ def test_migration_backfills_travelled_candidates_by_travel_date_then_renumbers_
         assert dict(connection.execute(text("SELECT id, traveller_id FROM crm_candidates")).all()) == {**expected, "h": None}
 
 
-# ------------------------------------------------------- assignment when stage 12 completes
+# ------------------------------------------------------- assignment when stage 13 completes
 
 def travel(env, candidate, order, day):
     app_id = mapped(env, candidate, order)
-    reach(env, app_id, 12)
-    data = payload(env, app_id, 12)
+    reach(env, app_id, 13)
+    data = payload(env, app_id, 13)
     data["travelDate"] = day
     complete(env, app_id, data)
     return app_id
@@ -178,7 +178,7 @@ def ids(env):
         return {c.id: (c.care_id, c.traveller_id) for c in db.scalars(select(Candidate))}
 
 
-def test_completing_stage_12_gives_the_next_traveller_number_in_the_order_people_travel(workflow):
+def test_completing_stage_13_gives_the_next_traveller_number_in_the_order_people_travel(workflow):
     env = workflow
     assert all(traveller is None for _care, traveller in ids(env).values())     # nobody has one before travelling
     travel(env, "candidate", "order", "2027-03-31")
@@ -200,7 +200,7 @@ def test_a_reversed_placement_keeps_its_traveller_id_when_completed_again(workfl
     assert ids(env)["candidate"][1] == "CI-T-001"
     env.actor = SimpleNamespace(id="admin", role=Role.admin)
     response = env.client.post(f"/api/applications/{app_id}/reopen", json={
-        "stage": 12, "reason": "Ticket corrected", "lock_version": version(env, app_id)})
+        "stage": 13, "reason": "Ticket corrected", "lock_version": version(env, app_id)})
     assert response.status_code == 200, response.text
     assert ids(env)["candidate"][1] == "CI-T-001"                # reversed from travelled: the number stays
     env.actor = SimpleNamespace(id="staff", role=Role.staff)
@@ -218,8 +218,8 @@ def test_concurrent_completions_get_distinct_traveller_numbers(workflow):
     env = workflow
     app_ids = [mapped(env, candidate=key) for key in ("candidate", "second-candidate")]
     for app_id in app_ids:
-        reach(env, app_id, 12)
-        data = payload(env, app_id, 12)
+        reach(env, app_id, 13)
+        data = payload(env, app_id, 13)
         data["travelDate"] = "2026-11-15"
         assert save(env, app_id, data).status_code == 200
     locks = [version(env, app_id) for app_id in app_ids]

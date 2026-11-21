@@ -8,11 +8,11 @@ Three buckets move on their own, computed from the live records on every read (n
   task is complete and the candidate leaves the to-work part at once. Deployed, not-interested and ownerless candidates are never
   listed, and neither is a candidate whose last placement ended because THEY declined (they are parked in the Data Bank until
   they are mapped to a new job, or until a call is recorded with the answer "yes" after the decline). A candidate nobody has contacted yet, or one who was rejected, stays on the list. No daily cap, no morning/evening, no slots, no deadlines, nothing postponed or carried over.
-* **Follow-up** (`/api/follow-up`): candidates the recruiter owns whose application is ACTIVE at stage 2 to 12: selected and
+* **Follow-up** (`/api/follow-up`): candidates the recruiter owns whose application is ACTIVE at stage 2 to 13: selected and
   still moving through the later stages. An application that closed (any negative exit: rejected, declined, not received,
   unfit, not interested ...) is no longer active, so it drops out; only candidates still going forward are listed. The stage
   rules decide what closes an application; this module only reads `status = active` and `current_stage`.
-* **Travelled**: stage 12 completes, the application becomes deployed and the candidate shows on the Travelled screen
+* **Travelled**: stage 13 (the air ticket) completes, the application becomes deployed and the candidate shows on the Travelled screen
   (`/api/travelled`, which reads deployed applications). Nothing here.
 
 Today's order, stable and the same on every read:
@@ -59,13 +59,13 @@ from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, AuditEntry, Candidate, CandidateStatus, Client, ClosureReason, Company, DailyGoal, Designation,
     Order, Remark, Source, Task, TaskKind, User,
 )
-from app.domain.stages import ADVANCE_STAGE, TOTAL_STAGES, VISA_STAGE, stage_by_no
+from app.domain.stages import ADVANCE_STAGE, REVIEW_STAGE, TOTAL_STAGES, VISA_STAGE, stage_by_no
 
 # Owned candidates the daily list draws on: being worked (new / in process) or assigned but still waiting for their
 # recruiter's review (missing phone, document warnings). A candidate does not stop being the recruiter's work because
 # the intake flagged its data: the assigned recruiter is the one who fixes it, so it must show on their list.
 WORKABLE = (CandidateStatus.new, CandidateStatus.in_process, CandidateStatus.needs_review)
-FOLLOW_UP_STAGES = (2, TOTAL_STAGES)  # an active application at these stages is Follow-up (12 = ticket booking pending); completing stage 12 deploys it (Travelled)
+FOLLOW_UP_STAGES = (2, TOTAL_STAGES)  # an active application at these stages is Follow-up (13 = ticket booking pending); completing stage 13 deploys it (Travelled)
 FALLBACK_GOALS = {"candidates": (5, 3), "forwarded_to_client": (2, None), "stage_moves": (5, None)}
 METRICS = tuple(FALLBACK_GOALS)
 MAX_ROWS = 1500  # a safety cap on the rows of one response; the counts are exact whatever the cap
@@ -393,14 +393,15 @@ def run_beside(db, main, *reads):
     return result, outcomes
 
 
-REVIEW_STAGE = VISA_STAGE  # "Visa arrival + Google review"; the review is "pending" from here on until it is obtained
+# REVIEW_STAGE (11, "Google review") comes from the stage definitions; the review is "pending" from there on until it is obtained.
+# Before migration 0056 it was ticked on the visa stage, so a value saved there still counts (see stage_facts).
 
 
 def stage_facts_query(*where):
-    """Stage 9 (advance) and stage 10 (visa arrival + Google review) records, never a reopened one, for the placements in `where`."""
+    """Stage 6 (advance), stage 10 (visa arrival, which used to carry the Google review tick) and stage 11 (Google review) records, never a reopened one, for the placements in `where`."""
     return (select(ApplicationStage.application_id, ApplicationStage.stage, ApplicationStage.attempt, ApplicationStage.completed_at,
                    ApplicationStage.amount, ApplicationStage.amount_currency, ApplicationStage.data)
-            .where(ApplicationStage.stage.in_((ADVANCE_STAGE, REVIEW_STAGE)), ApplicationStage.reopened_reason.is_(None), *where))
+            .where(ApplicationStage.stage.in_((ADVANCE_STAGE, VISA_STAGE, REVIEW_STAGE)), ApplicationStage.reopened_reason.is_(None), *where))
 
 
 def stage_facts(rows) -> dict[str, dict]:
@@ -408,7 +409,7 @@ def stage_facts(rows) -> dict[str, dict]:
     from `stage_facts_query` rows.
 
     The latest attempt of a stage is the effective record (the Advance collections report's rule). The advance is the amount the
-    recruiter recorded on stage 9, in the currency recorded there (INR unless another was chosen); a missing, zero or unreadable
+    recruiter recorded on stage 6, in the currency recorded there (INR unless another was chosen); a missing, zero or unreadable
     amount is no advance, and so is the amount of a Pending advance (it is only the one expected). It is the candidate's own money
     paid in; no invoice, CGST or GST figure is read here.
 
@@ -450,12 +451,12 @@ def stage_facts(rows) -> dict[str, dict]:
                 else:
                     entry["advance"] = (figure, entry["currency"])
         else:
-            entry["review"] = data.get("googleReview") is True
+            entry["review"] = entry["review"] or data.get("googleReview") is True
     return facts
 
 
 def payment_fields(app, facts: dict[str, dict]) -> dict:
-    """`advanceAmount` / `advanceCurrency` (null when none recorded) and `googleReview` ('obtained', 'pending' from stage 10 on, else null).
+    """`advanceAmount` / `advanceCurrency` (null when none recorded) and `googleReview` ('obtained', 'pending' from stage 11 on, else null).
 
     Also `advanceStatus` ('collected', 'pending' or null), `advanceExpected` (the amount of a pending advance) and `serviceChargeTotal`.
     `advanceAmount` stays the money actually collected: a pending advance never shows there."""
@@ -719,7 +720,7 @@ def assemble_outcome_rows(rows, remark_rows, fact_rows, closed_by: dict | None =
 # ------------------------------------------------------------------------------------------------ follow-up
 
 def _follow_up_filter(owner_ids):
-    """Active placements at stage 2-12 of candidates these recruiters own (and that are still open: not deployed / not interested)."""
+    """Active placements at stage 2-13 of candidates these recruiters own (and that are still open: not deployed / not interested)."""
     return [Candidate.owner_id.in_(owner_ids), Application.status == ApplicationStatus.active,
             Application.current_stage.between(*FOLLOW_UP_STAGES),
             Candidate.status.notin_([CandidateStatus.deployed, CandidateStatus.not_interested])]

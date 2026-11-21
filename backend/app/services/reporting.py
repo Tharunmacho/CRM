@@ -147,7 +147,7 @@ def sees_team(user):
     return is_admin_level(user)
 
 
-OVERVIEW_STAGES = (4, 5, 10, 11, 12)  # stage 4 feeds "selected"; 5, 10, 11, 12 feed the pipeline overview cards
+OVERVIEW_STAGES = (4, 5, 10, 12, 13)  # stage 4 feeds "selected"; 5, 10, 12, 13 feed the pipeline overview cards
 
 
 def read_dashboard_data(db, user, staff_id=None, zone=None, now=None):
@@ -222,7 +222,7 @@ def order_counts(applications):
 
     The PRD names the three numbers but does not define them, so: matched = applications still active on the
     order (not closed, not yet deployed); selected = active applications past stage 4; deployed = applications
-    that finished stage 12. Closed applications never count. The frontend keeps the same rule in
+    that finished the ticket stage (13). Closed applications never count. The frontend keeps the same rule in
     frontend/src/features/jobs/order-counts.ts, so the dashboard, reports, client page, order page and order
     cards all show identical numbers.
     """
@@ -233,7 +233,7 @@ def order_counts(applications):
 
 
 OVERVIEW_ITEM_LIMIT = 200  # rows listed per overview card; the counts are always the full numbers
-OFFER_STAGE, VISA_STAGE, STAMPING_STAGE, TICKET_STAGE = 5, 10, 11, 12
+OFFER_STAGE, VISA_STAGE, REVIEW_STAGE, STAMPING_STAGE, TICKET_STAGE = 5, 10, 11, 12, 13
 
 
 def _last_moves(data):
@@ -259,8 +259,8 @@ def pipeline_overview(data, apps, candidates, now):
     completed for STUCK_DAYS or more; one that never completed a stage is measured from when it was created), so
     both screens show the same people.
       offer      current = active at stage 5;                issued = stage 5 completed
-      visa       current = active at stage 10 or 11;         received = stage 10 completed, stamped = stage 11 completed
-      departure  current = active at stage 12 (ticket);      departed = deployed placements
+      visa       current = active at stage 10, 11 or 12;     received = stage 10 completed, stamped = stage 12 completed
+      departure  current = active at stage 13 (ticket);      departed = deployed placements
       idle       count = active placements with no progress for STUCK_DAYS+ days; longestDays = the oldest wait
     `items` lists the placements behind each number, waiting ones first (longest wait first), capped at
     OVERVIEW_ITEM_LIMIT; `itemsTotal` is the uncapped list length.
@@ -317,7 +317,7 @@ def pipeline_overview(data, apps, candidates, now):
             offer_w.append(row(app, "current", last))
         elif offered:
             offer_d.append(row(app, "done", offered))
-        if active and stage_no in (VISA_STAGE, STAMPING_STAGE):
+        if active and stage_no in (VISA_STAGE, REVIEW_STAGE, STAMPING_STAGE):
             visa_w.append(row(app, "current", last))
         elif got_visa or got_stamp:
             visa_d.append(row(app, "done", finished(app, VISA_STAGE, STAMPING_STAGE)))

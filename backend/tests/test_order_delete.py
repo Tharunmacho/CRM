@@ -179,7 +179,7 @@ def test_withdraw_flag_removes_the_applications_and_returns_candidates_to_the_da
 
 def test_a_deployed_placement_blocks_even_with_the_flag(env):
     cid = candidate(env.db, "placed")
-    application(env.db, "a-dep", cid, "o1", m.ApplicationStatus.deployed, stages=11)
+    application(env.db, "a-dep", cid, "o1", m.ApplicationStatus.deployed, stages=13)
     env.db.commit()
     for suffix in ("", "?withdrawApplications=true"):
         response = env.http().delete(f"/api/orders/o1{suffix}")
@@ -218,7 +218,7 @@ def test_a_recorded_payment_blocks_a_closed_placement_too(env):
 
 def test_a_deployment_on_another_job_does_not_block_this_one(env):
     cid = candidate(env.db, "two-jobs")
-    application(env.db, "a-dep", cid, "o2", m.ApplicationStatus.deployed, stages=11)
+    application(env.db, "a-dep", cid, "o2", m.ApplicationStatus.deployed, stages=13)
     application(env.db, "a-old", cid, "o1", m.ApplicationStatus.closed)
     env.db.commit()
     # Deployment on ORD-2 does not stop ORD-1 from being deleted once the admin confirms.

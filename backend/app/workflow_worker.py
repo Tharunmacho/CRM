@@ -6,7 +6,7 @@ import time
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.services.workflow_scheduler import deliver_due_todos, scan_daily_work_only, scan_workflow
+from app.services.workflow_scheduler import deliver_due_todos, scan_daily_work_only, scan_day_end_report, scan_workflow
 
 log = logging.getLogger("workflow_worker")
 TASK_SCAN_SECONDS = 15 * 60
@@ -32,6 +32,10 @@ def main():
                     counts = {**scan_daily_work_only(db, agency_timezone=get_settings().agency_timezone), "todos": deliver_due_todos(db)}
                 else:
                     counts = {"todos": deliver_due_todos(db)}
+                if task_scan or daily_scan:   # at most once a minute: the report itself is idempotent and a failure never stops the scans
+                    day_report = scan_day_end_report(db, agency_timezone=get_settings().agency_timezone)
+                    if day_report["sent"]:
+                        log.info("Day-end recruiter report delivered: %s", day_report)
                 db.commit()
                 if task_scan or daily_scan:
                     next_daily_scan = time.monotonic() + DAILY_SCAN_SECONDS

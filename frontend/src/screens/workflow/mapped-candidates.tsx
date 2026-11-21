@@ -236,7 +236,7 @@ export default function MappedCandidatesPage() {
     <div className="db mc">
       <PageHeader
         title="Matched candidates"
-        description="Candidates who are matched to an order. Open one to work on its 12 stages, from prescreening to deployment."
+        description="Candidates who are matched to an order. Open one to work on its 13 stages, from prescreening to deployment."
       />
 
       <KpiCards
@@ -259,7 +259,6 @@ export default function MappedCandidatesPage() {
               <Search size={15} aria-hidden="true" />
               <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search candidates, passports or orders" aria-label="Search candidates, passports or orders" />
             </label>
-            {!forceCards && view === 'table' && fit.hidden > 0 && <span className="ld-hidden-pill" title={`${fit.hidden} ${fit.hidden === 1 ? 'column is' : 'columns are'} hidden to fit the screen. Choose Columns to show ${fit.hidden === 1 ? 'it' : 'them'}, or switch to cards to see every field.`}>+{fit.hidden} hidden</span>}
             {!forceCards && view === 'table' && <ColumnMenu columns={menuColumns} groups={COLUMN_GROUPS} hidden={fit.hidden} shown={fit.keys} choices={columnChoices} onChange={setColumnChoices} />}
             {!forceCards && <ViewToggle view={view} onChange={changeView} />}
           </div>

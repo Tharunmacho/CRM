@@ -206,7 +206,7 @@ def test_flag_off_or_false_still_refuses_an_active_order(env):
 
 def test_withdraw_flag_never_overrides_a_deployed_placement(env):
     cid = candidate(env.db, "placed")
-    application(env.db, "a-dep", cid, "o1", m.ApplicationStatus.deployed, stages=11)
+    application(env.db, "a-dep", cid, "o1", m.ApplicationStatus.deployed, stages=13)
     application(env.db, "a-live", cid, "o2", m.ApplicationStatus.active)
     env.db.commit()
     response = env.http().delete(f"/api/candidates/{cid}?withdrawFromOrders=true")
@@ -239,7 +239,7 @@ def test_only_admin_level_roles_can_withdraw_and_delete(env, who):
 
 def test_deployed_candidate_cannot_be_deleted(env):
     cid = candidate(env.db, "placed")
-    application(env.db, "a-dep", cid, "o1", m.ApplicationStatus.deployed, stages=11)
+    application(env.db, "a-dep", cid, "o1", m.ApplicationStatus.deployed, stages=13)
     env.db.commit()
     response = env.http().delete(f"/api/candidates/{cid}")
     assert response.status_code == 409

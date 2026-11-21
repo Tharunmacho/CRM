@@ -78,13 +78,21 @@ test('Reports people table, By client, Lead sheet and Candidate monitoring: cent
   const wide = css.slice(css.indexOf('@container dw (min-width: 1080px)'), css.indexOf('/* "Lead status now"'))
   assert.match(wide, /thead th \{[^}]*text-align: var\(--table-align, center\);[^}]*white-space: normal;/, 'centred headings that wrap at spaces')
   assert.match(wide, /:is\(tbody, tfoot\) :is\(td, th\) \{[^}]*text-align: var\(--table-align, center\);[^}]*vertical-align: middle;/)
-  assert.match(wide, /th\.dwr-name \{[^}]*text-align: var\(--table-align, center\);/, 'names are centred')
+  // names stay left (the owner's rule: numbers and headings centred, names left), under a left name heading; the figure columns stay centred
+  assert.match(wide, /th\.dwr-name \{[^}]*text-align: var\(--table-align-text, left\);/, 'names are left')
+  assert.match(wide, /thead th\.dwr-name-head \{[^}]*text-align: var\(--table-align-text, left\);/, 'the name column heading is left over its names')
+  assert.match(wide, /\.dwr-who \{[^}]*text-align: var\(--table-align-text, left\);/, 'the name itself is left')
+  assert.match(wide, /td\.is-num \{[^}]*text-align: var\(--table-align, center\);/, 'figures are centred')
   assert.match(wide, /td\.is-tail \{ padding: 8px; text-align: var\(--table-align, center\); \}/, 'the Day closed pills are centred')
   assert.match(wide, /\.dwr-pct \{ justify-content: center;/, 'the Contacted % meter is centred')
   assert.match(wide, /\.dw-group > th \{[^}]*text-align: var\(--table-align-text, left\);/, 'the Active today / No activity bands stay left')
   assert.doesNotMatch(wide, /text-align: (right|left);(?![^}]*dw-group)/, 'no right- or left-aligned figure or name in the wide table')
-  // the stacked cards (under 1080px) keep their left layout
+  // the stacked cards (under 1080px): the name leads the card on the left, each figure sits centred under its centred label
   assert.match(css, /@container dw \(max-width: 1079px\)/)
+  const cards = css.slice(css.indexOf('@container dw (max-width: 1079px)'), css.indexOf('@container dw (min-width: 640px) and (max-width: 1079px)'))
+  assert.match(cards, /td\.is-num \{ font-size: 15px; font-weight: 600; text-align: var\(--table-align, center\); \}/, 'a figure in a card is centred')
+  assert.match(cards, /th\.dwr-name \{ grid-column: 1 \/ -1;/, 'the name leads the card across its full width')
+  assert.doesNotMatch(cards, /td\.is-num \{[^}]*text-align: left/, 'no left-aligned figure in a card')
   // the drill-down tables: centred, the free-text detail cell left
   assert.match(css, /\.dr-drill-table td \{[^}]*text-align: var\(--table-align, center\); vertical-align: middle;/)
   assert.match(css, /\.dr-drill-table td\.dr-detail \{ text-align: var\(--table-align-text, left\); \}/)

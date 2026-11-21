@@ -143,7 +143,7 @@ def test_upgrade_renumbers_every_stored_stage_number_and_carries_the_pcc_data(sc
     _migrate(engine, PREVIOUS)
     seed(engine)
     before = {name: records(engine, name) for name in ("a3", "a6", "a7", "a9", "a11", "ac", "ac6")}
-    _migrate(engine, "head")
+    _migrate(engine, "0048_pcc_stage")
 
     # Applications: those at stage >= 7 move up one; the ones at 3 and 6 (and the one closed at 6) stay.
     assert apps(engine) == {"a3": (3, "active", None), "a6": (6, "active", None), "a7": (8, "active", None), "a9": (10, "active", None),
@@ -204,7 +204,7 @@ def test_upgrade_renumbers_every_stored_stage_number_and_carries_the_pcc_data(sc
 
 def test_range_checks_allow_twelve_stages_and_no_more(schema_database):
     engine = schema_database
-    _migrate(engine, "head")
+    _migrate(engine, "0048_pcc_stage")
     with engine.begin() as c:
         execute(c, "INSERT INTO crm_client_contacts (id, name) VALUES ('client', 'Client')")
         execute(c, "INSERT INTO crm_employer_companies (id, client_id, name) VALUES ('company', 'client', 'Company')")
@@ -225,7 +225,7 @@ def test_range_checks_allow_twelve_stages_and_no_more(schema_database):
 def test_an_empty_database_migrates_both_ways(schema_database):
     engine = schema_database
     _migrate(engine, PREVIOUS)
-    _migrate(engine, "head")
+    _migrate(engine, "0048_pcc_stage")
     assert column(engine, "SELECT count(*) FROM crm_application_stages") == [0]
     _migrate(engine, PREVIOUS, downgrade=True)
     with engine.begin() as c:
@@ -250,7 +250,7 @@ def test_running_the_migration_body_again_on_converted_data_changes_nothing(sche
     engine = schema_database
     _migrate(engine, PREVIOUS)
     seed(engine)
-    _migrate(engine, "head")
+    _migrate(engine, "0048_pcc_stage")
     snapshot = ({name: records(engine, name) for name in ("a7", "a9", "a11")}, apps(engine), slots(engine, "a11"))
     upgrade = _body("upgrade")
     with engine.begin() as c:
@@ -264,7 +264,7 @@ def test_downgrade_merges_pcc_back_and_shifts_down_and_upgrading_again_restores_
     _migrate(engine, PREVIOUS)
     seed(engine)
     original = {name: records(engine, name) for name in ("a3", "a6", "a7", "a9", "a11", "ac", "ac6")}
-    _migrate(engine, "head")
+    _migrate(engine, "0048_pcc_stage")
 
     # Work done on the new stage 7 after the upgrade: an application at PCC (open task, draft, document, note, audit), another
     # one closed at PCC, and a real PCC answer on a9.
@@ -338,7 +338,7 @@ def test_downgrade_merges_pcc_back_and_shifts_down_and_upgrading_again_restores_
         assert dict(c.execute(text("SELECT id, detail FROM system_notifications")).all())["nt1"].startswith("Asha · Stage 9 · ")
 
     # Upgrading again restores the PCC records from the nested answers.
-    _migrate(engine, "head")
+    _migrate(engine, "0048_pcc_stage")
     restored = records(engine, "a9")[(7, 1)]
     assert restored["data"] == {"pccStatus": "pending", "pccAppliedDate": "2026-04-02", "feedback": "applied"} and restored["outcome"] == "PCC pending"
     assert records(engine, "a11")[(7, 1)]["data"] == {"pccStatus": "received", "pccReceivedDate": "2026-03-01"}
