@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertCircle, Check, ChevronDown, ChevronRight, Download, FileSpreadsheet, Loader2, Plane, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
+import { AlertCircle, Building2, Check, ChevronDown, ChevronRight, Download, FileSpreadsheet, Globe2, Loader2, Plane, RefreshCw, Search, SlidersHorizontal, Users, X } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Input, Select } from '@/shared/ui/primitives'
 import { EmptyState, PageHeader, StatusPill } from '@/shared/ui/display'
+import { SummaryCards } from '@/shared/ui/workspace'
 import { SnapshotState } from '@/shared/ui/page-loading'
 import { cn } from '@/shared/lib/cn'
 import { Pager } from '@/features/candidates/components/db-parts'
@@ -136,13 +137,13 @@ export default function TravelledPage() {
       <Button size="sm" disabled={!data || !!exporting} icon={exporting === 'xlsx' ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />} onClick={() => void exportFile('xlsx')}>{exporting === 'xlsx' ? 'Preparing Excel…' : 'Export Excel'}</Button>
       <Button size="sm" disabled={!data || !!exporting} icon={exporting === 'csv' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} onClick={() => void exportFile('csv')}>{exporting === 'csv' ? 'Preparing CSV…' : 'Export CSV'}</Button>
     </>}>
-      {data && <ul className="tv-stats" aria-label="Totals for this list">
-        <li><Plane size={14} aria-hidden="true" /><strong className="tnum">{data.total.toLocaleString()}</strong> Travelled</li>
-        <li><strong className="tnum">{data.summary.byClient.length.toLocaleString()}</strong> {data.summary.byClient.length === 1 ? 'Client' : 'Clients'}</li>
-        <li><strong className="tnum">{countries.toLocaleString()}</strong> {countries === 1 ? 'Country' : 'Countries'}</li>
-        <li><strong className="tnum">{agencies.toLocaleString()}</strong> {agencies === 1 ? 'Agency' : 'Agencies'}</li>
-      </ul>}
     </PageHeader>
+    {data && <SummaryCards items={[
+      { label: 'Travelled', value: data.total.toLocaleString(), detail: data.total === 1 ? 'candidate deployed' : 'candidates deployed', icon: Plane, tone: 'green' },
+      { label: data.summary.byClient.length === 1 ? 'Client' : 'Clients', value: data.summary.byClient.length.toLocaleString(), detail: 'employers they flew to', icon: Building2 },
+      { label: countries === 1 ? 'Country' : 'Countries', value: countries.toLocaleString(), detail: 'where they went', icon: Globe2 },
+      { label: agencies === 1 ? 'Agency' : 'Agencies', value: agencies.toLocaleString(), detail: 'recorded referral agencies', icon: Users },
+    ]} />}
 
     <section className="tv-toolbar" aria-label="Filters">
       <label className="tv-search">

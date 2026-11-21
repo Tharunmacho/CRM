@@ -86,7 +86,10 @@ test('a page starts at 25 (10 on a phone) unless the person chose a size', () =>
 
 test('the screen: header totals, ONE toolbar row, chips only while a filter is on, a folded Breakdown, a paged table', async () => {
   const source = await read('screens/travelled/travelled.tsx')
-  assert.match(source, /<ul className="tv-stats" aria-label="Totals for this list">/)
+  // the four totals are cards (the shared SummaryCards look), not small pills: Travelled, Clients, Countries, Agencies
+  assert.match(source, /<SummaryCards items=\{\[/)
+  for (const label of ['Travelled', 'Plane', 'Building2', 'Globe2', 'Users']) assert.match(source, new RegExp(label))
+  assert.doesNotMatch(source, /<ul className="tv-stats"/)
   assert.equal([...source.matchAll(/<section className="tv-toolbar"/g)].length, 1, 'one toolbar')
   for (const label of ['Period', 'Client', 'Country', 'Agency']) assert.match(source, new RegExp(`aria-label="${label}"`))
   assert.match(source, /More filters/)
@@ -95,7 +98,7 @@ test('the screen: header totals, ONE toolbar row, chips only while a filter is o
   assert.match(source, /Missing documents only/)
   assert.match(source, /\{chips\.length > 0 && <div className="tv-chips"/, 'the chips row exists only while a filter is on')
   assert.match(source, /Clear all/)
-  for (const gone of ['Show all candidates', 'All travelled candidates are shown when no filters', 'tv-quick', 'SummaryCards', '<details className="tv-breakdown-panel"']) assert.ok(!source.includes(gone), `${gone} is gone`)
+  for (const gone of ['Show all candidates', 'All travelled candidates are shown when no filters', 'tv-quick', '<details className="tv-breakdown-panel"']) assert.ok(!source.includes(gone), `${gone} is gone`)
   assert.match(source, /aria-expanded=\{breakdownOpen\}/)
   assert.match(source, /\{breakdownOpen && <div id="tv-breakdowns"/, 'the breakdown cards are not even rendered while folded')
   assert.match(source, /useState\(readBreakdownOpen\)/)
@@ -113,7 +116,6 @@ test('the toolbar and the table sit above the fold: slim header, 40px controls, 
   assert.match(css, /\.tv-search \{[^}]*height: 40px;/)
   assert.match(css, /:is\(\.tv-sel, \.tv-field\) \.custom-select-trigger \{[^}]*height: 40px; min-height: 40px;/)
   assert.match(css, /\.tv-more-toggle \{[^}]*height: 40px;/)
-  assert.match(css, /\.tv-stats li \{[^}]*height: 30px;/, 'one slim line of totals')
   assert.match(css, /\.tv-meta \{[^}]*min-height: 32px;/)
   assert.match(css, /\.tv-more-panel \{ position: absolute;/, 'More filters opens over the list, it never pushes the table down')
   assert.match(css, /\.tv-table-wrap \{ position: relative; max-height: max\(360px, calc\(100dvh - 380px\)\);/, 'the table box fits the screen and contains its screen-reader texts (no page stretching)')
@@ -134,7 +136,6 @@ test('phone: search and one Filters button, totals scroll sideways, filters open
   assert.match(source, /\{!phone && <>/, 'the four selects leave the toolbar on a phone')
   assert.match(source, /\{phone && <>\s*<Field label="Period">/, 'and move into the sheet')
   const phone = css.slice(css.indexOf('@media (max-width: 768px)'))
-  assert.match(phone, /\.tv-stats \{ flex-wrap: nowrap;[^}]*overflow-x: auto;/)
   assert.match(phone, /\.tv-more-panel \{ position: fixed;[^}]*bottom: 0;[^}]*border-radius: 16px 16px 0 0;/)
   assert.match(phone, /\.tv-backdrop \{ position: fixed; inset: 0;/)
   assert.match(css, /@media \(max-width: 899px\) \{[\s\S]*\.tv-table-wrap \{ max-height: none; overflow: visible; \}/, 'no inner scroll box for cards')
