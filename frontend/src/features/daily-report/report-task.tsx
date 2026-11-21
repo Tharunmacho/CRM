@@ -72,7 +72,7 @@ export function TaskReportView({ report, roster, staff, onPickStaff, onDrill, on
             <colgroup><col style={{ width: NAME_WIDTH }} />{Array.from({ length: 14 }, (_, i) => <col key={i} />)}<col style={{ width: TOTAL_WIDTH }} /></colgroup>
             <thead><tr>
               <th scope="col" className="dwr-name-head">Recruiter</th>
-              <th scope="col" className="is-num" title="Not on an order yet: candidates who are not matched to an order."><span className="dwm-h-no">–</span><span className="dwm-h-name">No order</span></th>
+              <th scope="col" className="is-num" title="No job yet: candidates who are on the recruiter's list but not yet matched to a job (order) of a client."><span className="dwm-h-no">–</span><span className="dwm-h-name">No job</span></th>
               {matrix.stages.map(stage => <th key={stage.no} scope="col" className="is-num" title={`Stage ${stage.no}: ${stage.name}`}><span className="dwm-h-no">{stage.no}</span><span className="dwm-h-name">{stage.short}</span></th>)}
               <th scope="col" className="is-num"><span className="dwm-h-no">&Sigma;</span><span className="dwm-h-name">Total</span></th>
             </tr></thead>

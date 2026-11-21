@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session, undefer
 
 from app.core.config import get_settings
@@ -1026,6 +1027,10 @@ def save_form(db: Session, user: User, candidate_id: str, body: dict, *, applica
     meta = {"changed_fields": changed}
     if placement is not None and placement.commencement_date != body["application"]["commencementDate"]:
         placement.commencement_date = body["application"]["commencementDate"]
+        if placement.status != ApplicationStatus.active:
+            # An ended placement's `updated_at` is the time it closed (the Tasks page's parking rule and Declined / Rejected order read it):
+            # writing the date of commencement must not move it.
+            flag_modified(placement, "updated_at")
         changed.append("application.commencementDate")
         meta["application_id"] = placement.id
     if changed:

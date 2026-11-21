@@ -329,8 +329,8 @@ export interface StageCol extends TableCol { no: number }
 export function stageColumns(report: DailyReport): StageCol[] {
   const totals = report.stages?.totals ?? []
   return [...totals].sort((a, b) => a.no - b.no).map(item => ({
-    no: item.no, id: String(item.no), label: item.no === 0 ? 'No order' : String(item.no),
-    info: item.no === 0 ? 'Not on an order yet: candidates who are not matched to an order.' : `Stage ${item.no}: ${item.label}. Candidates whose current stage this is.`,
+    no: item.no, id: String(item.no), label: item.no === 0 ? 'No job' : String(item.no),
+    info: item.no === 0 ? 'No job yet: candidates who are not matched to a job (order) of a client.' : `Stage ${item.no}: ${item.label}. Candidates whose current stage this is.`,
     drill: `stage:${item.no}`, width: item.no === 0 ? 92 : 56,
   }))
 }

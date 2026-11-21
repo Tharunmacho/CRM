@@ -80,7 +80,7 @@ test('NOTES is a column of every table; TODAY is a column only when the panel ho
 
 test('the Tasks table renders the model columns and no longer has a "Remark added" chip', async () => {
   const table = await code('../src/screens/tasks/task-table.tsx')
-  assert.match(table, /taskColumnsFor\(supervisor, place !== 'stage'\)/)
+  assert.match(table, /taskColumnsFor\(supervisor, place !== 'stage', closedRowsOf\(rows\)\)/)
   assert.doesNotMatch(table, /Remark added|is-remark/)
   assert.match(table, /Nothing yet/)
   assert.match(table, /todayChips\(/)

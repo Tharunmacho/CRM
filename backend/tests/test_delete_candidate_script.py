@@ -374,7 +374,7 @@ def test_imported_and_travelled_candidate_is_refused_although_the_plain_admin_de
     seed(env)
     target = env.db.get(m.Candidate, "target")
     target.source_detail = "Bulk import"
-    target.traveller_id = "CI-T-001"
+    target.traveller_id = "CI 01"
     env.db.commit()
     before = snapshot(env)
     code, prompts = run(env, "--candidate", REF, "--execute", typed=PHRASE)

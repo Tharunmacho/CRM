@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowUpRight, Building2, BriefcaseBusiness, Database, ListChecks, Mail, Plane, UserCheck, Users } from 'lucide-react'
+import { ArrowUpRight, Building2, BriefcaseBusiness, ClipboardPenLine, Database, ListChecks, Mail, Plane, UserCheck, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { useReportData } from '@/features/reports/report-api'
@@ -8,6 +8,7 @@ import type { LeadSummaryResponse } from '@/features/leads/lead-api'
 import { DashboardGraphs } from '@/features/dashboard/components/source-graph'
 import { candidatesAfterPrescreening, inView } from '@/features/dashboard/summary'
 import { inboxCard, type InboxCardData } from '@/features/dashboard/inbox-card'
+import { jobRequirementsCard, type JobRequirementsCardData } from '@/features/dashboard/job-requirements-card'
 import { useTravelled } from '@/features/travelled/travelled-api'
 import { EMPTY_FILTERS } from '@/features/travelled/travelled-model'
 import '@/styles/dashboard-simple.css'
@@ -30,6 +31,7 @@ export default function DashboardPage() {
   // intake numbers yet keeps the old card: the total number of messages across the connected accounts.
   const mail = useReportData<InboxCardData>('/inbox?limit=1', store.me.id, '', ['mail'])
   const inbox = inboxCard(mail.data)
+  const requirements = jobRequirementsCard(useReportData<JobRequirementsCardData>('/job-requirements?status=active&limit=1', store.me.id, '', ['job_requirements']).data)
   const leads = useReportData<LeadSummaryResponse>(`/leads/summary?scope=${isTeam ? 'all' : 'mine'}`, store.me.id, '', ['leads'])
 
   // Admin and MD see the whole team; staff see their own candidates and tasks.
@@ -48,6 +50,7 @@ export default function DashboardPage() {
 
   const cards: Card[] = [
     { key: 'inbox', label: 'Inbox', value: inbox.value, note: inbox.note, detail: inbox.detail, icon: Mail, tone: 'blue', to: '/inbox' },
+    { key: 'requirements', label: 'Job requirements', value: requirements.value, note: requirements.note, danger: requirements.danger, icon: ClipboardPenLine, tone: 'teal', to: '/job-requirements' },
     { key: 'clients', label: 'Clients', value: store.clients.length, note: `${noun(store.clients.length, 'client', 'clients')} created`, icon: Building2, tone: 'green', to: '/clients' },
     { key: 'jobs', label: 'Jobs', value: store.orders.length, note: `${noun(store.orders.length, 'job', 'jobs')} created`, icon: BriefcaseBusiness, tone: 'amber', to: '/jobs' },
     { key: 'candidates', label: 'Candidates', value: afterPrescreening, note: 'from prescreening onward', icon: UserCheck, tone: 'violet', to: '/mapped' },

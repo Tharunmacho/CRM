@@ -27,19 +27,19 @@ const { CandidateCell, CandidateIds, TravellerIdChip } = compiled.exports
 const render = (type, props) => renderToStaticMarkup(React.createElement(type, props))
 const read = (file) => readFile(new URL(file, import.meta.url), 'utf8')
 
-const person = { id: 'c1', name: 'Asha Rao', ref: 'CND-01096', careId: 'CI-078', travellerId: 'CI-T-094', dob: '1990-01-05', phone: '+910000000001', passportNo: 'P1234567' }
+const person = { id: 'c1', name: 'Asha Rao', ref: 'CND-01096', careId: 'CI-078', travellerId: 'CI 94', dob: '1990-01-05', phone: '+910000000001', passportNo: 'P1234567' }
 
 test('the Data Bank row shows only the Data Bank ID: no CND reference, no Traveller ID, in the text or the tooltip', () => {
   const html = render(CandidateCell, { candidate: person })
   assert.match(html, /<b class="cid-main">CI-078<\/b>/)
-  assert.doesNotMatch(html, /CND-|CI-T-|Traveller/)
+  assert.doesNotMatch(html, /CND-|CI 94|Traveller/)
   assert.match(html, /title="[^"]*CI-078/)
 })
 
 test('the Data Bank row of a very old candidate without a Data Bank ID shows the reference instead, never both', () => {
   const html = render(CandidateCell, { candidate: { ...person, careId: null } })
   assert.match(html, /CND-01096/)
-  assert.doesNotMatch(html, /CI-078|CI-T-/)
+  assert.doesNotMatch(html, /CI-078|CI 94/)
 })
 
 test('the Tasks row (Today\'s candidates and Follow-up) shows only the Data Bank ID', () => {
@@ -51,15 +51,16 @@ test('the Tasks row (Today\'s candidates and Follow-up) shows only the Data Bank
   assert.equal(render(CandidateIds, { item: { candidateCareId: null, candidateRef: '' } }).includes('cid-main'), false)
 })
 
-test('the Travelled row shows only the Traveller ID plus the passport number as plain text', async () => {
+test('the Travelled row shows the passport number and, below it, the Traveller number', async () => {
   const chip = render(TravellerIdChip, { candidate: person })
-  assert.match(chip, /CI-T-094/)
+  assert.match(chip, /CI 94/)
   assert.doesNotMatch(chip, /CI-078|CND-/)
   assert.equal(render(TravellerIdChip, { candidate: { ...person, travellerId: null } }), '')
 
   const source = await read('../src/screens/travelled/travelled.tsx')
   const row = source.slice(source.indexOf('function TravelTable'))
-  assert.doesNotMatch(row, /TravellerIdChip|row\.travellerId/)   // the table shows no CI number
+  assert.doesNotMatch(row, /TravellerIdChip/)   // the table draws the small number itself, not the wide labelled chip
+  assert.match(row, /\{row\.travellerId && <span className="tv-traveller tnum"[^>]*>\{row\.travellerId\}<\/span>\}/)
   assert.doesNotMatch(row, /row\.airline|row\.pnr|PNR |Flight/)   // and no flight
   assert.doesNotMatch(row, /primaryId|careIdOf|row\.careId|row\.ref\b|Care India ID/)
 })

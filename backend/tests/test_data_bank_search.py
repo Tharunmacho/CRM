@@ -296,7 +296,7 @@ def _travel_fixture(bank):
     people = {'flown-id': 'o-1', 'flown-legacy': 'o-1', 'flown-and-active': 'o-2', 'flown-twice': 'o-1'}
     for identifier in [*people, 'fresh', 'working', 'closed', 'reopened', 'marked-only']:
         add(bank, identifier)
-    bank.get(m.Candidate, 'flown-id').traveller_id = 'CI-T-001'
+    bank.get(m.Candidate, 'flown-id').traveller_id = 'CI 01'
 
     def placement(identifier, candidate, order, state, stage, year=2025):
         bank.add(m.Application(id=identifier, candidate_id=candidate, order_id=order, owner_id='asha', current_stage=stage, status=state,
@@ -370,7 +370,7 @@ def test_travelled_filter_endpoints_and_export_follow_it(bank):
 def test_search_finds_a_candidate_by_care_india_id_serial_or_crm_reference(bank):
     add(bank, 'first', ref='CND-01096', name='Serial Match', care_id='CI-096', phone='9000000011')
     add(bank, 'second', ref='CND-01097', name='Other Person', care_id='CI-1096', phone='9000000012')
-    add(bank, 'flown', ref='CND-01098', name='Flown Person', care_id='CI-097', traveller_id='CI-T-007', phone='9000000013')
+    add(bank, 'flown', ref='CND-01098', name='Flown Person', care_id='CI-097', traveller_id='CI 07', phone='9000000013')
     bank.commit()
     assert ids(bank, 'CND-01096') == {'first'}                 # the CRM reference stays searchable
     assert ids(bank, 'CI-096') == {'first'}                    # the Care India ID, any case
@@ -378,5 +378,5 @@ def test_search_finds_a_candidate_by_care_india_id_serial_or_crm_reference(bank)
     assert ids(bank, 'CI-96') == {'first'}                     # unpadded: the stored ID is zero-padded
     assert 'first' in ids(bank, '96') and 'flown' not in ids(bank, '96')    # the bare serial finds CI-096 (a plain substring search also meets CI-1096)
     assert 'flown' in ids(bank, '097')
-    assert ids(bank, 'CI-T-007') == {'flown'} and ids(bank, 'ci-t-7') == {'flown'}
+    assert ids(bank, 'CI 07') == {'flown'} and ids(bank, 'ci 7') == {'flown'}
     assert ids(bank, 'CI-1096') == {'second'}

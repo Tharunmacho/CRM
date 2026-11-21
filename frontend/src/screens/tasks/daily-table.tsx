@@ -223,12 +223,14 @@ export function OutcomeStage({ item, zone }: { item: Pick<DailyItem, 'stage' | '
   const detail = outcomeDetail({ ...outcome, stage }, titleOf, zone)
   const meta = [detail.when, detail.by].filter(Boolean).join(' · ')
   const tip = [outcome.label, detail.where, detail.why, meta].filter(Boolean).join(' · ')
+  const name = stage ? titleOf(stage) : undefined
   return (
     <div className={cn('dw-stage dw-outcome', `is-${outcome.kind}`)} title={tip}>
       <span className={cn('dw-outcome-chip', `is-${outcome.kind}`)}>
         <b>{outcome.label}</b>
-        {detail.where && <span className="dw-outcome-at">{detail.where}</span>}
+        {stage && <span className="dw-outcome-at">&middot; Stage {stage}</span>}
       </span>
+      {name && <span className="dw-outcome-stage">{name}</span>}
       {detail.why && <span className="dw-outcome-why">{detail.why}</span>}
       {meta && <span className="dw-outcome-meta">{meta}</span>}
     </div>

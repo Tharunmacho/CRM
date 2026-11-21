@@ -94,7 +94,7 @@ export interface Candidate {
   ref: string
   /** Immutable public ID, sequenced for the Care India April--March financial year. */
   careId?: string | null
-  /** Immutable Traveller ID (separate CI-T series); only candidates who have travelled have one. */
+  /** Immutable Traveller ID (separate series: CI 01, CI 02 ...); only candidates who have travelled have one. */
   travellerId?: string | null
   name: string
   phone: string

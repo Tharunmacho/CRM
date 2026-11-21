@@ -307,6 +307,7 @@ function TravelTable({ rows, total, page, pageSize, filtered, onPage, onPageSize
             <td data-label="Candidate" className="tv-who">
               <Link to={`/candidates/${row.candidateId}`}>{row.name}</Link>
               <small className="tv-passport tnum">{row.passportNumber || <span className="tv-muted">Passport not added</span>}</small>
+              {row.travellerId && <span className="tv-traveller tnum" title={`Traveller number ${row.travellerId}`}>{row.travellerId}</span>}
               {row.status && row.status !== 'deployed' && <StatusPill status={row.status} />}
             </td>
             <td data-label="Client">{row.clientId ? <Link to={`/clients/${row.clientId}`}>{row.client}</Link> : row.client || <span className="tv-muted">—</span>}</td>

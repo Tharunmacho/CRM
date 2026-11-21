@@ -55,7 +55,7 @@ def env(schema_database):
             order = Order(id=f"o{number}", ref=f"ORD-{number}", company_id=company, designation_id="job", openings=5, country=country)
             candidate = Candidate(id=f"c{number}", ref=f"CND-{number:05d}", name=name, phone=f"90000000{number:02d}", source=source,
                                   source_detail=agency, owner_id=recruiter, passport_no="P7654321" if number == 1 else None,
-                                  care_id=f"CI-{number:03d}", traveller_id="CI-T-001" if number == 1 else None)
+                                  care_id=f"CI-{number:03d}", traveller_id="CI 01" if number == 1 else None)
             db.add_all([order, candidate])
             db.flush()
             application = Application(id=f"a{number}", candidate_id=candidate.id, order_id=order.id, owner_id=recruiter, current_stage=13,
@@ -109,7 +109,7 @@ def test_every_travelled_placement_is_listed_newest_first_with_its_client_and_ag
     assert body["total"] == 7
     akash = next(row for row in body["rows"] if row["name"] == "Akash Murugesan")
     assert akash == {
-        "applicationId": "a1", "candidateId": "c1", "ref": "CND-00001", "travellerId": "CI-T-001", "careId": "CI-001", "name": "Akash Murugesan", "client": "Century Mechanical Systems Factory LLC",
+        "applicationId": "a1", "candidateId": "c1", "ref": "CND-00001", "travellerId": "CI 01", "careId": "CI-001", "name": "Akash Murugesan", "client": "Century Mechanical Systems Factory LLC",
         "clientId": "client", "country": "UAE", "job": "Machine Operator", "orderRef": "ORD-1", "orderId": "o1", "passportNumber": "P7654321", "agency": "Star Agency",
         "travelDate": "2026-05-09", "commencementDate": "2026-06-01", "airline": "Air Arabia G9472", "pnr": "6ZA8JH", "recruiter": "Staff", "status": "deployed",
         "documents": {"have": 11, "required": 11, "missing": []}}
@@ -353,11 +353,13 @@ def test_csv_export_follows_the_filters_and_is_safe_for_spreadsheets(env):
 
 def test_rows_carry_the_traveller_id_and_it_can_be_searched_and_exported(env):
     rows = {row["name"]: row for row in get(env)["rows"]}
-    assert rows["Akash Murugesan"]["travellerId"] == "CI-T-001"
+    assert rows["Akash Murugesan"]["travellerId"] == "CI 01"
     assert all(row["travellerId"] is None for name, row in rows.items() if name != "Akash Murugesan")   # not numbered yet: null, never missing
-    assert names(get(env, q="ci-t-001")) == ["Akash Murugesan"]
-    exported = list(csv.reader(StringIO(env.client.get("/api/travelled/export", params={"format": "csv", "q": "CI-T-001"}).content.decode("utf-8-sig"))))
-    assert exported[0][0] == "Traveller ID" and len(exported) == 2 and exported[1][0] == "CI-T-001"
+    assert names(get(env, q="ci 1")) == ["Akash Murugesan"]          # the typed number is not zero-padded
+    assert names(get(env, q="CI 01")) == ["Akash Murugesan"] and names(get(env, q="ci01")) == ["Akash Murugesan"]
+    assert names(get(env, q="ci 2")) == []
+    exported = list(csv.reader(StringIO(env.client.get("/api/travelled/export", params={"format": "csv", "q": "CI 01"}).content.decode("utf-8-sig"))))
+    assert exported[0][0] == "Traveller ID" and len(exported) == 2 and exported[1][0] == "CI 01"
 
 
 def test_rows_carry_the_care_india_id(env):

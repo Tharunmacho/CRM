@@ -47,7 +47,7 @@ def seeded(workspace):
     assert [len(c) for c in chunks] == [15, 16, 16]  # a 45-page resume: three jobs, two overlap pages
     with workspace() as db:
         db.add_all([
-            Candidate(id="cand-a", ref="CND-A", care_id="CI-101", traveller_id="CI-T-101", name="Asha Traveller", phone=PHONES[0],
+            Candidate(id="cand-a", ref="CND-A", care_id="CI-101", traveller_id="CI 101", name="Asha Traveller", phone=PHONES[0],
                       source=Source.walk_in, owner_id="owner", status=CandidateStatus.deployed),
             Candidate(id="cand-b", ref="CND-B", care_id="CI-102", name="Bala Current", phone=PHONES[1], source=Source.walk_in,
                       owner_id="owner", status=CandidateStatus.in_process),
@@ -171,7 +171,7 @@ def test_per_candidate_per_month_and_per_file(seeded):
     assert set(candidates) == {"Asha Traveller", "Bala Current", "Chitra Current"}  # candidate "Synthetic candidate" has no documents
     cell = lambda name, column: candidates[name][head.index(column)]
     asha, bala, chitra = "Asha Traveller", "Bala Current", "Chitra Current"
-    assert (cell(asha, "Care India ID"), cell(asha, "Traveller ID"), cell(asha, "Cohort")) == ("CI-101", "CI-T-101", report.TRAVELLED)
+    assert (cell(asha, "Care India ID"), cell(asha, "Traveller ID"), cell(asha, "Cohort")) == ("CI-101", "CI 101", report.TRAVELLED)
     assert [cell(asha, c) for c in ("Files (all)", "Files sent to Veris", "Files local OCR only (not billed)")] == [3, 2, 0]
     assert [cell(asha, c) for c in ("Resume jobs", "Passport jobs", "Aadhaar jobs", "Total pages (incl. overlap)")] == [1, 1, 0, 4]
     assert [cell(bala, c) for c in ("Files (all)", "Files sent to Veris", "Files local OCR only (not billed)")] == [3, 2, 1]
@@ -212,7 +212,7 @@ def test_date_filter_and_no_personal_data_in_any_output(seeded, tmp_path):
     blob = "\n".join(Path(p).read_text(encoding="utf-8-sig") for p in paths)
     for secret in (*PHONES, "A1234567", "example.test", "hr@"):
         assert secret not in blob
-    assert "Asha Traveller" in blob and "CI-T-101" in blob  # the per-file / per-candidate sheets do carry the name and IDs
+    assert "Asha Traveller" in blob and "CI 101" in blob  # the per-file / per-candidate sheets do carry the name and IDs
     names = {Path(p).name.split("-", 4)[-1] for p in paths}
     assert any(name.startswith("excluded-not-linked") for name in names) and any(name.startswith("per-candidate") for name in names)
     with open(next(p for p in paths if "summary" in str(p)), newline="", encoding="utf-8-sig") as handle:

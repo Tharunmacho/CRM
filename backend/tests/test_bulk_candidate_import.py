@@ -160,7 +160,7 @@ def test_someone_who_has_flown_is_recorded_as_travelled_even_without_the_offer_c
     assert '"id": "history"' not in json.dumps([s.data for s in stages])                                       # the stand-in is never stored
     with env.sessions() as db:   # travelled: the first Traveller ID of the continuous series, separate from the Care India ID
         candidate = db.get(Candidate, result["candidateId"])
-        assert candidate.traveller_id == "CI-T-001" and candidate.care_id == "CI-001"
+        assert candidate.traveller_id == "CI 01" and candidate.care_id == "CI-001"
 
 
 def test_someone_the_office_says_has_flown_but_has_no_ticket_is_travelled_with_the_date_left_blank(env):
@@ -175,7 +175,7 @@ def test_someone_the_office_says_has_flown_but_has_no_ticket_is_travelled_with_t
     assert application.status == ApplicationStatus.deployed
     assert "travelDate" not in stages[12].data and "file" not in stages[12].data and '"id": "history"' not in json.dumps([s.data for s in stages])
     with env.sessions() as db:   # no travel date on file: still numbered, as the next traveller
-        assert db.get(Candidate, flown["candidateId"]).traveller_id == "CI-T-001"
+        assert db.get(Candidate, flown["candidateId"]).traveller_id == "CI 01"
 
 
 def test_a_complete_folder_becomes_a_deployed_candidate_with_all_thirteen_stages(env):
@@ -184,7 +184,7 @@ def test_a_complete_folder_becomes_a_deployed_candidate_with_all_thirteen_stages
     with env.sessions() as db:
         candidate = db.get(Candidate, result["candidateId"])
         assert (candidate.name, candidate.status, candidate.owner_id) == ("Rahul Kumar", CandidateStatus.deployed, "staff")
-        assert candidate.traveller_id == "CI-T-001"   # numbering follows the order people become travellers, not the travel date
+        assert candidate.traveller_id == "CI 01"   # numbering follows the order people become travellers, not the travel date
         assert candidate.designations == ["Welder"]
         application = db.scalar(select(Application).where(Application.candidate_id == candidate.id))
         assert application.status == ApplicationStatus.deployed and application.current_stage == 13

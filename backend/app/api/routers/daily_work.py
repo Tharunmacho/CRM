@@ -66,7 +66,7 @@ def daily_work_today(staff: str | None = None, view: Literal["current", "decline
     A read only: nothing is allocated.
 
     `view` (default `current`, exactly the list above) also reaches the candidates whose placement ended: `declined` (their own no),
-    `rejected` (any other negative closure), `travelled` (a deployed placement) and `all` (current plus those three). Every item carries
+    `rejected` (any other negative closure; both are kept off today's list), `travelled` (a deployed placement) and `all` (current plus those three). Every item carries
     `outcome` {kind, label, reason, stage, at}; `viewCounts` {current, declined, rejected, travelled} counts each view for the same scope.
     """
     # Every open tab refetches when a task or candidate changes; tabs of the same person (or a second supervisor) share one build.
@@ -106,7 +106,7 @@ def _daily_work(db: Session, user: User, staff: str | None, view: str = "current
             counts = daily_work.counts_from_rows(rows) if len(rows) < daily_work.MAX_ROWS else daily_work.owner_counts(db, selector, now=now)
         else:
             counts = got["counts"]
-        if view == "all":   # a candidate on today's list is listed once, as a current row
+        if view == "all":   # a safety net: a declined / rejected candidate is parked (never on today's list too), but one is never listed twice
             listed = {row[0].id for row in rows}
             outcome_rows = [row for row in outcome_rows if row[0].id not in listed]
         # What needs the rows' ids (everything the recruiter's own page already read in the first round): one more round, side by side.
@@ -114,12 +114,12 @@ def _daily_work(db: Session, user: User, staff: str | None, view: str = "current
         if rows and not wide:
             later.update(zip(("placed", "tasks", "facts", "remarks"), daily_work.placement_reads([row[0].id for row in rows], now=now)))
         if outcome_rows:
-            later.update(zip(("outcome_remarks", "outcome_facts", "outcome_by"), daily_work.outcome_reads([row[1].id for row in outcome_rows])))
+            later.update(zip(("outcome_remarks", "outcome_facts", "outcome_by"), daily_work.outcome_reads([row[1].id for row in outcome_rows], [row[0].id for row in outcome_rows])))
         got.update(_run(db, later))
         if rows:
             items = daily_work.assemble_rows(rows, got["placed"], got["tasks"], got["facts"], got["remarks"], now=now)
         if outcome_rows:
-            outcome_items = daily_work.assemble_outcome_rows(outcome_rows, got["outcome_remarks"], got["outcome_facts"], got["outcome_by"])
+            outcome_items = daily_work.assemble_outcome_rows(outcome_rows, got["outcome_remarks"], got["outcome_facts"], got["outcome_by"], now=now)
     summary = daily_work.summarise([counts.get(uid, (0, 0)) for uid in shown])
     listed_outcomes = sum(counts_by_view[kind] for kind in kinds)
     result = {

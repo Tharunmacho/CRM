@@ -35,6 +35,7 @@ from app.services.application_form import LEGACY_SLOTS, required_for_deployment
 from app.services.invoice_access import can_see_invoices
 from app.services.parallel_reads import parallel_reads
 from app.services.response_cache import cached, scope_of
+from app.services.traveller_id import format_traveller_id
 
 router = APIRouter(prefix="/api/travelled", tags=["travelled"])
 
@@ -124,7 +125,10 @@ class Filters:
             needle = self.q.lower()
             if not any(needle in (row[key] or "").lower() for key in (
                     "name", "ref", "travellerId", "careId", "passportNumber", "orderRef", "pnr", "client", "job", "agency", "country", "airline")):
-                return False
+                # "CI 7" (or "ci7") finds the traveller number "CI 07": the stored numbers are zero-padded.
+                typed = re.fullmatch(r"ci\s*(\d+)", needle)
+                if not (typed and int(typed.group(1)) >= 1 and row["travellerId"] == format_traveller_id(int(typed.group(1)))):
+                    return False
         return True
 
 

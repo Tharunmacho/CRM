@@ -30,7 +30,7 @@ const context = {
 }
 
 const candidate = {
-  id: 'c1', ref: 'CND-1', careId: 'CI-26-27-001', travellerId: 'CI-T-26-27-001', name: 'Test Person', phone: '+910000000001', whatsapp: '+910000000002', email: 'test@example.test',
+  id: 'c1', ref: 'CND-1', careId: 'CI-26-27-001', travellerId: 'CI 01', name: 'Test Person', phone: '+910000000001', whatsapp: '+910000000002', email: 'test@example.test',
   dob: '1990-01-05', gender: 'Male', nationality: 'Indian', currentCity: 'Chennai', languages: ['English', 'Tamil'],
   passportNo: 'X0000000', passportIssue: '2020-02-03', passportExpiry: '2030-02-02', passportPlace: 'Chennai',
   designations: ['Cook', 'Helper'], totalExperience: 5, gulfExperience: 1, experienceIndia: 4, skills: ['Grill', 'Prep'], expectedSalary: 150000,

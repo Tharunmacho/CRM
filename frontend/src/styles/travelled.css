@@ -117,6 +117,8 @@
 .tv-who a { font-weight: 600; }
 /* the passport number sits under the name: muted, tabular */
 .tv-table td.tv-who small { margin-top: 2px; font-size: 12px; letter-spacing: .01em; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* the traveller number (CI 01, CI 02 ...) is a small chip under the passport number; nothing is drawn for a candidate without one */
+.tv-table td.tv-who .tv-traveller { display: inline-block; margin-top: 4px; padding: 0 9px; border-radius: 999px; background: var(--tint-2); font-size: 12px; font-weight: 600; line-height: 20px; letter-spacing: .02em; color: var(--text-main); white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* S NO is a short number, DOC and the travel date are dd/mm/yyyy and dd Mon yyyy: they stay on one line; the long headings wrap at their space, never mid-word */
 .tv-table td:is(:nth-child(1), :nth-child(2), :nth-child(3)) { white-space: nowrap; }
 .tv-table th.tv-th-wrap { white-space: normal; }

@@ -1,0 +1,305 @@
+/*
+ * Job requirements: the sheet the recruiters type into. The table look is the one of the report tables (report-tables.css, .dwm-table): a primary-blue
+ * header band (44px, uppercase, faint dividers), a 1px line under every row and between every column in the brighter --rt-line, zebra stripes, a hover tint,
+ * headings and values centred (the Client name is left, it is free text). The cells are inputs that look like plain text until hovered or focused.
+ * From 900px the sheet is a table inside a box that scrolls sideways when the columns are wider than the panel; below 900px every row is a labelled card.
+ */
+.jr { --rt-line: color-mix(in srgb, var(--text-muted) 42%, var(--bg-card)); --rt-stripe: color-mix(in srgb, var(--primary) 3.5%, var(--bg-card)); min-width: 0; max-width: 100%; }
+.jr-panel { min-width: 0; border: var(--table-frame-width, 1px) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); background: var(--bg-card); overflow: hidden; }
+
+.jr-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--rt-line); }
+.jr-search { flex: 1 1 260px; max-width: 380px; min-width: 0; }
+.jr-tabs { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--tint-1); }
+.jr-tab { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+.jr-tab:hover { color: var(--text-main); }
+.jr-tab.is-on { background: var(--bg-card); color: var(--primary); box-shadow: 0 0 0 1px var(--border-control); }
+.jr-tab-count { min-width: 22px; padding: 1px 6px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; text-align: center; }
+.jr-tab.is-on .jr-tab-count { background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); }
+.jr-state { padding: 8px 0 24px; }
+
+.jr-scroll { min-width: 0; overflow-x: auto; }
+.jr-scroll:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.jr-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; color: var(--text-main); font-size: 13px; line-height: 1.35; }
+.jr-table :is(th, td) { box-sizing: border-box; padding: 6px 8px; border: 0; border-bottom: 1px solid var(--rt-line); background: var(--bg-card); text-align: center; vertical-align: middle; overflow-wrap: anywhere; }
+.jr-table tbody :is(td):not(:last-child) { border-right: 1px solid var(--rt-line); }
+.jr-table thead th { height: 44px; padding: 4px 8px; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-transform: uppercase; white-space: normal; word-break: keep-all; }
+.jr-table thead th:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--on-primary) 60%, var(--primary)); }
+.jr-table thead th.is-left, .jr-table tbody td.is-left { text-align: left; padding-left: 14px; }
+.jr-table tbody td { height: 60px; }
+.jr-table tbody tr:last-child > td { border-bottom: 0; }
+.jr-table tbody .jr-row:nth-child(even) > td { background: var(--rt-stripe); }
+.jr-table tbody .jr-row:hover > td { background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
+.jr-table tbody .jr-row.has-error > td { background: color-mix(in srgb, var(--error-ink) 6%, var(--bg-card)); }
+.jr-serial { font-weight: 700; font-variant-numeric: tabular-nums; }
+.jr-none td { height: 120px; color: var(--text-muted); }
+
+/* the typed cells: plain text until hovered or focused */
+.jr-cell-box { position: relative; display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; min-width: 0; }
+.jr-input { width: 100%; min-width: 0; height: 36px; padding: 0 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text-main); font: inherit; font-size: 13px; text-align: center; text-overflow: ellipsis; transition: border-color .12s, background-color .12s, box-shadow .12s; }
+.is-left .jr-input { text-align: left; font-weight: 600; }
+.jr-input::placeholder { color: var(--text-light); }
+.jr-input:hover { border-color: var(--border-hover); background: var(--bg-card); }
+.jr-input:focus, .jr-input:focus-visible { outline: none; border-color: var(--primary); background: var(--bg-card); box-shadow: 0 0 0 3px var(--primary-glow); text-overflow: clip; }
+.jr-input.is-error { border-color: var(--error-ink); background: var(--error-fill); }
+.jr-cell-box.has-picker .jr-input { padding-right: 4px; }
+.jr-cell-error { position: absolute; left: 0; right: 0; top: 100%; z-index: 2; margin-top: 1px; color: var(--error-ink); font-size: 11px; line-height: 1.2; text-align: center; pointer-events: none; }
+.jr-cell-box .relative { width: 100%; }
+.jr-cell-box .ui-input { height: 36px; border-color: transparent; background: transparent; box-shadow: none; font-size: 13px; text-align: center; }
+.jr-cell-box .ui-input:hover { border-color: var(--border-hover); }
+.jr-cell-box .ui-input:focus { border-color: var(--primary); background: var(--bg-card); box-shadow: 0 0 0 3px var(--primary-glow); }
+.jr-cell-box .ui-input.is-error { border-color: var(--error-ink); background: var(--error-fill); }
+.jr-cell-box .date-picker { flex: none; }
+.jr-cell-box .date-picker-trigger { width: 30px; height: 30px; min-height: 0; padding: 0; justify-content: center; border-radius: 7px; }
+.jr-cell-box .date-picker-trigger > span { display: none; }
+.jr-yesno { width: 100%; }
+
+.jr-status { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 88px; height: 30px; padding: 0 12px; border: 1px solid var(--success-edge, var(--success-ink)); border-radius: 999px; background: var(--success-fill); color: var(--success-ink); font-size: 12.5px; font-weight: 700; cursor: pointer; transition: filter .12s; }
+.jr-status:hover { filter: brightness(.96); }
+.jr-status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.jr-status.is-closed { border-color: var(--border-control); background: var(--tint-2); color: var(--text-muted); }
+
+.jr-details { display: inline-flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; min-height: 36px; padding: 4px 10px; border: 1px dashed var(--border-control); border-radius: 8px; background: transparent; color: var(--primary); font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.jr-details:hover { border-style: solid; background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+.jr-details.is-filled { border-style: solid; border-color: color-mix(in srgb, var(--primary) 35%, var(--border-control)); color: var(--text-main); }
+.jr-details.is-filled > svg { color: var(--success-ink); }
+.jr-details-text { display: grid; min-width: 0; }
+.jr-details-sum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.jr-details-open { color: var(--primary); font-size: 11.5px; font-weight: 600; }
+
+.jr-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.jr-upload { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px dashed var(--border-control); border-radius: 8px; background: transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.jr-upload:hover { border-style: solid; color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+.jr-ad { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.jr-thumb { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 44px; height: 44px; padding: 0; overflow: hidden; border: 1px solid var(--border-control); border-radius: 8px; background: var(--tint-1); color: var(--primary); font-size: 10px; font-weight: 700; cursor: zoom-in; text-decoration: none; }
+.jr-thumb.is-pdf { cursor: pointer; }
+.jr-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.jr-ad-actions { display: grid; gap: 3px; }
+.jr-mini { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 20px; padding: 0; border: 1px solid var(--border-main); border-radius: 5px; background: var(--bg-card); color: var(--text-muted); cursor: pointer; }
+.jr-mini:hover { color: var(--primary); border-color: var(--primary); }
+.jr-mini.is-danger:hover { color: var(--error-ink); border-color: var(--error-ink); }
+.jr-ad-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12.5px; }
+.jr-lightbox { display: block; max-width: 100%; max-height: 68vh; margin: 0 auto; border-radius: 8px; object-fit: contain; }
+.jr-lightbox-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; color: var(--primary); font-size: 13px; font-weight: 600; }
+
+.jr-colhead { display: inline-flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; }
+.jr-colhead-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jr-colhead .ui-row-menu-trigger { flex: none; width: 22px; height: 22px; color: var(--on-primary); }
+.jr-colhead .ui-row-menu-trigger:hover { background: color-mix(in srgb, var(--on-primary) 20%, transparent); }
+.jr-addfield { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--on-primary) 70%, var(--primary)); border-radius: 7px; background: color-mix(in srgb, var(--on-primary) 14%, var(--primary)); color: var(--on-primary); font: inherit; font-size: 11.5px; font-weight: 700; letter-spacing: .02em; text-transform: none; white-space: nowrap; cursor: pointer; }
+.jr-addfield:hover { background: color-mix(in srgb, var(--on-primary) 26%, var(--primary)); }
+
+.jr-actions-cell { position: relative; }
+.jr-actions { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 30px; }
+.jr-save { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.jr-save.is-saving { color: var(--text-muted); }
+.jr-save.is-saved { color: var(--success-ink); }
+.jr-save.is-error { color: var(--error-ink); }
+.jr-retry { margin-left: 4px; padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.jr-row-error { display: block; margin-top: 2px; color: var(--error-ink); font-size: 11px; line-height: 1.2; }
+.jr-spin { animation: jr-spin .9s linear infinite; }
+@keyframes jr-spin { to { transform: rotate(360deg); } }
+
+.jr-skeleton td { height: 60px; }
+.jr-skeleton td > span { display: block; height: 14px; width: 70%; margin: 0 auto; border-radius: 6px; background: linear-gradient(90deg, var(--tint-2), var(--tint-1), var(--tint-2)); background-size: 200% 100%; animation: jr-shimmer 1.2s ease-in-out infinite; }
+@keyframes jr-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .jr-spin, .jr-skeleton td > span { animation: none; } }
+
+.jr-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--rt-line); color: var(--text-muted); font-size: 12.5px; }
+.jr-foot-error { color: var(--error-ink); }
+
+/* the requirements form (the owner's sheet: Sl. No. | Job Requirements Details | Client Information) */
+.jr-sheet { display: grid; border: 1px solid var(--rt-line); border-radius: 8px; overflow: hidden; }
+.jr-sheet-head, .jr-sheet-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) minmax(0, 1.5fr); align-items: stretch; }
+.jr-sheet-head { min-height: 40px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.jr-sheet-head > span { white-space: nowrap; display: flex; align-items: center; padding: 6px 12px; }
+.jr-sheet-head > span:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--on-primary) 60%, var(--primary)); }
+.jr-sheet-head > span:last-child { padding-left: 14px; }
+.jr-sheet-row { border-top: 1px solid var(--rt-line); }
+.jr-sheet-row:nth-child(odd) { background: var(--rt-stripe); }
+.jr-sheet-row > .jr-sheet-no, .jr-sheet-head > .jr-sheet-no { justify-content: center; text-align: center; }
+.jr-sheet-row > .jr-sheet-no { display: flex; align-items: center; padding: 8px 4px; border-right: 1px solid var(--rt-line); font-weight: 700; font-variant-numeric: tabular-nums; }
+.jr-sheet-label { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 8px 12px; border-right: 1px solid var(--rt-line); color: var(--text-main); font-size: 13.5px; font-weight: 600; line-height: 1.3; }
+.jr-sheet-label small { color: var(--text-muted); font-size: 11.5px; font-weight: 500; }
+.jr-sheet-input { display: flex; align-items: center; padding: 6px 8px; min-width: 0; }
+.jr-sheet-input > * { width: 100%; }
+.jr-sheet-input .date-picker { width: 100%; }
+.jr-sheet-input .date-picker-trigger { width: 100%; }
+@media (max-width: 560px) { .jr-sheet-head, .jr-sheet-row { grid-template-columns: 44px minmax(0, 1fr); } .jr-sheet-head > span:last-child { display: none; } .jr-sheet-input { grid-column: 1 / -1; padding-top: 0; } .jr-sheet-label { border-right: 0; } }
+.jr-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+.jr-form.is-single { grid-template-columns: minmax(0, 1fr); }
+.jr-form .jr-form-wide { grid-column: 1 / -1; }
+.jr-confirm { margin: 0; color: var(--text-main); font-size: 14px; line-height: 1.55; }
+.jr-confirm-error { margin: 10px 0 0; color: var(--error-ink); font-size: 13px; }
+@media (max-width: 640px) { .jr-form { grid-template-columns: minmax(0, 1fr); } }
+
+/* below 900px every row is a card with labelled lines */
+@media (max-width: 899px) {
+  .jr-scroll { overflow: visible; }
+  .jr-table, .jr-table tbody, .jr-table tr, .jr-table td { display: block; width: 100%; min-width: 0 !important; }
+  .jr-table colgroup, .jr-table thead { display: none; }
+  .jr-table tbody tr { margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--rt-line); background: var(--bg-card); }
+  .jr-table tbody .jr-row:nth-child(even) { background: var(--rt-stripe); }
+  .jr-table tbody tr:last-child { border-bottom: 0; }
+  .jr-table tbody td, .jr-table tbody .jr-row:nth-child(even) > td, .jr-table tbody .jr-row:hover > td { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 8px; height: auto; min-height: 44px; padding: 4px 0; border: 0; border-bottom: 1px dashed var(--rt-line); background: transparent; text-align: left; }
+  .jr-table tbody td:last-child { border-bottom: 0; }
+  .jr-table tbody td::before { content: attr(data-label); color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .jr-table tbody td.jr-serial { font-size: 14px; }
+  .jr-table tbody td.jr-serial::before { content: 'S.No'; }
+  .jr-table tbody td > * { justify-self: start; }
+  .jr-table tbody td > .jr-cell-box, .jr-table tbody td > .jr-yesno { justify-self: stretch; }
+  .jr-input, .is-left .jr-input { text-align: left; border-color: var(--border-main); background: var(--bg-card); height: 40px; }
+  .jr-cell-box .ui-input { text-align: left; border-color: var(--border-main); background: var(--bg-card); height: 40px; }
+  .jr-cell-box { justify-content: flex-start; }
+  .jr-table tbody td.jr-actions-cell { display: flex; flex-wrap: wrap; justify-content: flex-end; }
+  .jr-table tbody td.jr-actions-cell::before { content: none; }
+  .jr-table .jr-none { padding: 0; }
+  .jr-table .jr-none td { display: block; height: auto; padding: 32px 14px; text-align: center; }
+  .jr-table .jr-none td::before { content: none; }
+  .jr-table .jr-skeleton td::before { content: none; }
+  .jr-table .jr-skeleton td { display: block; }
+  .jr-toolbar { padding: 12px; }
+  .jr-search { max-width: none; flex-basis: 100%; }
+  .jr-tabs { width: 100%; }
+  .jr-tab { flex: 1 1 0; justify-content: center; min-height: 40px; }
+}
+
+/* "Add field" lives in the header band; on a phone the header is hidden, so the toolbar carries a copy */
+.jr-addfield-phone { display: none; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font-size: 13px; font-weight: 600; cursor: pointer; }
+@media (max-width: 899px) { .jr-addfield-phone { display: inline-flex; } }
+
+/* management view: summary cards, filter row, deadline chip, closing reason, history */
+.jr-cards { margin-bottom: 16px; }
+.jr-cards .workspace-summary { grid-template-columns: repeat(var(--summary-columns, 5), minmax(0, 1fr)); }
+@media (max-width: 1100px) { .jr-cards .workspace-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .jr-cards .workspace-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.jr-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; padding: 10px 16px 12px; border-bottom: 1px solid var(--rt-line); background: var(--tint-1); }
+.jr-filter { display: grid; gap: 3px; min-width: 0; width: 178px; }
+.jr-filter > span { color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.jr-filter-dates { width: auto; }
+.jr-daterange { display: flex; gap: 8px; }
+.jr-viewchip { align-self: center; padding: 3px 10px; border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border-control)); border-radius: 999px; background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); color: var(--primary); font-size: 12px; font-weight: 700; }
+@media (max-width: 899px) { .jr-filter { flex: 1 1 140px; width: auto; } .jr-filters { padding: 10px 12px; } }
+
+.jr-owner { width: 100%; }
+.jr-details-box { display: inline-grid; justify-items: center; gap: 4px; max-width: 100%; }
+.jr-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border: 1px solid var(--border-control); border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.jr-chip.is-amber { border-color: var(--warning-edge, var(--warning-ink)); background: var(--warning-fill); color: var(--warning-ink); }
+.jr-chip.is-red { border-color: var(--error-edge, var(--error-ink)); background: var(--error-fill); color: var(--error-ink); }
+.jr-status-box { display: inline-grid; justify-items: center; gap: 3px; }
+.jr-status-reason { color: var(--text-muted); font-size: 11.5px; font-weight: 600; line-height: 1.1; }
+.jr-reasons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.jr-reason { min-height: 48px; }
+
+.jr-history { padding: 18px 22px; }
+.jr-history-state { display: flex; align-items: center; gap: 8px; padding: 24px 0; color: var(--text-muted); font-size: 13.5px; }
+.jr-timeline { position: relative; margin: 0; padding: 0 0 0 22px; list-style: none; }
+.jr-timeline::before { content: ''; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 2px; background: var(--rt-line); }
+.jr-timeline > li { position: relative; padding: 0 0 18px; }
+.jr-timeline-dot { position: absolute; left: -22px; top: 4px; width: 12px; height: 12px; border: 2px solid var(--primary); border-radius: 50%; background: var(--bg-card); }
+.jr-timeline p { margin: 0; }
+.jr-timeline-what { color: var(--text-main); font-size: 14px; font-weight: 700; }
+.jr-timeline-sum { margin-top: 2px; color: var(--text-main); font-size: 13px; overflow-wrap: anywhere; }
+.jr-timeline-who { margin-top: 3px; color: var(--text-muted); font-size: 12px; }
+.jr-colhead .ui-row-menu-trigger, .jr-colhead .ui-row-menu-trigger:focus-visible { border-color: transparent; background: transparent; box-shadow: none; color: var(--on-primary); }
+.jr-table .jr-cell-box .jr-input { padding-inline: 4px; }
+
+/* no sideways scroll without extra columns: long text wraps instead of being cut */
+.jr-input.is-multiline { display: block; height: auto; min-height: 36px; padding: 8px 6px; overflow: hidden; resize: none; line-height: 1.3; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
+.jr-details { min-width: 0; }
+.jr-details-sum { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+.jr-table { word-break: normal; }
+.jr-table tbody td { padding: 6px 5px; }
+.jr-table thead th { padding: 4px 4px; }
+.jr-status { min-width: 0; padding: 0 10px; }
+.jr-cell-box .date-picker-trigger { width: 26px; height: 26px; }
+.jr-upload { padding: 0 6px; }
+.jr-actions { gap: 4px; }
+.jr-addfield { padding: 0 8px; }
+.jr-table .jr-cell-box .relative > svg { display: none; }
+.jr-table .jr-cell-box .ui-input { padding-right: 4px; padding-left: 4px; }
+.jr-table .jr-cell-box .custom-select-trigger, .jr-owner { min-width: 0; }
+
+/* ---- the table tidied: every row lines up, values are centred, nothing is cut ---- */
+.jr .jr-table { table-layout: fixed; }
+.jr .jr-table tbody td { height: auto; min-height: 64px; padding: 8px 6px; vertical-align: middle; }
+.jr .jr-table tbody tr { height: 64px; }
+.jr .jr-table thead th { height: auto; min-height: 44px; padding: 6px 4px; overflow-wrap: normal; word-break: normal; line-height: 1.2; }
+.jr .jr-table thead th.jr-th-add { white-space: nowrap; }
+.jr .jr-serial { font-size: 13px; }
+.jr .jr-input, .jr .jr-cell-box .ui-input { height: 40px; }
+.jr .jr-input.is-multiline { height: auto; min-height: 40px; padding: 9px 8px; }
+.jr .jr-cell-box { flex-wrap: nowrap; }
+.jr .jr-cell-box .date-picker { flex: none; }
+.jr .jr-cell-box .date-picker-trigger { width: 26px; height: 26px; }
+.jr .jr-owner, .jr .jr-table .custom-select-trigger { height: 40px; min-height: 40px; }
+.jr .jr-owner { width: 100%; }
+
+/* the requirements details cell: a button as wide as the cell, the summary on at most two lines, the chip inside the cell */
+.jr .jr-details-box { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; width: 100%; }
+.jr .jr-details { width: 100%; max-width: 100%; justify-content: flex-start; padding: 6px 10px; text-align: left; }
+.jr .jr-details-text { flex: 1 1 auto; min-width: 0; }
+.jr .jr-details-sum { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+.jr .jr-details-open { display: block; white-space: nowrap; }
+.jr .jr-details:not(.is-filled) { justify-content: center; text-align: center; }
+
+/* the Ad: a fixed 44px slot, the same in every row */
+.jr .jr-upload { flex-direction: column; gap: 1px; width: 44px; height: 44px; min-height: 44px; padding: 0; font-size: 10.5px; line-height: 1.1; }
+.jr .jr-ad { gap: 4px; }
+.jr .jr-thumb { width: 44px; height: 44px; }
+
+/* the status switch */
+.jr .jr-status-box { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
+.jr .jr-switch { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 44px; min-height: 44px; padding: 2px 4px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.jr .jr-switch-track { position: relative; display: block; flex: none; width: 40px; height: 22px; border-radius: 999px; background: var(--border-control); transition: background-color .15s; }
+.jr .jr-switch-thumb { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(15, 23, 42, .35); transition: transform .15s; }
+.jr .jr-switch.is-on .jr-switch-track { background: var(--success-ink); }
+.jr .jr-switch.is-on .jr-switch-thumb { transform: translateX(18px); }
+.jr .jr-switch-label { font-size: 12px; font-weight: 700; line-height: 1; }
+.jr .jr-switch.is-on .jr-switch-label { color: var(--success-ink); }
+.jr .jr-switch:hover .jr-switch-track { filter: brightness(.94); }
+.jr .jr-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .jr .jr-switch-track, .jr .jr-switch-thumb { transition: none; } }
+.jr .jr-status-reason { max-width: 100%; text-align: center; overflow-wrap: anywhere; }
+
+/* the row actions: the menu button with the save mark under it */
+.jr .jr-actions { flex-direction: column; gap: 2px; }
+.jr .jr-save { font-size: 11px; }
+
+/* the extra columns: the header wraps, the value is centred */
+.jr .jr-colhead { flex-wrap: nowrap; }
+.jr .jr-colhead-name { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; text-align: center; }
+.jr .jr-cell-box .jr-input { text-align: center; }
+
+@media (max-width: 899px) {
+  .jr .jr-table tbody tr { height: auto; }
+  .jr .jr-switch { flex-direction: row; gap: 10px; min-height: 44px; min-width: 44px; padding: 4px 6px; }
+  .jr .jr-status-box { align-items: flex-start; }
+  .jr .jr-details-box { align-items: stretch; }
+  .jr .jr-actions { flex-direction: row; }
+}
+.jr .jr-cell-box .jr-input.is-multiline { text-align: left; }
+.jr .jr-status-box { width: 100%; }
+.jr .jr-status-reason { overflow-wrap: break-word; word-break: normal; line-height: 1.2; }
+/* DOC: the calendar button sits inside the box at its right, so the date and the button are on one line and the date is never cut */
+.jr .jr-cell-box.has-picker { position: relative; }
+.jr .jr-cell-box.has-picker .jr-input { padding-left: 4px; padding-right: 30px; }
+.jr .jr-cell-box.has-picker .date-picker { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); }
+.jr .jr-cell-box.has-picker .date-picker-trigger { width: 24px; height: 24px; border-color: transparent; background: transparent; }
+.jr .jr-cell-box.has-picker .date-picker-trigger:hover { background: var(--tint-2); }
+/* Assigned to: the select takes the whole cell */
+.jr .jr-table .custom-select { display: block; width: 100%; }
+.jr .jr-table .custom-select .custom-select-trigger { width: 100%; padding-inline: 8px; }
+/* the header's Add field button fits the actions column */
+.jr .jr-addfield { gap: 3px; padding: 0 6px; font-size: 11px; letter-spacing: 0; text-transform: uppercase; }
+.jr .jr-addfield svg { width: 12px; height: 12px; }
+/* beat the global table padding (8px 14px) of the shared table styles */
+html:root:root .jr .jr-table tbody td { padding: 8px 5px; }
+html:root:root .jr .jr-table thead th { padding: 6px 4px; }
+html:root:root .jr .jr-table tbody td.is-left { padding-left: 10px; }
+
+/* everything written shows in full: Country and the owner wrap, the details summary takes up to three lines */
+.jr .jr-input.is-multiline.is-centered, .jr .jr-cell-box .jr-input.is-multiline.is-centered { text-align: center; font-weight: 400; }
+.jr .jr-details-sum { -webkit-line-clamp: 3; }
+.jr .jr-owner { height: auto; min-height: 40px; padding-block: 4px; align-items: center; }
+.jr .jr-owner > span { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.25; text-align: left; }
+.jr .jr-table .custom-select .custom-select-trigger.jr-owner { height: auto; min-height: 40px; }

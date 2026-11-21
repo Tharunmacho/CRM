@@ -247,12 +247,12 @@ def test_the_counter_row_equals_the_last_number_given_and_numbers_past_999_gain_
 def test_traveller_numbers_are_a_separate_series_and_never_count_as_care_ids(schema_database):
     with _migrated(schema_database)() as db:
         assert [_add(db, key) for key in ("a", "b")] == ["CI-001", "CI-002"]
-        # Travelling gives CI-T-001 to "a"; a traveller number is not a Care India number and moves nothing in that series.
-        assert assign_traveller_id(db, db.get(Candidate, "a")) == "CI-T-001"
+        # Travelling gives CI 01 to "a"; a traveller number is not a Care India number and moves nothing in that series.
+        assert assign_traveller_id(db, db.get(Candidate, "a")) == "CI 01"
         assert allocate_care_id(db) == "CI-003"
         db.execute(text("UPDATE crm_traveller_id_counters SET last_serial = 900"))
-        db.execute(text("UPDATE crm_candidates SET traveller_id = 'CI-T-900' WHERE id = 'b'"))
-        assert allocate_care_id(db) == "CI-003"          # CI-T-900 is not read as 900
+        db.execute(text("UPDATE crm_candidates SET traveller_id = 'CI 900' WHERE id = 'b'"))
+        assert allocate_care_id(db) == "CI-003"          # CI 900 is not read as 900
         # A traveller-style value can never be stored as a Care India ID, so it cannot reach the series either.
         with pytest.raises(IntegrityError):
             with db.begin_nested():

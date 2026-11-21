@@ -172,9 +172,9 @@ def search_statement(filters: Search):
         digits = re.sub(r"\D", "", term)
         if len(digits) >= 4 and re.fullmatch(r"[\d\s+\-()]+", term):  # a phone typed with spaces or a country code
             clauses += [literal_contains(func.regexp_replace(field, r"\D", "", "g"), digits) for field in (Candidate.phone, Candidate.whatsapp)]
-        # "CI-96", "ci 96" and a bare "96" all find CI-096; "CI-T-7" finds CI-T-007 (the stored IDs are zero-padded).
+        # "CI-96", "ci 96" and a bare "96" all find CI-096; "CI 7" and the old "CI-T-7" find the traveller number "CI 07" (the stored IDs are zero-padded).
         care_serial = re.fullmatch(r"(?:ci[-\s]?)?(\d{1,6})", lowered)
-        traveller_serial = re.fullmatch(r"ci[-\s]?t[-\s]?(\d{1,6})", lowered)
+        traveller_serial = re.fullmatch(r"ci(?:[-\s]?t[-\s]?|\s)(\d{1,6})", lowered)
         if care_serial and int(care_serial.group(1)) >= 1:
             clauses.append(Candidate.care_id == format_care_id(int(care_serial.group(1))))
         if traveller_serial and int(traveller_serial.group(1)) >= 1:

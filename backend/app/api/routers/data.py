@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
-from sqlalchemy import delete, exists, func, or_, select, text, update
+from sqlalchemy import and_, delete, exists, func, or_, select, text, update
 from uuid import uuid4
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -1142,6 +1142,61 @@ def clear_task_remark(task_id: str, db: Session = Depends(get_db), user: User = 
         raise HTTPException(403, "Only the assigned recruiter or a supervisor can update this task")
     db.commit()
     return {"cleared": int(row.cleared or 0)}
+
+
+# Remarks and notes on a placement that ENDED (the Tasks page tabs Declined / Rejected / Travelled): those rows carry no open task, so they are
+# written by placement. Nothing here touches the placement (no status, no `updated_at`: that is the closure time `daily_work._parked` reads),
+# the candidate or any open task, so a rejected or declined candidate stays off today's list.
+
+def _ended_placement_task(db: Session, user: User, application_id: str) -> tuple[Application, Candidate, str]:
+    """(placement, candidate, id of the task that holds its remarks): the placement's newest task, else a cancelled "holder" task made for the
+    purpose (cancelled, so it is nobody's open work and in no count). Only a recruiter who may work the candidate, an MD or an admin."""
+    from app.core.deps import ensure_can_work_candidate
+    application = db.scalar(select(Application).where(Application.id == application_id))
+    if application is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Placement not found")
+    candidate = db.get(Candidate, application.candidate_id)
+    ensure_can_work_candidate(candidate, user, db)
+    if application.status == ApplicationStatus.active:
+        raise HTTPException(409, "This placement is still active: write on its task")
+    task_id = db.scalar(select(Task.id).where(Task.application_id == application.id).order_by(Task.created_at.desc(), Task.id.desc()).limit(1))
+    if task_id is None:
+        holder = Task(kind=TaskKind.stage, title="Notes on an ended placement", candidate_id=candidate.id, application_id=application.id,
+                      stage=application.current_stage, owner_id=candidate.owner_id or user.id, cancelled_at=datetime.now(timezone.utc))
+        db.add(holder)
+        db.flush()
+        task_id = holder.id
+    return application, candidate, task_id
+
+
+@router.post("/applications/{application_id}/ended-remarks", status_code=status.HTTP_201_CREATED)
+def add_ended_remark(application_id: str, body: RemarkIn, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """A remark (the Remarks cell) or a note (the NOTES cell) on a declined / rejected / travelled placement; read back on the next list as the
+    row's `remark`, `notes` and `todayNotes` like on a current row."""
+    application, candidate, task_id = _ended_placement_task(db, user, application_id)
+    remark = Remark(task_id=task_id, body=body.body.strip(), author_id=user.id, kind=body.kind)
+    db.add(remark)
+    db.add(AuditEntry(actor_id=user.id, action="Added task note" if body.kind == "note" else "Added task remark", target=candidate.name,
+                      entity_type="task", entity_id=task_id))
+    db.flush()
+    out = RemarkOut(id=remark.id, task_id=task_id, body=remark.body, author_id=user.id, created_at=remark.created_at,
+                    kind=remark.kind).model_dump(by_alias=True, mode="json")
+    db.commit()
+    return out
+
+
+@router.post("/applications/{application_id}/ended-remarks/clear")
+def clear_ended_remark(application_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """"Select remark" on an ended placement: its Remarks cell reads empty again (notes stay), as `clear_task_remark` does for a current row."""
+    application, candidate, task_id = _ended_placement_task(db, user, application_id)
+    cleared = db.execute(update(Remark).where(Remark.deleted_at.is_(None), Remark.cleared_at.is_(None), Remark.kind == "remark", Remark.task_id.in_(
+        select(Task.id).where(or_(Task.application_id == application.id, and_(Task.candidate_id == candidate.id, Task.application_id.is_(None))))))
+        .values(cleared_at=func.now())).rowcount
+    if cleared:
+        db.add(AuditEntry(actor_id=user.id, action="Cleared task remark", target=candidate.name, entity_type="task", entity_id=task_id,
+                          meta={"remarks": cleared}))
+    db.commit()
+    return {"cleared": int(cleared or 0)}
 
 
 # --------------------------------------------------------------- call outcome

@@ -164,7 +164,7 @@ def test_a_traveller_being_deployed_publishes_one_event_with_the_candidate(desk,
         db.commit()
         assert candidate.traveller_id
     event = one_event(listener, includes=["applications", "candidates", "reports"], ids={"applications": [app_id], "candidates": [candidate_id]})
-    assert "CI-T" not in str(event)   # the Traveller ID itself is never in an event
+    assert candidate.traveller_id not in str(event)   # the Traveller ID itself is never in an event
 
 
 # ------------------------------------------------------------------ the day close

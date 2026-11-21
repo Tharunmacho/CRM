@@ -6,7 +6,7 @@ import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { useAutoGrow } from '@/shared/ui/use-auto-grow'
 import { RecordIdentity } from '@/shared/ui/workspace'
-import { agencyLabel, clockTime, countryCell, isClosed, nothingYet, noteWhen, notesNewestFirst, PENDING_NOTE, rowAction, sendNote, taskColumnsFor, widthsWithSpare, todayChips, todayPlace, type DailyNote, type TaskRow } from '@/features/daily-work/daily-work-model'
+import { agencyLabel, clockTime, closedRowsOf, countryCell, isClosed, nothingYet, noteWhen, notesNewestFirst, PENDING_NOTE, rowAction, sendNote, taskColumnsFor, widthsWithSpare, todayChips, todayPlace, type DailyNote, type TaskRow } from '@/features/daily-work/daily-work-model'
 import { getNoteDraft, noteDraftKey, setNoteDraft } from '@/features/daily-work/note-drafts'
 import { DELETE_NOTE_HINT, DELETE_NOTE_LABEL, DELETE_NOTE_TITLE } from '@/features/daily-work/note-delete-model'
 import { OwnerTag } from './task-identity'
@@ -20,7 +20,7 @@ import {
  * up to 1108px for a supervisor (1021px for a recruiter) without TODAY and are used as percentages, so the table always fills its panel (1111px at a 1440px
  * window with the sidebar open) and never scrolls sideways; under 1080px of panel width the list is a stack of cards instead. Headers and cells are
  * centred; text wraps (the full text is the tooltip) instead of being cut with an ellipsis. The rows arrive sorted by DOC (taskRows). A candidate
- * whose placement ended (Declined, Rejected, Travelled) shows its outcome in STAGE, a dash in TODAY and REMARKS, a read-only DOC and only View.
+ * whose placement ended (Declined, Rejected, Travelled) shows its outcome in STAGE and a dash in TODAY; DOC, REMARKS and NOTES are filled in and edited exactly as on a current row (saved by placement, since there is no open task) and show everything the recruiters wrote.
  * TODAY is a column of its own only when the panel holds the whole plan (`todayPlace`); on a narrower table its chip sits in the STAGE cell, under the
  * stage chip and its dashes, and a phone card has a TODAY row.
  * NOTES is a column of its own at every width and REMARKS holds only the select (a remark and a note are different things: the remark is the candidate's
@@ -173,7 +173,8 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
   const mayDelete = (row: TaskRow, note: DailyNote) => !!onDeleteNote && !!canDeleteNote?.(row, note)
   const ask = (row: TaskRow, note: DailyNote) => () => setAsking({ row, note })
   const place = todayPlace(supervisor, panelWidth)
-  const columns = taskColumnsFor(supervisor, place !== 'stage')
+  const columns = taskColumnsFor(supervisor, place !== 'stage', closedRowsOf(rows))   // ended rows: a wider STAGE, and no TODAY column when every row ended
+  const showToday = columns.some((c) => c.key === 'today')
   // REMARKS and NOTES take the room the panel has beyond the minimum plan (widthsWithSpare); every other column keeps its measured width.
   const widths = widthsWithSpare(columns, panelWidth)
   const effective = columns.map((c) => ({ ...c, width: widths[c.key] }))
@@ -190,7 +191,7 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
             const closed = isClosed(row)
             const noCountry = countryCell(row, countryCode).names.length === 0
             const { called, moved } = row.today
-            const work = canWork(row) && !closed
+            const work = canWork(row)   // a row whose placement ended is edited like any other: remark, notes and DOC (by placement, see the ended-remarks endpoints)
             return (
               <tr key={row.candidateId} className={cn('dw-row', closed && 'is-closed')}>
                 <td className="is-num tnum" data-label="S NO">{index + 1}</td>
@@ -201,16 +202,16 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
                 {supervisor && <td data-label="Recruiter">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
                 <td data-label="AGENCY" className={cn(!agencyLabel(row) && 'is-empty')}><AgencyCell item={row} /></td>
                 <td data-label="STAGE"><StageCell item={row} zone={zone} />{place === 'stage' && !closed && <TodayChips row={row} zone={zone} inStage />}</td>
-                {place !== 'stage' && (
+                {showToday && (
                   <td data-label="TODAY" className={cn(closed && 'is-empty')}>
                     {closed ? <span className="dw-none" title="Nothing is worked on a candidate whose placement ended">—</span> : <TodayChips row={row} zone={zone} />}
                   </td>
                 )}
-                <td data-label="REMARKS" className={cn((closed || (!row.remark && !work)) && 'is-empty')}>
-                  {closed ? <span className="dw-none" title="Nothing is worked on a candidate whose placement ended">—</span> : <RemarkCell item={row} canWork={work} onSave={(text) => onRemark(row, text)} onClear={onClearRemark && row.taskId ? () => onClearRemark(row) : undefined} />}
+                <td data-label="REMARKS" className={cn(!row.remark && !work && 'is-empty')}>
+                  <RemarkCell item={row} canWork={work} onSave={(text) => onRemark(row, text)} onClear={onClearRemark && (row.taskId || closed) ? () => onClearRemark(row) : undefined} />
                 </td>
                 <td data-label="NOTES" className={cn(!work && !(row.notes ?? row.todayNotes)?.length && 'is-empty')}>
-                  <NotesCell row={row} zone={zone} canAdd={work && !!row.taskId} authorName={authorName} onAdd={onAddNote} mayDelete={mayDelete} onAsk={ask} />
+                  <NotesCell row={row} zone={zone} canAdd={work && (!!row.taskId || closed)} authorName={authorName} onAdd={onAddNote} mayDelete={mayDelete} onAsk={ask} />
                 </td>
                 <td data-label="Actions" className="is-actions">
                   <div className="dw-actions">

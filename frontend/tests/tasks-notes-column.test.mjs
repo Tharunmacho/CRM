@@ -124,7 +124,7 @@ test('the store writes a note with kind "note" to the same endpoint, and a remar
   assert.match(store, /addRemark: async \(taskId, body, kind = 'remark'\) => \{\s*await run\(\(\) => api\.post\(`\/tasks\/\$\{taskId\}\/remarks`, kind === 'note' \? \{ body, kind \} : \{ body \}\)/)
   const screen = await code('../src/screens/tasks/daily-work.tsx')
   assert.match(screen, /store\.addRemark\(row\.taskId, text, 'note'\)/)
-  assert.match(screen, /onRemark=\{async \(row, text\) => \{ if \(row\.taskId\) \{ await store\.addRemark\(row\.taskId, text\)/, 'the Remarks select still writes a remark')
+  assert.match(screen, /onRemark=\{async \(row, text\) => \{ if \(row\.taskId\) await store\.addRemark\(row\.taskId, text\); else if \(isClosed\(row\)/, 'the Remarks select still writes a remark')
 })
 
 /* ------------------------------------------------------------------ the screen and the styles */
@@ -133,9 +133,9 @@ test('the table: NOTES always a column, the Remarks cell holds only the select, 
   const table = await code('../src/screens/tasks/task-table.tsx')
   assert.doesNotMatch(table, /has-notes|tw-remark-notes|showsNotesColumn|tw-remark-note-text/)
   assert.match(table, /todayPlace\(supervisor, panelWidth\)/)
-  assert.match(table, /taskColumnsFor\(supervisor, place !== 'stage'\)/)
+  assert.match(table, /taskColumnsFor\(supervisor, place !== 'stage', closedRowsOf\(rows\)\)/)
   assert.match(table, /<StageCell item=\{row\} zone=\{zone\} \/>\{place === 'stage' && !closed && <TodayChips row=\{row\} zone=\{zone\} inStage \/>\}/)
-  assert.match(table, /\{place !== 'stage' && \(\s*<td data-label="TODAY"/)
+  assert.match(table, /\{showToday && \(\s*<td data-label="TODAY"/)
   // the REMARKS cell: the select (or a dash) and nothing else
   const remarks = table.slice(table.indexOf('<td data-label="REMARKS"'), table.indexOf('<td data-label="NOTES"'))
   assert.match(remarks, /<RemarkCell /)
@@ -150,7 +150,7 @@ test('the table: NOTES always a column, the Remarks cell holds only the select, 
 
 test('the input: always visible for people who may work the candidate, Enter saves, Shift+Enter is a new line, Escape clears, disabled while saving', async () => {
   const table = await code('../src/screens/tasks/task-table.tsx')
-  assert.match(table, /canAdd=\{work && !!row\.taskId\}/, 'the same rule as the Remarks select')
+  assert.match(table, /canAdd=\{work && \(!!row\.taskId \|\| closed\)\}/, 'the same rule as the Remarks select')
   assert.match(table, /placeholder="Add a note…"/)
   assert.match(table, /event\.key === 'Enter' && !event\.shiftKey && !event\.nativeEvent\.isComposing/)
   assert.match(table, /event\.key === 'Escape' && text/)
@@ -167,7 +167,7 @@ test('the styles: no second line under the remark, the list is at most 260px and
   assert.doesNotMatch(css, /has-notes|tw-remark-notes|tw-notes-more/)
   assert.match(css, /\.tw-note-list \{[^}]*max-height: 260px[^}]*overflow-y: auto/)
   assert.match(css, /\.tw-note-input \{[^}]*min-height: 32px/)
-  assert.match(css, /\.tw-note-body \{[^}]*overflow-wrap: break-word/)
+  assert.match(css, /\.tw-note-body \{[^}]*overflow-wrap: anywhere/)
   assert.match(css, /td\[data-label='NOTES'\] \{ grid-column: 1 \/ -1; \}/)
   assert.match(css, /\.tw-today\.is-in-stage \{ margin-top: 6px; \}/)
   assert.match(css, /--tw-pad-l: 6px; --tw-pad-r: 6px;/)

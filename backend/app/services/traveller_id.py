@@ -1,9 +1,12 @@
-"""Care India TRAVELLER identifiers: the second, separate ID series.
+"""Care India TRAVELLER numbers: the second, separate ID series.
 
 ``Candidate.care_id`` (``CI-001``, see ``care_india_id``) numbers every candidate who enters the Data Bank.  The traveller
-ID numbers only the people who actually travelled, in the order they became travellers:
+number numbers only the people who actually travelled:
 
-    CI-T-001, CI-T-002, ...
+    CI 01, CI 02, ... CI 99, CI 100, CI 101, ...
+
+The people who had travelled before this format existed were numbered once, by migration 0057, in the order of their DATE OF
+TRAVEL (oldest = ``CI 01``); everybody after them continues the same series in the order they become travellers.
 
 Both start with ``CI`` (the agency), but they are different series with different counters
 (``crm_candidate_id_counters`` for the Data Bank ID, ``crm_traveller_id_counters`` here).
@@ -18,7 +21,7 @@ Both start with ``CI`` (the agency), but they are different series with differen
 * Serial numbers are reserved with one PostgreSQL upsert on a single counter row, so concurrent completions never receive
   the same number and a rolled-back transaction does not consume one.
 
-Everything about the format lives in this module (and the matching regex in migration 0044 / the model's check
+Everything about the format lives in this module (and the matching regex in migration 0057 / the model's check
 constraint): change ``PREFIX`` / ``format_traveller_id`` to change what the public ID looks like.
 """
 from __future__ import annotations
@@ -27,15 +30,15 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 
-PREFIX = "CI-T"
+PREFIX = "CI"
 COUNTER_KEY = "GLOBAL"
 
 
 def format_traveller_id(serial: int) -> str:
-    """Format a positive counter as the public traveller ID (``CI-T-007``; four digits once past 999)."""
+    """Format a positive counter as the public traveller number (``CI 07``; it simply grows wider after ``CI 99``: ``CI 100``)."""
     if serial < 1:
         raise ValueError("Traveller serial must be positive.")
-    return f"{PREFIX}-{serial:03d}"
+    return f"{PREFIX} {serial:02d}"
 
 
 def allocate_traveller_id(db: Session) -> str:

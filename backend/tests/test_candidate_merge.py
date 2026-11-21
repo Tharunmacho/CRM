@@ -343,7 +343,7 @@ def test_a_deployed_travelled_or_invoiced_duplicate_is_never_merged_away(env):
         db.commit()
     refused(env, "invoice")
     with env.sessions() as db:
-        person(db, "traveller", care_id="CI-300", name="Rashid Khan", phone="9000000001", traveller_id="CI-T-001")
+        person(db, "traveller", care_id="CI-300", name="Rashid Khan", phone="9000000001", traveller_id="CI 01")
         db.commit()
     response = merge(env, source="traveller", target=TGT)
     assert response.status_code == 409 and "deployed or has travelled" in response.json()["detail"]
@@ -357,7 +357,7 @@ def deploy_target(env):
         db.add(m.ApplicationStage(application_id="t-app", stage=13, data={"flown": True}))
         db.add(m.Task(id="t-task", kind=m.TaskKind.stage, title="Stage 11", candidate_id=TGT, application_id="t-app", owner_id="staff", completed_at=NOW))
         db.add(m.CandidateInvoice(id="t-inv", candidate_id=TGT, application_id="t-app", scope_key="t-app", number="INV-9"))
-        db.get(m.Candidate, TGT).traveller_id = "CI-T-001"
+        db.get(m.Candidate, TGT).traveller_id = "CI 01"
         db.commit()
 
 

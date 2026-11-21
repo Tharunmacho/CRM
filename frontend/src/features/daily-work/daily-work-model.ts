@@ -374,7 +374,7 @@ export function outcomeStageText(outcome: Pick<DailyOutcome, 'stage'>, titleOf: 
 export const VIEW_CAPTION: Record<DailyView, string> = {
   current: '',
   declined: 'Declined: the candidate said no (they turned the offer or the job down).',
-  rejected: 'Rejected: someone else stopped the application: the client, the medical, the visa or another step.',
+  rejected: 'Rejected: the client (or a later step such as the medical or the visa) turned the candidate down.',
   travelled: 'Travelled: the candidate was deployed and has flown.',
   all: 'All: the current process plus the candidates who were declined, rejected or have travelled.',
 }
@@ -555,8 +555,22 @@ export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
 ]
 
 /** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own); `roomForToday` keeps the TODAY column. */
-export const taskColumnsFor = (supervisor: boolean, roomForToday = true): TaskColumn[] =>
-  TASK_LIST_COLUMNS.filter((column) => (supervisor || !column.supervisor) && (roomForToday || !column.roomy))
+export const taskColumnsFor = (supervisor: boolean, roomForToday = true, closed: ClosedRows = 'none'): TaskColumn[] => {
+  const columns = TASK_LIST_COLUMNS.filter((column) => (supervisor || !column.supervisor) && (roomForToday || !column.roomy) && !(closed === 'all' && column.key === 'today'))
+  return closed === 'none' ? columns : columns.map((column) => (column.key === 'stage' ? { ...column, width: ENDED_STAGE_WIDTH } : column))
+}
+
+/**
+ * A row whose placement ended shows its outcome in STAGE (a one-line pill, the stage name, the reason, "date · by whom"): that cell needs ENDED_STAGE_WIDTH px
+ * instead of the 106px of a progress pill. A list with such rows (`some`: the All tab) has the wider STAGE column; a list of nothing but ended rows
+ * (`all`: Declined, Rejected, Travelled) has no TODAY column either (nothing is done on them today), and its spare room goes to REMARKS and NOTES as always.
+ */
+export type ClosedRows = 'none' | 'some' | 'all'
+export const ENDED_STAGE_WIDTH = 150
+export const closedRowsOf = (rows: readonly { outcome?: Partial<DailyOutcome> | null }[]): ClosedRows => {
+  const closed = rows.filter((row) => isClosed(row)).length
+  return closed === 0 ? 'none' : closed === rows.length ? 'all' : 'some'
+}
 
 /**
  * Remarks and Notes are what people read and write on this list, so they get ALL the room the panel has beyond the minimum plan (the columns above

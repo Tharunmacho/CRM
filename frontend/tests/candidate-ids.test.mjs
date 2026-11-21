@@ -11,7 +11,7 @@ async function load(path) {
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8')
 
 const ids = await load('../src/features/candidates/candidate-ids.ts')
-const both = { ref: 'CND-01092', careId: 'CI-078', travellerId: 'CI-T-094' }
+const both = { ref: 'CND-01092', careId: 'CI-078', travellerId: 'CI 94' }
 
 test('the Data Bank ID is the ONE ID shown; the CND reference and the Traveller ID are never added to it', () => {
   assert.equal(ids.primaryId(both), 'CI-078')
@@ -41,16 +41,28 @@ test('missing candidates and fields do not throw', () => {
 })
 
 test('the Traveller ID is read as sent, and is empty for a candidate who has not travelled', () => {
-  assert.equal(ids.travellerIdOf(both), 'CI-T-094')
+  assert.equal(ids.travellerIdOf(both), 'CI 94')
   assert.equal(ids.travellerLabel, undefined, 'no Traveller ID label is added to other screens')
   for (const travellerId of [undefined, null, '', '  ']) assert.equal(ids.travellerIdOf({ ref: 'CND-1', travellerId }), '')
 })
 
 test('search still finds a candidate by the Data Bank ID, the Traveller ID or the hidden CND reference, in any case', () => {
-  for (const text of ['ci-078', 'CI-T-09', 'cnd-01092', '078']) assert.equal(ids.matchesIdText(both, text), true, text)
+  for (const text of ['ci-078', 'CI 9', 'ci 94', 'cnd-01092', '078']) assert.equal(ids.matchesIdText(both, text), true, text)
   assert.equal(ids.matchesIdText(both, 'CI-099'), false)
   assert.equal(ids.matchesIdText(both, ''), false)
   assert.equal(ids.matchesIdText({ ref: 'CND-1' }, 'CI-T'), false)
+  // the stored numbers are zero-padded, a typed number is not
+  assert.equal(ids.matchesIdText({ ref: 'CND-1', travellerId: 'CI 07' }, 'ci 7'), true)
+  assert.equal(ids.matchesIdText({ ref: 'CND-1', travellerId: 'CI 07' }, 'ci7'), true)
+  assert.equal(ids.matchesIdText({ ref: 'CND-1', travellerId: 'CI 07' }, 'ci 8'), false)
+  assert.equal(ids.matchesIdText({ ref: 'CND-1', travellerId: 'CI 07' }, 'ci 00'), false)
+})
+
+test('the traveller number is CI, a space and at least two digits, growing wider after 99', () => {
+  assert.deepEqual([1, 2, 9, 10, 99, 100, 101, 1234].map(ids.formatTravellerId), ['CI 01', 'CI 02', 'CI 09', 'CI 10', 'CI 99', 'CI 100', 'CI 101', 'CI 1234'])
+  for (const bad of [0, -1, 1.5, Number.NaN]) assert.throws(() => ids.formatTravellerId(bad), RangeError)
+  for (const serial of [1, 9, 10, 99, 100, 101, 5000]) assert.equal(ids.travellerSerialOf(ids.formatTravellerId(serial)), serial)
+  for (const bad of ['CI-T-001', 'CI 1', 'CI 00', 'CI 001', 'ci 01', 'CI  01', 'CI 01 ', '', null, undefined, 7]) assert.equal(ids.travellerSerialOf(bad), null, String(bad))
 })
 
 test('the paper form header names the Data Bank ID only; the reference stands in only without one', () => {
@@ -79,7 +91,7 @@ test('every screen shows only the Data Bank ID (Travelled only the Traveller ID)
   assert.match(letterhead, /paperIdLine\(candidate, readableReference\)/)
 
   const travelled = await read('../src/screens/travelled/travelled.tsx')
-  assert.doesNotMatch(travelled, /TravellerIdChip/, 'the Travelled table shows no CI number')
+  assert.doesNotMatch(travelled, /TravellerIdChip/, 'the table draws the number itself, not the wide chip')
   assert.doesNotMatch(travelled, /primaryId|careIdOf|secondaryId|candidate-ids/)
 
   const palette = await read('../src/app/layout/command-search.tsx')

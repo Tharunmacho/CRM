@@ -184,6 +184,9 @@ interface StoreValue extends Data {
   deleteRemark: (remarkId: string) => Promise<void>
   /** "Select remark": the candidate's remark cell reads empty again; the notes and the history stay. */
   clearRemark: (taskId: string) => Promise<void>
+  /** The same two writes for a placement that ended (Declined / Rejected / Travelled rows have no open task): by placement id. */
+  addEndedRemark: (applicationId: string, body: string, kind?: 'remark' | 'note') => Promise<void>
+  clearEndedRemark: (applicationId: string) => Promise<void>
   recordCall: (candidateId: string, interested: string, remarks: string, called?: boolean) => Promise<void>
   markNotificationRead: (id?: string) => Promise<void>
   addCandidate: (payload: Record<string, unknown>, options?: { deferRefresh?: boolean }) => Promise<{ id: string; ownerName?: string | null } | null>
@@ -709,6 +712,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       clearRemark: async (taskId) => {
         await run(() => api.post(`/tasks/${encodeURIComponent(taskId)}/remarks/clear`))
+      },
+      addEndedRemark: async (applicationId, body, kind = 'remark') => {
+        await run(() => api.post(`/applications/${encodeURIComponent(applicationId)}/ended-remarks`, kind === 'note' ? { body, kind } : { body }), kind === 'note' ? 'Note added' : 'Remark added')
+      },
+      clearEndedRemark: async (applicationId) => {
+        await run(() => api.post(`/applications/${encodeURIComponent(applicationId)}/ended-remarks/clear`))
       },
       recordCall: async (candidateId, interested, remarks, called = true) => {
         await run(

@@ -23,6 +23,7 @@ from app.services.traveller_id import allocate_traveller_id, assign_traveller_id
 from test_database_naming import _migrate, schema_database  # noqa: F401
 
 PREVIOUS = "0043_stage_stop_exits"
+TARGET = "0044_simple_continuous_ids"      # the revision under test; later revisions (0057 renumbers the travellers again) have their own tests
 MIGRATION = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0044_simple_continuous_ids.py"
 
 # key: (created_at, care_id as 0040 issued it). Financial year 2025-26 has a gap (003 was deleted), 2026-27 starts again at 001.
@@ -73,7 +74,7 @@ def test_existing_ids_are_renumbered_contiguously_from_001_in_their_current_orde
     engine = schema_database
     _migrate(engine, PREVIOUS)
     seed(engine)
-    _migrate(engine, "head")
+    _migrate(engine, TARGET)
 
     assert rows(engine, "care_id") == NEW_CARE                   # the CI-25-26-003 gap closed: 001..006, same relative order
     assert rows(engine, "traveller_id") == {**NEW_TRAVELLER, "a": None, "c": None}
@@ -102,7 +103,7 @@ def test_a_candidate_deleted_before_the_migration_leaves_no_gap_and_ties_follow_
                                     "VALUES (:id, :ref, :id, :phone, 'walk_in', :created, :created)"),
                                {"id": key, "ref": f"CND-{key}", "phone": f"91000000{key[1]}", "created": created})
         connection.execute(text("ALTER TABLE crm_candidates ENABLE TRIGGER crm_candidates_assign_care_id"))
-    _migrate(engine, "head")
+    _migrate(engine, TARGET)
     assert rows(engine, "care_id") == {"a": "CI-001", "c": "CI-002", "d": "CI-003", "e": "CI-004", "f": "CI-005", "z1": "CI-006", "z2": "CI-007"}
     assert rows(engine, "traveller_id") == {"a": None, "c": None, "d": "CI-T-001", "e": "CI-T-002", "f": "CI-T-003", "z1": None, "z2": None}
     with engine.begin() as connection:
@@ -117,7 +118,7 @@ def test_an_empty_database_gets_zero_counters_so_the_first_numbers_are_001(schem
         assert counters(connection, "crm_candidate_id_counters") == {"GLOBAL": 0}
         assert counters(connection, "crm_traveller_id_counters") == {"GLOBAL": 0}
     with sessionmaker(bind=engine)() as db:
-        assert allocate_care_id(db) == "CI-001" and allocate_traveller_id(db) == "CI-T-001"
+        assert allocate_care_id(db) == "CI-001" and allocate_traveller_id(db) == "CI 01"
         db.commit()
 
 
@@ -131,19 +132,19 @@ def test_new_ids_continue_after_the_maximum_and_the_deleted_tail_numbers_are_giv
         db.add(new)
         db.flush()
         assert new.care_id == "CI-007"                                   # max (CI-006) + 1
-        assert assign_traveller_id(db, new) == "CI-T-005"                # the next deployed candidate: CI-T-004 + 1
-        assert assign_traveller_id(db, new) == "CI-T-005"                # exactly once, idempotent on retry
+        assert assign_traveller_id(db, new) == "CI 05"                   # the next deployed candidate: CI 04 + 1
+        assert assign_traveller_id(db, new) == "CI 05"                   # exactly once, idempotent on retry
         db.commit()
         # A direct insert that forgets the ID is numbered by the database trigger from the same counter.
         assert db.execute(text("INSERT INTO crm_candidates (id, ref, name, phone, source) VALUES ('h', 'CND-h', 'h', '90000000300', 'walk_in') RETURNING care_id")).scalar_one() == "CI-008"
         db.commit()
         # Deleting the highest candidates frees their Data Bank numbers: the next one is the Data Bank maximum (CI-006) + 1.
-        # Traveller numbers are a separate series and are still never reused: CI-T-005 went to g and stays used.
+        # Traveller numbers are a separate series and are still never reused: CI 05 went to g and stays used.
         db.delete(db.get(Candidate, "g"))
         db.delete(db.get(Candidate, "h"))
         db.commit()
         assert allocate_care_id(db) == "CI-007"
-        assert allocate_traveller_id(db) == "CI-T-006"
+        assert allocate_traveller_id(db) == "CI 06"
         db.commit()
         assert counters(db.connection(), "crm_candidate_id_counters") == {"GLOBAL": 7}   # the counter row equals the number just given
 
@@ -154,14 +155,14 @@ def test_ids_grow_naturally_past_999(schema_database):
     with sessionmaker(bind=engine)() as db:
         # The Data Bank holds CI-998 as its highest number; the Care India number is read from there (the counter row is ignored).
         db.execute(text("INSERT INTO crm_candidates (id, ref, care_id, name, phone, source) VALUES ('top', 'CND-TOP', 'CI-998', 'top', '90000000399', 'walk_in')"))
-        db.execute(text("INSERT INTO crm_traveller_id_counters (series, last_serial) VALUES ('GLOBAL', 998) ON CONFLICT (series) DO UPDATE SET last_serial = 998"))
+        db.execute(text("INSERT INTO crm_traveller_id_counters (series, last_serial) VALUES ('GLOBAL', 98) ON CONFLICT (series) DO UPDATE SET last_serial = 98"))
         given = []
         for index in range(3):
             given.append(allocate_care_id(db))
             db.add(Candidate(id=f"n{index}", ref=f"CND-N{index}", name="n", phone=f"9000000040{index}", source="walk_in", care_id=given[-1]))
             db.flush()
         assert given == ["CI-999", "CI-1000", "CI-1001"]
-        assert [allocate_traveller_id(db) for _ in range(3)] == ["CI-T-999", "CI-T-1000", "CI-T-1001"]
+        assert [allocate_traveller_id(db) for _ in range(3)] == ["CI 99", "CI 100", "CI 101"]      # two digits at least, then it simply grows wider
         # The database-side backstop agrees (it must not truncate to three digits).
         db.execute(text("UPDATE crm_candidate_id_counters SET last_serial = 1001"))
         assert db.execute(text("INSERT INTO crm_candidates (id, ref, name, phone, source) VALUES ('big', 'CND-BIG', 'big', '90000000410', 'walk_in') RETURNING care_id")).scalar_one() == "CI-1002"
@@ -178,7 +179,7 @@ def test_format_constraints_and_immutability_survive_the_renumbering(schema_data
             with pytest.raises(IntegrityError):
                 with connection.begin_nested():
                     connection.execute(text("INSERT INTO crm_candidates (id, ref, care_id, name, phone, source) VALUES ('x', 'CND-X', :care, 'x', '90000000500', 'walk_in')"), {"care": care})
-        for traveller in ("CI-T-26-27-001", "CI-T-1", "CI-T-000", "CI-T-0001", "CI-001", "ci-t-007"):
+        for traveller in ("CI-T-26-27-001", "CI-T-001", "CI 1", "CI 00", "CI 001", "ci 01", "CI  01", "CI 01 ", "CI-001", "CI 0"):
             with pytest.raises(IntegrityError):
                 with connection.begin_nested():
                     connection.execute(text("UPDATE crm_candidates SET traveller_id = :traveller WHERE id = 'a'"), {"traveller": traveller})
@@ -190,12 +191,12 @@ def test_format_constraints_and_immutability_survive_the_renumbering(schema_data
                 connection.execute(text("UPDATE crm_candidates SET care_id = 'CI-777' WHERE id = 'a'"))
         with pytest.raises(IntegrityError):
             with connection.begin_nested():
-                connection.execute(text("UPDATE crm_candidates SET traveller_id = 'CI-T-777' WHERE id = 'b'"))
+                connection.execute(text("UPDATE crm_candidates SET traveller_id = 'CI 77' WHERE id = 'b'"))
         with pytest.raises(IntegrityError):
             with connection.begin_nested():
                 connection.execute(text("UPDATE crm_candidates SET traveller_id = NULL WHERE id = 'b'"))
         connection.execute(text("INSERT INTO crm_candidates (id, ref, care_id, name, phone, source) VALUES ('ok', 'CND-OK', 'CI-1000', 'ok', '90000000501', 'walk_in')"))
-        connection.execute(text("UPDATE crm_candidates SET traveller_id = 'CI-T-999' WHERE id = 'a'"))     # NULL -> value is allowed once
+        connection.execute(text("UPDATE crm_candidates SET traveller_id = 'CI 999' WHERE id = 'a'"))     # NULL -> value is allowed once
 
 
 def _migration_module():
@@ -209,7 +210,7 @@ def test_the_migration_body_is_safe_to_run_again_on_converted_data(schema_databa
     engine = schema_database
     _migrate(engine, PREVIOUS)
     seed(engine)
-    _migrate(engine, "head")
+    _migrate(engine, TARGET)
     before = (rows(engine, "care_id"), rows(engine, "traveller_id"))
     module = _migration_module()
     with engine.begin() as connection:
@@ -272,7 +273,7 @@ def test_concurrent_creations_never_share_a_care_id_or_traveller_number(schema_d
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(create, range(16)))
     assert sorted(care for care, _ in results) == [f"CI-{n:03d}" for n in range(1, 17)]
-    assert sorted(traveller for _, traveller in results) == [f"CI-T-{n:03d}" for n in range(1, 17)]
+    assert sorted(traveller for _, traveller in results) == [f"CI {n:02d}" for n in range(1, 17)]
     with sessions() as db:
         assert {row.care_id for row in db.scalars(select(Candidate))} == {f"CI-{n:03d}" for n in range(1, 17)}
 
@@ -283,7 +284,7 @@ def test_a_deployed_candidate_with_no_traveller_id_is_numbered_after_the_existin
     seed(engine)
     with engine.begin() as connection:     # deployed, but 0041 / the app never numbered them: should not happen, must not stay blank
         connection.execute(text("INSERT INTO crm_applications (id, candidate_id, order_id, current_stage, status) VALUES ('app-a', 'a', 'order', 11, 'deployed')"))
-    _migrate(engine, "head")
+    _migrate(engine, TARGET)
     assert rows(engine, "traveller_id") == {**NEW_TRAVELLER, "a": "CI-T-005", "c": None}
     with engine.begin() as connection:
         assert counters(connection, "crm_traveller_id_counters") == {"GLOBAL": 5}

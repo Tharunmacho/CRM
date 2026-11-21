@@ -85,15 +85,15 @@ def test_export_has_the_same_extra_columns_with_the_labels_admins_set(grid):
 
 
 def test_traveller_id_is_listed_searchable_and_exported_beside_the_care_india_id(grid):
-    grid.execute(m.Candidate.__table__.update().where(m.Candidate.id == 'two').values(traveller_id='CI-T-007'))
+    grid.execute(m.Candidate.__table__.update().where(m.Candidate.id == 'two').values(traveller_id='CI 07'))
     grid.commit()
     row = next(item for item in listing(grid) if item['id'] == 'two')
-    assert row['travellerId'] == 'CI-T-007'
+    assert row['travellerId'] == 'CI 07'
     assert next(item for item in listing(grid) if item['id'] == 'one')['travellerId'] is None
-    assert {item['id'] for item in listing(grid, q='ci-t-007')} == {'two'}      # found by the traveller ID, as by the Care India ID
+    assert {item['id'] for item in listing(grid, q='ci 07')} == {'two'}      # found by the traveller ID, as by the Care India ID
     with ZipFile(BytesIO(export_candidates(grid, Search(sort='name', direction='asc')))) as archive:
         sheet = ElementTree.fromstring(archive.read('xl/worksheets/sheet1.xml'))
     rows = [[''.join(cell.itertext()) for cell in r.findall('{*}c')] for r in sheet.findall('{*}sheetData/{*}row')]
     header = rows[0]
     assert header.index('Traveller ID') == header.index('Care India ID') + 1
-    assert {r[header.index('Name')]: r[header.index('Traveller ID')] for r in rows[1:]}['Meena Das'] == 'CI-T-007'
+    assert {r[header.index('Name')]: r[header.index('Traveller ID')] for r in rows[1:]}['Meena Das'] == 'CI 07'

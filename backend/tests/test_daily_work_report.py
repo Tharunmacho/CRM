@@ -67,7 +67,7 @@ NOW = datetime(2026, 11, 5, 14, 0, tzinfo=IST).astimezone(timezone.utc)
 KEYS = ["leadsContacted", "prescreened", "forwarded", "shortlisted", "interviews", "offers", "visas", "travelled"]
 PEOPLE = {"admin": Role.admin, "manager": Role.manager, "asha": Role.staff, "ravi": Role.staff, "meena": Role.staff,
           "zed": Role.staff, "gone": Role.staff}
-PHONES, PASSPORT, TRAVELLER = [], "Z9876543", "CI-T-001"
+PHONES, PASSPORT, TRAVELLER = [], "Z9876543", "CI 01"
 
 
 def ist(day, hour=0, minute=0):

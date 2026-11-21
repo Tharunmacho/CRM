@@ -12,6 +12,7 @@ import { isAdminLevel, roleLabel } from '@/shared/model/role-labels'
 
 const loaders = {
   'inbox/inbox': () => import('@/screens/inbox/inbox'),
+  'job-requirements/job-requirements': () => import('@/screens/job-requirements/job-requirements'),
   'clients/clients': () => import('@/screens/clients/clients'),
   'clients/client-detail': () => import('@/screens/clients/client-detail'),
   'jobs/jobs': () => import('@/screens/jobs/jobs'),
@@ -31,6 +32,7 @@ const loadShell = () => import('@/app/layout/app-shell').then((module) => ({ def
 const FIRST_SCREEN: [RegExp, keyof typeof loaders][] = [
   [/^\/?$/, 'dashboard/dashboard'],
   [/^\/inbox\/?$/, 'inbox/inbox'],
+  [/^\/job-requirements\/?$/, 'job-requirements/job-requirements'],
   [/^\/clients\/?$/, 'clients/clients'],
   [/^\/clients\/[^/]+\/?$/, 'clients/client-detail'],
   [/^\/jobs\/?$/, 'jobs/jobs'],
@@ -80,6 +82,7 @@ const AppShell = lazy(loadShell)
 const DashboardPage = lazy(loaders['dashboard/dashboard'])
 const InboxPage = lazy(loaders['inbox/inbox'])
 const WhatsAppPage = lazy(() => import('@/screens/inbox/whatsapp'))
+const JobRequirementsPage = lazy(loaders['job-requirements/job-requirements'])
 const ClientsPage = lazy(loaders['clients/clients'])
 const ClientDetailPage = lazy(loaders['clients/client-detail'])
 const JobsPage = lazy(loaders['jobs/jobs'])
@@ -158,6 +161,7 @@ export default function AppRoutes() {
             <Route index element={<DashboardPage />} />
             <Route path="inbox" element={<InboxPage />} />
             <Route path="whatsapp" element={<WhatsAppPage />} />
+            <Route path="job-requirements" element={<JobRequirementsPage />} />
             <Route path="clients" element={<ClientsPage />} />
             <Route path="clients/:id" element={<ClientDetailPage />} />
             {/* Companies live inside Clients now; old links and bookmarks land on the client list. */}

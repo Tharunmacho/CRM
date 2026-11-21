@@ -1711,7 +1711,7 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
             amount=data.get("amount") if number == ADVANCE_STAGE and data.get("advanceStatus") != "pending" else None, amount_currency=data.get("amountCurrency") if number == ADVANCE_STAGE else None))
     if deploy:
         _sync_order(db, locked)
-        # They have travelled: they get the next number in the traveller series (CI-T-001, CI-T-002 ...).
+        # They have travelled: they get the next number in the traveller series (CI 01, CI 02 ...).
         assign_traveller_id(db, candidate)
     else:
         # The stage the recruiter continues at: its task, and what the sheet already says as the saved draft.

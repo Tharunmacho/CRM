@@ -83,6 +83,29 @@ def scan_day_end_report(db, *, now=None, agency_timezone=None):
         return {"sent": 0, "days": [], "failed": True}
 
 
+_JOB_REMINDER_COOLDOWN_SECONDS = 600
+_job_reminder_retry_at = 0.0
+
+
+def scan_job_requirement_deadlines(db, *, now=None, agency_timezone=None):
+    """Job requirement deadline reminders as one more independent pass; the caller commits.
+
+    Same shape as scan_day_end_report: its own savepoint, never raises, retried after a short pause; the pass itself is idempotent."""
+    import logging
+    import time as clock
+    global _job_reminder_retry_at
+    if clock.monotonic() < _job_reminder_retry_at:
+        return {"owners": 0, "admins": 0}
+    from app.services.job_requirement_reminders import deliver_job_requirement_reminders
+    try:
+        with db.begin_nested():
+            return deliver_job_requirement_reminders(db, now=now, agency_timezone=agency_timezone)
+    except Exception as exc:
+        _job_reminder_retry_at = clock.monotonic() + _JOB_REMINDER_COOLDOWN_SECONDS
+        logging.getLogger("job_requirement_reminders").error("Job requirement reminders failed (%s); the other scans continue.", type(exc).__name__)
+        return {"owners": 0, "admins": 0, "failed": True}
+
+
 def scan_daily_work_only(db, *, now=None, agency_timezone=None):
     """The daily-work clean-up pass between the 15-minute task scans (the daily list itself is computed live); the caller commits."""
     from app.services.daily_work import scan_daily_work

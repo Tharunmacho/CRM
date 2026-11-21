@@ -174,12 +174,12 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
             action={person ? <Button onClick={() => setStaff('all')}>Show all recruiters</Button> : undefined} />
         ) : (
           <TaskTable rows={rows} zone={zone} labelledBy={viewTabId(view)} busy={waiting} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
-            canWork={(row) => !!row.taskId && (store.can('work_any_candidate') || row.ownerId === store.me.id)}
+            canWork={(row) => (!!row.taskId || (isClosed(row) && !!row.applicationId)) && (store.can('work_any_candidate') || row.ownerId === store.me.id)}
             onOpen={open} onProfile={(row) => navigate(`/candidates/${row.candidateId}`)}
             onSaveDoc={async (row, iso) => { if (!row.applicationId) return; await saveApplicationForm(row.candidateId, { applicationId: row.applicationId }, { application: { commencementDate: iso } }); await refreshAll() }}
-            onRemark={async (row, text) => { if (row.taskId) { await store.addRemark(row.taskId, text); await refreshAll() } }}
-            onClearRemark={async (row) => { if (row.taskId) { await store.clearRemark(row.taskId); await refreshAll() } }}
-            onAddNote={async (row, text) => { if (row.taskId) { await store.addRemark(row.taskId, text, 'note'); await refreshAll() } }} authorName={store.me?.name}
+            onRemark={async (row, text) => { if (row.taskId) await store.addRemark(row.taskId, text); else if (isClosed(row) && row.applicationId) await store.addEndedRemark(row.applicationId, text); else return; await refreshAll() }}
+            onClearRemark={async (row) => { if (row.taskId) await store.clearRemark(row.taskId); else if (isClosed(row) && row.applicationId) await store.clearEndedRemark(row.applicationId); else return; await refreshAll() }}
+            onAddNote={async (row, text) => { if (row.taskId) await store.addRemark(row.taskId, text, 'note'); else if (isClosed(row) && row.applicationId) await store.addEndedRemark(row.applicationId, text, 'note'); else return; await refreshAll() }} authorName={store.me?.name}
             canDeleteNote={(row, note) => canDeleteNote(note, row, store.me)} onDeleteNote={(_row, note) => deleteNote(note.id)} />
         )}
       </section>

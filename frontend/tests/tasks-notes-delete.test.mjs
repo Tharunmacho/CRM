@@ -75,7 +75,7 @@ test('every note of the NOTES list (table and phone card) has a "Delete note" ic
   assert.doesNotMatch(table, /window\.confirm|confirm\(/)
   assert.match(table, /onDeleteNote\?\.\(target\.row, target\.note\)/, 'nothing is deleted before the dialog is confirmed')
   assert.match(table, /canDeleteNote\?\.\(row, note\)/, 'without the rule no button is drawn')
-  assert.match(table, /onClear=\{onClearRemark && row\.taskId/)
+  assert.match(table, /onClear=\{onClearRemark && \(row\.taskId/)
 })
 
 test('the page hides the note at once, deletes through the store, refreshes, and brings the note back with a message when the server refuses', async () => {

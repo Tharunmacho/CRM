@@ -4,6 +4,7 @@ Runs on the explicitly guarded disposable PostgreSQL DB (see test_database_namin
 test_daily_work. The first candidates are driven through the real stage endpoints, so the closures are the ones production writes.
 """
 import io
+from datetime import timedelta
 import re
 import zipfile
 
@@ -49,8 +50,8 @@ def test_every_item_of_the_default_view_carries_a_current_outcome_and_the_defaul
     assert {i["outcome"]["kind"] for i in plain["items"]} == {"current"}
     assert all(i["outcome"] == {"kind": "current", "label": None, "reason": None, "stage": None, "at": None, "by": None} for i in plain["items"])
     assert plain["view"] == "current"
-    # The rejected and the unmapped candidates are back in the pool, so (as before) they stay on today's list; the decline does not.
-    assert set(ids(plain)) == {"c1", "c3", "c4"}
+    # The rejected and the declined candidates are parked (Rejected / Declined tabs); the unmapped one is only off a job, so it stays on today's list.
+    assert set(ids(plain)) == {"c3", "c4"}
     for item in listing(desk, "asha", "/api/follow-up")["items"]:
         assert item["outcome"]["kind"] == "current"
 
@@ -87,13 +88,13 @@ def test_travelled_view_lists_deployed_placements(desk):
     assert view(desk, "admin", "travelled")["viewCounts"]["travelled"] == 1
 
 
-def test_all_view_is_today_plus_the_three_and_lists_a_rejected_candidate_on_todays_list_once(desk):
+def test_all_view_is_today_plus_the_three_each_candidate_once(desk):
     ended_desk(desk)
     body = view(desk, "asha", "all")
     assert sorted(ids(body)) == ["c0", "c1", "c2", "c3", "c4"]
     kinds = {item["candidateId"]: item["outcome"]["kind"] for item in body["items"]}
-    # c1 (rejected, back in the pool) is on today's list: once, as current; c3 was only unmapped, which is no outcome.
-    assert kinds == {"c4": "current", "c3": "current", "c1": "current", "c0": "declined", "c2": "travelled"}
+    # c1 (rejected) is parked: on the Rejected view only; c3 was only unmapped, which is no outcome.
+    assert kinds == {"c4": "current", "c3": "current", "c1": "rejected", "c0": "declined", "c2": "travelled"}
     assert len(ids(body)) == len(set(ids(body)))
 
 
@@ -105,8 +106,8 @@ def test_view_counts_agree_with_the_lists_in_every_scope(desk):
         for name in ("declined", "rejected", "travelled"):
             assert counts[name] == len(view(desk, user, name, staff)["items"]), (user, staff, name)
         assert counts["current"] == len(view(desk, user, "current", staff)["items"])
-    assert view(desk, "asha", "current")["viewCounts"] == {"current": 3, "declined": 1, "rejected": 1, "travelled": 1}
-    assert view(desk, "admin", "current")["viewCounts"] == {"current": 3, "declined": 2, "rejected": 1, "travelled": 1}
+    assert view(desk, "asha", "current")["viewCounts"] == {"current": 2, "declined": 1, "rejected": 1, "travelled": 1}
+    assert view(desk, "admin", "current")["viewCounts"] == {"current": 2, "declined": 2, "rejected": 1, "travelled": 1}
 
 
 def test_scope_rules_are_those_of_the_default_view(desk):
@@ -264,3 +265,199 @@ def test_completing_a_stage_locks_in_one_statement_and_writes_each_table_once(de
     assert sum(s.startswith("SELECT crm_candidates") for s in seen) == 1 and not any(s.startswith("SELECT crm_job_orders") for s in seen), seen
     assert sum(s.startswith("UPDATE crm_applications") for s in seen) == 1, seen
     assert done.status_code == 200 and desk.client.get(f"/api/applications/{app_id}/draft").json()["lockVersion"] == saved.json()["lockVersion"] + 1
+
+
+# ------------------------------------------------------------------ a rejected candidate is off today's list; every detail shows on the ended tabs
+
+def current_ids(desk, user="asha", extra=""):
+    return sorted(ids(view(desk, user, "current", extra)))
+
+
+def test_a_rejected_candidate_is_on_the_rejected_tab_only_and_the_counts_agree_everywhere(desk):
+    ended_desk(desk)
+    assert current_ids(desk) == ["c3", "c4"]                       # c1 (rejected at the interview) is no longer a bare "Initial call" row
+    assert ids(view(desk, "asha", "rejected")) == ["c1"]
+    everything = view(desk, "asha", "all")
+    assert sorted(ids(everything)) == ["c0", "c1", "c2", "c3", "c4"] and len(ids(everything)) == len(set(ids(everything)))
+    assert {i["candidateId"]: i["outcome"]["kind"] for i in everything["items"]} == {
+        "c0": "declined", "c1": "rejected", "c2": "travelled", "c3": "current", "c4": "current"}
+    body = view(desk, "asha", "current")
+    assert body["summary"] == {"total": 2, "toWork": 2, "doneToday": 0} and body["viewCounts"] == {"current": 2, "declined": 1, "rejected": 1, "travelled": 1}
+    # the per-recruiter card, the supervisor's total and the sidebar figure (the same summary) say the same
+    card = next(s["summary"] for s in view(desk, "manager", "current")["staff"] if s["userId"] == "asha")
+    assert card == {"total": 2, "toWork": 2, "doneToday": 0}
+    assert view(desk, "manager", "current")["summary"]["total"] == 2
+    with desk.sessions() as db:
+        from app.services import daily_work
+        assert daily_work.owner_counts(db, ["asha"])["asha"] == (2, 0)
+    # the Data Bank keeps them: still a candidate, not removed
+    with desk.sessions() as db:
+        assert db.scalar(text("SELECT status FROM crm_candidates WHERE id = 'c1'")) == "new"
+
+
+def test_a_yes_call_after_a_rejection_puts_the_candidate_back_on_todays_list_not_the_rejected_tab(desk):
+    ended_desk(desk)
+    with desk.sessions() as db:
+        db.execute(text("UPDATE crm_candidates SET call_recorded_at = now() + interval '1 hour', call_called = true, call_interested = 'yes' WHERE id = 'c1'"))
+        db.commit()
+    assert ids(view(desk, "asha", "rejected")) == [] and view(desk, "asha", "current")["viewCounts"]["rejected"] == 0
+    assert "c1" in current_ids(desk) and view(desk, "asha", "current")["summary"]["total"] == 3
+    assert sorted(ids(view(desk, "asha", "all"))).count("c1") == 1
+    # an older yes (before the closure) or a no does not bring them back
+    with desk.sessions() as db:
+        db.execute(text("UPDATE crm_candidates SET call_recorded_at = now() - interval '30 days', call_interested = 'yes' WHERE id = 'c1'"))
+        db.commit()
+    assert ids(view(desk, "asha", "rejected")) == ["c1"] and "c1" not in current_ids(desk)
+
+
+def test_a_rejected_candidate_mapped_to_a_new_job_is_back_on_the_list_and_off_the_rejected_tab(desk):
+    ended_desk(desk)
+    as_user(desk, "asha")
+    assert desk.client.post("/api/applications", json={"candidate_id": "c1", "order_id": "order"}).status_code == 201
+    assert ids(view(desk, "asha", "rejected")) == [] and "c1" in current_ids(desk)
+    counts = view(desk, "asha", "current")["viewCounts"]
+    assert counts["rejected"] == 0 and counts["current"] == 3
+
+
+def with_details(desk):
+    """c1 (rejected at the interview): an agency, a remark on its stage task, a remark on its initial-call task, two notes and a date of commencement."""
+    apps, _other = ended_desk(desk)
+    with desk.sessions() as db:
+        db.execute(text("UPDATE crm_candidates SET source = 'referral', source_detail = 'Gulf Agency' WHERE id = 'c1'"))
+        db.execute(text("UPDATE crm_applications SET commencement_date = '2026-12-05' WHERE id = :a"), {"a": apps["c1"]})
+        stage_task = db.scalar(text("SELECT id FROM workflow_tasks WHERE application_id = :a ORDER BY created_at DESC LIMIT 1"), {"a": apps["c1"]})
+        db.execute(text("INSERT INTO workflow_tasks (id, kind, title, candidate_id, owner_id, completed_at) VALUES ('call-c1', 'initial_call', 'Call', 'c1', 'asha', now())"))
+        for rid, task, body, kind, minutes in (("r1", stage_task, "Client wants a younger profile", "remark", 3), ("r2", "call-c1", "Called, interested", "remark", 30),
+                                               ("n1", stage_task, "Spoke to the client on Monday", "note", 2), ("n2", "call-c1", "Prefers Qatar", "note", 20)):
+            db.execute(text("INSERT INTO workflow_task_remarks (id, task_id, body, author_id, kind, created_at) "
+                            "VALUES (:i, :t, :b, 'asha', :k, now() - make_interval(mins => :m))"), {"i": rid, "t": task, "b": body, "k": kind, "m": minutes})
+        db.commit()
+    return apps
+
+
+def test_the_rejected_row_carries_the_same_detail_as_a_current_row(desk):
+    apps = with_details(desk)
+    item = view(desk, "asha", "rejected")["items"][0]
+    assert item["candidateId"] == "c1" and item["taskId"] is None
+    assert (item["client"], item["position"], item["country"], item["agency"], item["commencementDate"]) == ("Gulf Builders", "Welder", "Qatar", "Gulf Agency", "2026-12-05")
+    assert item["remark"]["body"] == "Client wants a younger profile" and item["remark"]["by"] == "Asha"      # the placement's newest remark wins
+    assert [n["body"] for n in item["notes"]] == ["Spoke to the client on Monday", "Prefers Qatar"]            # notes of the placement and of the initial call, newest first
+    assert [n["body"] for n in item["todayNotes"]] == []       # written at real "now", the frozen agency day is another one
+    assert item["notes"][0]["by"] == "Asha" and item["notes"][0]["byId"] == "asha"
+    # without a remark on the placement the initial call's remark shows, and a cleared remark is no remark
+    with desk.sessions() as db:
+        db.execute(text("UPDATE workflow_task_remarks SET deleted_at = now() WHERE id = 'r1'"))
+        db.commit()
+    assert view(desk, "asha", "rejected")["items"][0]["remark"]["body"] == "Called, interested"
+    with desk.sessions() as db:
+        db.execute(text("UPDATE workflow_task_remarks SET cleared_at = now() WHERE id = 'r2'"))
+        db.commit()
+    assert view(desk, "asha", "rejected")["items"][0]["remark"] is None
+    # every tab that lists the row carries the same keys as a current row
+    current_keys = set(view(desk, "asha", "current")["items"][0])
+    current_keys -= {"stageMovedAt", "calledAt"}      # what was done today: nothing is done on an ended placement
+    for name in ("declined", "rejected", "travelled", "all"):
+        for row in view(desk, "asha", name)["items"]:
+            assert current_keys <= set(row), (name, current_keys - set(row))
+
+
+def test_the_ended_views_still_cost_a_handful_of_statements_with_the_notes(desk):
+    with_details(desk)
+    rejected = statements(desk, "/api/daily-work?view=rejected", "asha")
+    assert len(rejected) <= 6, rejected
+    everything = statements(desk, "/api/daily-work?view=all", "asha")
+    assert len(everything) <= 10, everything   # today's five reads, view counts, the ended rows, then remarks / facts / who closed them side by side
+
+
+def ended_app(desk):
+    apps = with_details(desk)
+    return apps
+
+
+def test_remarks_notes_and_doc_are_written_on_an_ended_placement_and_read_back_on_every_tab(desk):
+    apps = ended_app(desk)
+    app_id = apps["c1"]
+    as_user(desk, "asha")
+    with desk.sessions() as db:
+        before = db.execute(text("SELECT status, closure_reason, updated_at, current_stage FROM crm_applications WHERE id = :a"), {"a": app_id}).one()
+        tasks_before = db.scalar(text("SELECT count(*) FROM workflow_tasks"))
+        open_before = db.scalar(text("SELECT count(*) FROM workflow_tasks WHERE completed_at IS NULL AND cancelled_at IS NULL"))
+    remark = desk.client.post(f"/api/applications/{app_id}/ended-remarks", json={"body": "  Waiting for the next opening  "})
+    assert remark.status_code == 201, remark.text
+    assert remark.json()["body"] == "Waiting for the next opening" and remark.json()["kind"] == "remark" and remark.json()["authorId"] == "asha"
+    note = desk.client.post(f"/api/applications/{app_id}/ended-remarks", json={"body": "Called the agency", "kind": "note"})
+    assert note.status_code == 201 and note.json()["kind"] == "note"
+    for name in ("rejected", "all"):
+        row = next(i for i in view(desk, "asha", name)["items"] if i["candidateId"] == "c1")
+        assert row["remark"]["body"] == "Waiting for the next opening"
+        assert row["notes"][0]["body"] == "Called the agency" and row["notes"][0]["id"] == note.json()["id"]
+    # the placement is untouched: still closed for the same reason at the same time, nothing reopened, no open task made, off today's list
+    with desk.sessions() as db:
+        after = db.execute(text("SELECT status, closure_reason, updated_at, current_stage FROM crm_applications WHERE id = :a"), {"a": app_id}).one()
+        assert tuple(after) == tuple(before)
+        assert db.scalar(text("SELECT count(*) FROM workflow_tasks WHERE completed_at IS NULL AND cancelled_at IS NULL")) == open_before
+        assert db.scalar(text("SELECT count(*) FROM workflow_tasks")) == tasks_before            # the placement's own task held them
+        assert db.scalar(text("SELECT count(*) FROM system_audit_log WHERE action IN ('Added task remark', 'Added task note') AND actor_id = 'asha'")) >= 2
+    assert "c1" not in current_ids(desk) and ids(view(desk, "asha", "rejected")) == ["c1"]
+    # the notes can be deleted like any note, and "Select remark" clears the remark cell (the notes stay)
+    assert desk.client.delete(f"/api/remarks/{note.json()['id']}").status_code == 200
+    assert "Called the agency" not in [n["body"] for n in view(desk, "asha", "rejected")["items"][0]["notes"]]
+    cleared = desk.client.post(f"/api/applications/{app_id}/ended-remarks/clear")
+    assert cleared.status_code == 200 and cleared.json()["cleared"] >= 2
+    row = view(desk, "asha", "rejected")["items"][0]
+    assert row["remark"] is None and [n["body"] for n in row["notes"]] == ["Spoke to the client on Monday", "Prefers Qatar"]
+
+
+def test_the_date_of_commencement_is_saved_on_an_ended_placement_without_moving_its_closure_time(desk):
+    from app.api.routers import application_form as form_router
+    apps = ended_app(desk)
+    desk.app.include_router(form_router.router)
+    as_user(desk, "asha")
+    with desk.sessions() as db:
+        closed_at = db.scalar(text("SELECT updated_at FROM crm_applications WHERE id = :a"), {"a": apps["c1"]})
+    saved = desk.client.put(f"/api/candidates/c1/application-form?applicationId={apps['c1']}", json={"application": {"commencementDate": "2026-12-20"}})
+    assert saved.status_code == 200, saved.text
+    row = view(desk, "asha", "rejected")["items"][0]
+    assert row["commencementDate"] == "2026-12-20"
+    with desk.sessions() as db:
+        assert db.scalar(text("SELECT updated_at FROM crm_applications WHERE id = :a"), {"a": apps["c1"]}) == closed_at
+        assert db.scalar(text("SELECT status FROM crm_applications WHERE id = :a"), {"a": apps["c1"]}) == "closed"
+    # a candidate whose yes call is older than the closure is therefore still parked (the DOC edit did not make the closure newer)
+    with desk.sessions() as db:
+        db.execute(text("UPDATE crm_candidates SET call_recorded_at = :at, call_called = true, call_interested = 'yes' WHERE id = 'c1'"), {"at": closed_at + timedelta(seconds=-5)})
+        db.commit()
+    assert "c1" not in current_ids(desk)
+
+
+def test_who_may_write_on_an_ended_placement(desk):
+    apps = ended_app(desk)
+    url = f"/api/applications/{apps['c1']}/ended-remarks"
+    as_user(desk, "ravi")                                                    # another recruiter's candidate
+    assert desk.client.post(url, json={"body": "x"}).status_code == 403
+    assert desk.client.post(url + "/clear").status_code == 403
+    for supervisor in ("admin", "manager"):                                  # admin and MD may
+        as_user(desk, supervisor)
+        assert desk.client.post(url, json={"body": f"by {supervisor}", "kind": "note"}).status_code == 201
+    as_user(desk, "asha")
+    assert desk.client.post(url, json={"body": ""}).status_code == 422
+    assert desk.client.post("/api/applications/nope/ended-remarks", json={"body": "x"}).status_code == 404
+    # an ACTIVE placement is written through its task, not here
+    active = apps["c4"]
+    assert desk.client.post(f"/api/applications/{active}/ended-remarks", json={"body": "x"}).status_code == 409
+    notes = [n["body"] for n in view(desk, "asha", "rejected")["items"][0]["notes"]]
+    assert "by admin" in notes and "by manager" in notes and "x" not in notes
+
+
+def test_a_travelled_or_declined_placement_without_any_task_gets_a_cancelled_holder_task(desk):
+    apps, _other = ended_desk(desk)
+    with desk.sessions() as db:
+        db.execute(text("DELETE FROM workflow_tasks WHERE application_id = :a"), {"a": apps["c2"]})
+        db.commit()
+    as_user(desk, "asha")
+    response = desk.client.post(f"/api/applications/{apps['c2']}/ended-remarks", json={"body": "Flew on 12 Nov"})
+    assert response.status_code == 201, response.text
+    with desk.sessions() as db:
+        holder = db.execute(text("SELECT cancelled_at, completed_at, application_id FROM workflow_tasks WHERE id = :t"), {"t": response.json()["taskId"]}).one()
+        assert holder.cancelled_at is not None and holder.completed_at is None and holder.application_id == apps["c2"]
+    row = view(desk, "asha", "travelled")["items"][0]
+    assert row["candidateId"] == "c2" and row["remark"]["body"] == "Flew on 12 Nov"

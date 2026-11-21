@@ -6,7 +6,7 @@ import time
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.services.workflow_scheduler import deliver_due_todos, scan_daily_work_only, scan_day_end_report, scan_workflow
+from app.services.workflow_scheduler import deliver_due_todos, scan_daily_work_only, scan_day_end_report, scan_job_requirement_deadlines, scan_workflow
 
 log = logging.getLogger("workflow_worker")
 TASK_SCAN_SECONDS = 15 * 60
@@ -36,6 +36,9 @@ def main():
                     day_report = scan_day_end_report(db, agency_timezone=get_settings().agency_timezone)
                     if day_report["sent"]:
                         log.info("Day-end recruiter report delivered: %s", day_report)
+                    reminders = scan_job_requirement_deadlines(db, agency_timezone=get_settings().agency_timezone)
+                    if reminders["owners"] or reminders["admins"]:
+                        log.info("Job requirement deadline reminders delivered: %s", reminders)
                 db.commit()
                 if task_scan or daily_scan:
                     next_daily_scan = time.monotonic() + DAILY_SCAN_SECONDS

@@ -58,7 +58,7 @@ test('contact, passport, designation, and location are searchable without invent
 })
 
 test('the Care India ID, the Traveller ID and the CRM reference all find the candidate', () => {
-  const withIds = { ...candidate, careId: 'CI-26-27-001', travellerId: 'CI-T-26-27-001' }
-  for (const query of ['CI-26-27-001', 'ci-t-26-27-001', 'CAN-009']) assert.equal(matchesCandidate(withIds, filters, query), true, query)
+  const withIds = { ...candidate, careId: 'CI-26-27-001', travellerId: 'CI 01' }
+  for (const query of ['CI-26-27-001', 'ci 01', 'CAN-009']) assert.equal(matchesCandidate(withIds, filters, query), true, query)
   assert.equal(matchesCandidate(candidate, filters, 'CI-26-27-001'), false)
 })

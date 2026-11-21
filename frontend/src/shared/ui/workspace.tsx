@@ -76,7 +76,7 @@ export function RecordIdentity({
         {Icon ? <Icon size={17} strokeWidth={1.8} /> : initials(name)}
       </span>
       <div className="min-w-0">
-        <p className="record-name">{name}</p>
+        <p className="record-name" title={name}>{name}</p>
         {detail && <p className="record-detail">{detail}</p>}
       </div>
     </div>

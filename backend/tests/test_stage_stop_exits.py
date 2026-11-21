@@ -113,11 +113,12 @@ def test_a_stopping_exit_at_every_stage_closes_the_application(workflow, stage, 
     (True, 5, {"stop": "declined"}, "offer_declined", CandidateStatus.needs_review, False),
     (True, 13, {"stop": "not_travelling"}, "not_travelling", CandidateStatus.needs_review, False),
     (False, 4, {"stop": "declined"}, "stage_declined", CandidateStatus.not_interested, False),
-    # The PCC refusal is not their own no either: they return to the pool as New.
-    (False, 9, {"stop": "not_cleared"}, "pcc_not_cleared", CandidateStatus.new, True),
-    # A rejection is not their own no: unchanged, they return to the pool (and to the Tasks list) as Needs review / New.
-    (True, 4, {"stop": "rejected"}, "interview_rejected", CandidateStatus.needs_review, True),
-    (False, 4, {"stop": "rejected"}, "interview_rejected", CandidateStatus.new, True),
+    # The PCC refusal is not their own no: they return to the pool as New, but the placement ended negatively, so they are parked too
+    # (the Tasks page shows them on its Rejected tab, not on today's list).
+    (False, 9, {"stop": "not_cleared"}, "pcc_not_cleared", CandidateStatus.new, False),
+    # A rejection is not their own no: they return to the pool as Needs review / New, and are parked like a decline (Rejected tab only).
+    (True, 4, {"stop": "rejected"}, "interview_rejected", CandidateStatus.needs_review, False),
+    (False, 4, {"stop": "rejected"}, "interview_rejected", CandidateStatus.new, False),
     # Stage 2 closed because the resume never arrived: not the candidate's no, but it has always parked them by status; unchanged.
     (True, 2, {"forwarded": "no", "reason": "resume_not_received"}, "resume_not_received", CandidateStatus.not_interested, False),
 ])
@@ -140,8 +141,7 @@ def test_a_decline_keeps_the_needs_review_status_and_a_parked_candidate_stays_of
         candidate = db.get(Candidate, "candidate")
         assert candidate.status == status and candidate.needs_review is needs_review         # the flag itself is never touched
         assert CandidateStatus.needs_review in daily_work.WORKABLE                           # the status alone would NOT hide them
-        # The candidate's own no takes them off the list at once (no ticked row either); a rejection stays on it; a stage 2
-        # closure that is not their no stays off the list (parked by status), exactly as before.
+        # Any negative end (their own no or a rejection) takes them off the list at once (no ticked row either).
         today = {row["candidateId"]: row for row in daily_work.load_rows(db, ["staff"], now=datetime.now(timezone.utc) + timedelta(minutes=1), tz="Asia/Kolkata")}
         if reason in CANDIDATE_SAID_NO:
             assert "candidate" not in today

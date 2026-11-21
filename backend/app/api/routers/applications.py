@@ -531,7 +531,7 @@ def complete_stage(application_id: str, body: CompleteIn,
             app.status = ApplicationStatus.deployed
             candidate.status = CandidateStatus.deployed
             _sync_order(db, order)
-            # The candidate has travelled: they get the next Traveller ID (CI-T-001, CI-T-002 ...) now, and never before.
+            # The candidate has travelled: they get the next Traveller ID (CI 01, CI 02 ...) now, and never before.
             # Last, so the counter row is the final lock this transaction takes; a second completion after a reopen
             # returns the number they already hold.
             assign_traveller_id(db, candidate)

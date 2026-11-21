@@ -252,7 +252,7 @@ test('Tasks and stages: tasks, then candidates at No order and stages 1 to 12, p
   const cols = v.stageColumns(report)
   assert.deepEqual(v.TASK_COLS.map(c => c.label), ['Done', 'Pending', 'Overdue'])
   assert.equal(v.taskStageCols(report).length, 16)
-  assert.deepEqual(cols.map(c => c.label), ['No order', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'])
+  assert.deepEqual(cols.map(c => c.label), ['No job', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'])
   assert.equal(cols[3].drill, 'stage:3')
   assert.match(cols[3].info, /Interview scheduling/)
   const rows = v.taskStageRows(report)

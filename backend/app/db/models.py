@@ -410,7 +410,7 @@ class CandidateIdCounter(Base):
 
 
 class TravellerIdCounter(Base):
-    """The one continuous counter behind the TRAVELLER ID (``CI-T-001``, ``CI-T-002`` ...), a series separate from the candidate ID.
+    """The one continuous counter behind the TRAVELLER ID (``CI 01``, ``CI 02`` ...), a series separate from the candidate ID.
 
     A single row keyed ``GLOBAL``; see ``app.services.traveller_id``.
     """
@@ -422,7 +422,7 @@ class TravellerIdCounter(Base):
 
     __table_args__ = (
         CheckConstraint("last_serial >= 0", name="ck_crm_traveller_id_counters_last_serial"),
-        {"comment": "Single continuous counter (row GLOBAL) for immutable Care India traveller IDs: CI-T-001, CI-T-002, ... Never restarts, never reused."},
+        {"comment": "Single continuous counter (row GLOBAL) for immutable Care India traveller numbers: CI 01, CI 02, ... Never restarts, never reused."},
     )
 
 
@@ -433,7 +433,7 @@ class Candidate(Base, PkMixin, TimestampMixin):
     # Public, immutable Care India candidate ID: CI-001, CI-002, ... one continuous series given at creation (migration
     # 0044).  The legacy ``ref`` remains the technical CRM reference used by existing links and history.
     care_id: Mapped[str | None] = mapped_column(String(40))
-    # Second, separate immutable series for people who travelled: CI-T-001, CI-T-002, ... one continuous series, given
+    # Second, separate immutable series for people who travelled: CI 01, CI 02, ... one continuous series, given
     # once when the placement is deployed (``app.services.traveller_id``). Null until then.
     traveller_id: Mapped[str | None] = mapped_column(String(40))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -526,7 +526,7 @@ class Candidate(Base, PkMixin, TimestampMixin):
             name="ck_crm_candidates_care_id_format",
         ),
         CheckConstraint(
-            PostgresOnly("traveller_id IS NULL OR traveller_id ~ '^[C][I]-[T]-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$'"),
+            PostgresOnly("traveller_id IS NULL OR traveller_id ~ '^[C][I] (0[1-9]|[1-9][0-9]+)$'"),
             name="ck_crm_candidates_traveller_id_format",
         ),
         Index("ix_crm_candidates_phone", "phone"),
@@ -1962,4 +1962,48 @@ class InvoicePayment(Base, PkMixin):
         CheckConstraint("(source_stage_id IS NULL) = (source_application_id IS NULL)", name="ck_invoice_payment_source"),
         CheckConstraint("(voided_at IS NULL AND void_reason IS NULL AND voided_by IS NULL) OR (voided_at IS NOT NULL AND void_reason IS NOT NULL AND length(trim(void_reason)) > 0)", name="ck_invoice_payment_void"),
         {"comment": "Actual candidate fee receipts. Financial entries are immutable; supervised voids retain the original receipt and reason."},
+    )
+
+
+class JobRequirement(Base, PkMixin, TimestampMixin):
+    """One row of the manually kept 'Job requirements' sheet: a client's vacancy the recruiters type in, with an optional ad flyer."""
+
+    __tablename__ = "crm_job_requirements"
+    doc_date: Mapped[date | None] = mapped_column(Date, comment="DOC: the date the requirement was received; today (agency time zone) when not sent.")
+    client_name: Mapped[str] = mapped_column(String(200), nullable=False, server_default=text("''"))
+    country: Mapped[str] = mapped_column(String(100), nullable=False, server_default=text("''"))
+    details: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), comment="The requirement form: the 16 sheet items (position, vacancies, placeOfWork, contractPeriod, qualification, agePreference, additionalSkills, basicSalary, workingHours, overtime, otCalculation, food, accommodation, insurance, transport, remarks) and deadline.")
+    status: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'active'"), comment="active or closed.")
+    custom: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), comment="Values of the recruiter-added columns, {field id: value}.")
+    ad_object_key: Mapped[str | None] = mapped_column(String(500), comment="Storage key of the uploaded ad image or PDF.")
+    ad_file_name: Mapped[str | None] = mapped_column(String(255))
+    ad_content_type: Mapped[str | None] = mapped_column(String(100))
+    ad_size_kb: Mapped[int | None] = mapped_column(Integer)
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), comment="The recruiter or MD this requirement is assigned to; the creator by default.")
+    closed_reason: Mapped[str | None] = mapped_column(String(20), comment="Why it was closed: filled, client_cancelled, expired or other; empty while active or when skipped.")
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="When the status last became closed; cleared on reopening.")
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    updated_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    __table_args__ = (
+        Index("ix_crm_job_requirements_status_doc_date", "status", text("doc_date DESC")),
+        Index("ix_crm_job_requirements_owner", "owner_id"),
+        CheckConstraint("status IN ('active','closed')", name="ck_crm_job_requirements_status"),
+        CheckConstraint("closed_reason IS NULL OR closed_reason IN ('filled','client_cancelled','expired','other')", name="ck_crm_job_requirements_closed_reason"),
+        {"comment": "Job requirements recruiters keep by hand: client, country, requirement form, ad flyer, status and recruiter-added columns."},
+    )
+
+
+class JobRequirementField(Base, PkMixin):
+    """A column the recruiters added to the Job requirements sheet; its values live in crm_job_requirements.custom under the field id."""
+
+    __tablename__ = "crm_job_requirement_fields"
+    key: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, comment="Slug of the label.")
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    type: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'text'"), comment="text, number, date or yes_no.")
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        CheckConstraint("type IN ('text','number','date','yes_no')", name="ck_crm_job_requirement_fields_type"),
+        {"comment": "Recruiter-added columns of the Job requirements sheet (label, value type and order)."},
     )
