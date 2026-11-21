@@ -95,7 +95,9 @@
    line with 8px side padding, rows of at least 56px with every cell centred, a faint var(--table-line) line under every row and a LIGHT var(--table-column-line)
    between body columns. Words wrap at spaces (a link or a name is never cut); under 900px the rows are labelled cards. The box is as tall as the screen allows
    (the header stays in sight while the rows scroll) and the pager sits right under it. */
-.tv-table-wrap { max-height: max(360px, calc(100dvh - 380px)); overflow-x: hidden; overflow-y: auto; }
+/* position: relative makes the scroll box the containing block of the absolutely placed screen-reader texts (.sr-only) inside the rows; without it
+   one such text per row escaped the box and stretched the whole page (a 25-row page became 2000px tall, with an empty band under the app frame) */
+.tv-table-wrap { position: relative; max-height: max(360px, calc(100dvh - 380px)); overflow-x: hidden; overflow-y: auto; }
 .tv-table { width: 100%; min-width: 0; table-layout: auto; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
 /* the columns size to their content (table-layout: auto): each at least its longest word and its heading plus the padding, the rest shared by what each holds; no fixed percentages */
 .tv-table td { overflow-wrap: break-word; }

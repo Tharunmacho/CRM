@@ -116,7 +116,7 @@ test('the toolbar and the table sit above the fold: slim header, 40px controls, 
   assert.match(css, /\.tv-stats li \{[^}]*height: 30px;/, 'one slim line of totals')
   assert.match(css, /\.tv-meta \{[^}]*min-height: 32px;/)
   assert.match(css, /\.tv-more-panel \{ position: absolute;/, 'More filters opens over the list, it never pushes the table down')
-  assert.match(css, /\.tv-table-wrap \{ max-height: max\(360px, calc\(100dvh - 380px\)\);/, 'the table box fits the screen')
+  assert.match(css, /\.tv-table-wrap \{ position: relative; max-height: max\(360px, calc\(100dvh - 380px\)\);/, 'the table box fits the screen and contains its screen-reader texts (no page stretching)')
   assert.match(css, /\.tv-table th \{ position: sticky; top: 0;/)
   assert.match(css, /\.tv-table td \{[^}]*height: 56px;/)
   assert.doesNotMatch(css, /\.tv-c-[a-z]+ \{ width: \d+%; \}/, 'columns size to their content, no fixed shares')
@@ -178,4 +178,9 @@ test('the rows keep their information but lose the redundant captions', async ()
   assert.match(table, /<details className="tv-doc-details">/, 'the missing documents are still one click away')
   assert.match(table, /Review documents/)
   assert.match(table, /Add agency/)
+})
+
+test('the table scroll box contains the absolutely placed screen-reader texts of its rows, so a long page cannot stretch the document', async () => {
+  const css = await read('../src/styles/travelled.css')
+  assert.match(css, /\.tv-table-wrap \{ position: relative;/)
 })
