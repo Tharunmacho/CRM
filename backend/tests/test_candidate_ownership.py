@@ -116,9 +116,12 @@ def test_only_admin_level_roles_keep_the_recruiter_choice(env):
     assert add_candidate(env, "manager", "9000000011")["ownerId"] == "a"
     assert add_candidate(env, "admin", "9000000007")["ownerId"] == "b"
     act_as(env, "admin")
-    for bad in ("away", "manager", "missing"):
+    for bad in ("away", "missing"):
         response = env.client.post("/api/candidates", json={"name": "Y", "phone": "9000000099", "assign_to": bad})
         assert response.status_code == 422, (bad, response.text)
+    # The MD takes candidates by hand like a recruiter (never through the automatic rotation).
+    md_owned = env.client.post("/api/candidates", json={"name": "Z", "phone": "9000000098", "assign_to": "manager"})
+    assert md_owned.status_code == 201 and md_owned.json()["ownerId"] == "manager", md_owned.text
 
 
 # --------------------------------------------------------------------------- the rule at every door

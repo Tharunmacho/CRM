@@ -124,8 +124,8 @@ def _transfer(db: Session, actor: User, user: User, users: list[User], target_id
         raise HTTPException(422, 'Choose a recruiter to take over all of this person\'s candidates, open tasks and leads.')
     target = _find(users, target_id)
     from app.services.attendance_availability import unavailable_staff_ids
-    if target.id == user.id or not target.active or target.role != Role.staff or target.on_leave or target.id in unavailable_staff_ids(db):
-        raise HTTPException(422, 'Choose a different active recruiter who is not on leave.')
+    if target.id == user.id or not target.active or target.role not in (Role.staff, Role.manager) or target.on_leave or target.id in unavailable_staff_ids(db):
+        raise HTTPException(422, 'Choose a different active recruiter or the MD who is not on leave.')
     ids = [candidate.id for candidate in candidates]
     for candidate in candidates:
         candidate.owner_id = target.id
@@ -345,8 +345,8 @@ def delete_user(db: Session, actor: User, user_id: str, reassign_to: str | None 
         if not moves_candidates_or_tasks:  # the transfer re-checks leave itself; with only leads to hand over, check it here
             from app.services.attendance_availability import unavailable_staff_ids
             unavailable = recipient.id in unavailable_staff_ids(db)
-        if recipient.id == person.id or not recipient.active or recipient.role != Role.staff or recipient.on_leave or unavailable:
-            raise HTTPException(422, 'Choose a different active recruiter who is not on leave.')
+        if recipient.id == person.id or not recipient.active or recipient.role not in (Role.staff, Role.manager) or recipient.on_leave or unavailable:
+            raise HTTPException(422, 'Choose a different active recruiter or the MD who is not on leave.')
         if moves_candidates_or_tasks:
             transfer, ownership_changes, task_only_changes = _transfer(db, actor, person, users, reassign_to, owned['openTasks'], with_leads=False)
     elif moves_candidates_or_tasks:

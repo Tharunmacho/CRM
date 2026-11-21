@@ -12,3 +12,6 @@ html:root:root:root .dwr .dwl-panel .dw-table .is-idle .dwr-who { opacity: .75; 
 /* "Calls and follow-ups": two plain figures under the status table */
 html:root:root:root .dwr .dwr-lead-calls { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0; padding: 12px 4px 2px; font-size: 13px; color: var(--text-muted, inherit); }
 html:root:root:root .dwr .dwr-lead-calls b { color: var(--text-main, inherit); font-size: 14px; }
+html:root:root:root .dwr .dwl-table.is-matrix .dwl-h { font-size: 10px; letter-spacing: 0; text-transform: none; }
+html:root:root:root .dwr .dwl-table.is-matrix td.is-num .dwr-pct { gap: 4px; }
+html:root:root:root .dwr .dwl-table.is-matrix td.is-num .dwr-pct .dwb-meter { flex: 0 1 28px; min-width: 16px; }

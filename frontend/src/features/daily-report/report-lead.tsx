@@ -4,7 +4,7 @@ import { initials } from '@/shared/lib/format'
 import { Select } from '@/shared/ui/primitives'
 import { ScrollEdges } from '@/screens/tasks/daily-table'
 import { hueOf } from './report-table'
-import { numberText, pctText } from './daily-report-view'
+import { numberText, pctText, reportPeople } from './daily-report-view'
 import { headLines, leadMatrix, statusNow, type MatrixRow } from './lead-matrix'
 import type { ViewProps } from './report-views'
 import '@/styles/report-lead.css'
@@ -28,12 +28,12 @@ function Person({ row }: { row: MatrixRow }) {
   return <span className="dwr-person"><span className={cn('record-avatar', `avatar-hue-${hueOf(row.name)}`)} aria-hidden="true">{row.unassigned ? '–' : initials(row.name)}</span><span className="dwr-who">{row.name}</span></span>
 }
 
-const NAME_WIDTH = 188
-const ASSIGNED_WIDTH = 92
-const CONTACTED_WIDTH = 104
-const PCT_WIDTH = 116
-/** A status column is as wide as the longest word of its heading (11px bold capitals, about 8px a letter) plus padding, never under 76px. */
-const statusWidth = (label: string) => Math.round(Math.max(76, ...headLines(label).flatMap(line => line.split(' ')).map(word => word.length * 8.2 + 26)))
+/* The matrix fits its panel (fixed layout): the Recruiter column as wide as the names need, the statuses share the rest equally. Under the minimum the scroll box takes over. */
+const NAME_WIDTH = 160
+const ASSIGNED_WIDTH = 72
+const CONTACTED_WIDTH = 82
+const PCT_WIDTH = 104
+const STATUS_MIN = 52
 
 function Heading({ label, title }: { label: string; title: string }) {
   return <th scope="col" className="is-num" title={title}>{headLines(label).map((line, i) => <span key={i} className="dwl-h">{line}</span>)}</th>
@@ -50,9 +50,8 @@ export function LeadReportView({ report, roster, staff, onPickStaff, onDrill }: 
   const status = useMemo(() => statusNow(matrix, report, team ? staff : ''), [matrix, report, team, staff])
   if (!sheet) return <section className="dw-panel dwm-panel" aria-label="Lead sheet report"><p className="dwr-quiet">{NEEDS_SERVER}</p></section>
 
-  const widths = matrix.columns.map(c => statusWidth(c.label))
-  const minWidth = NAME_WIDTH + ASSIGNED_WIDTH + widths.reduce((all, w) => all + w, 0) + CONTACTED_WIDTH + PCT_WIDTH
-  const people = roster.length ? roster : report.staff
+  const minWidth = NAME_WIDTH + ASSIGNED_WIDTH + matrix.columns.length * STATUS_MIN + CONTACTED_WIDTH + PCT_WIDTH
+  const people = reportPeople(roster.length ? roster : report.staff)
   const one = team && staff ? people.find(item => item.id === staff)?.name : undefined
   const shownTotal = status.reduce((sum, item) => sum + item.count, 0)
   const drillContacted = (row: MatrixRow) => (!row.unassigned && (row.contacted ?? 0) > 0 ? () => onDrill('leadsContacted', row.id === 'total' ? null : row.id) : undefined)
@@ -76,8 +75,8 @@ export function LeadReportView({ report, roster, staff, onPickStaff, onDrill }: 
       {matrix.rows.length === 0
         ? <p className="dwb-none">Nobody in this selection.</p>
         : <ScrollEdges label="Leads by status, by recruiter. Scroll sideways for more statuses">
-          <table className="dwr-table dwm-table dwl-table" aria-label="Leads by status, by recruiter" style={{ minWidth }}>
-            <colgroup><col style={{ width: NAME_WIDTH }} /><col style={{ width: ASSIGNED_WIDTH }} />{widths.map((width, i) => <col key={i} style={{ width }} />)}<col style={{ width: CONTACTED_WIDTH }} /><col style={{ width: PCT_WIDTH }} /></colgroup>
+          <table className="dwr-table dwm-table dwl-table is-matrix" aria-label="Leads by status, by recruiter" style={{ minWidth }}>
+            <colgroup><col style={{ width: NAME_WIDTH }} /><col style={{ width: ASSIGNED_WIDTH }} />{matrix.columns.map(c => <col key={c.key} />)}<col style={{ width: CONTACTED_WIDTH }} /><col style={{ width: PCT_WIDTH }} /></colgroup>
             <thead><tr>
               <th scope="col" className="dwr-name-head">Recruiter</th>
               <Heading label="Assigned" title="Assigned: leads the recruiter holds right now, whatever their status" />

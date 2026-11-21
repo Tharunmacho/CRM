@@ -9,7 +9,8 @@ const moduleUrl = (source) => {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
   return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
 }
-const m = await import(moduleUrl(await readFile(new URL('../src/features/daily-report/lead-matrix.ts', import.meta.url), 'utf8')))
+const viewUrl = moduleUrl(await readFile(new URL('../src/features/daily-report/daily-report-view.ts', import.meta.url), 'utf8'))
+const m = await import(moduleUrl((await readFile(new URL('../src/features/daily-report/lead-matrix.ts', import.meta.url), 'utf8')).replace("'./daily-report-view'", `'${viewUrl}'`)))
 
 const COLUMNS = [
   { key: 'new', label: 'Not contacted' }, { key: 'contacted', label: 'Contacted' }, { key: 'interested', label: 'Interested' },
@@ -96,4 +97,24 @@ test('Lead status now: the matrix total with shares; the sheet byStatus is the f
   const fallback = m.statusNow(m.leadMatrix(old, '', []), old, '')
   assert.deepEqual(fallback.map((x) => [x.key, x.count]), [['new', 7], ['contacted', 3]])
   assert.deepEqual(m.statusNow(m.leadMatrix(old, 'ravi', []), old, 'ravi'), [])
+})
+
+test('who is listed: the MD and recruiters are rows, the Administrator is not; the Administrator leads join Unassigned so the Total still ties to the sheet', () => {
+  const r = report()
+  r.staff = [{ ...person('adm', 'Root', 3, 1), role: 'admin' }, { ...person('md', 'Mahesh', 2, 1), role: 'manager' }, { ...person('ravi', 'Ravi', 4, 3), role: 'staff' }]
+  r.leadSheet.byStatusPerStaff = [
+    { id: 'adm', counts: { ...zero, new: 3 } }, { id: 'md', counts: { ...zero, contacted: 2 } }, { id: 'ravi', counts: { ...zero, new: 4 } }, { id: 'unassigned', counts: { ...zero, new: 1 } },
+  ]
+  const matrix = m.leadMatrix(r, '', [])
+  assert.deepEqual(matrix.rows.map((row) => row.name), ['Mahesh', 'Ravi', 'Unassigned'])
+  const unassigned = matrix.rows.find((row) => row.unassigned)
+  assert.equal(unassigned.counts.new, 4) // 1 nobody owns + 3 held by the Administrator account
+  assert.equal(matrix.total.counts.new, 4 + 4)
+  assert.equal(matrix.total.counts.contacted, 2)
+  assert.equal(matrix.total.assigned, 2 + 4) // recruiters and the MD only
+  // the Administrator's leads alone still make the Unassigned row; one person picked shows no Unassigned row; the Administrator cannot be picked
+  assert.equal(m.leadMatrix(r, 'md', []).rows.length, 1)
+  assert.equal(m.leadMatrix(r, 'adm', []).rows.length, 0)
+  const only = report(); only.staff = r.staff; only.leadSheet.byStatusPerStaff = [{ id: 'adm', counts: { ...zero, new: 3 } }]
+  assert.equal(m.leadMatrix(only, '', []).rows.find((row) => row.unassigned).counts.new, 3)
 })

@@ -152,3 +152,10 @@ test('"Missed check-out" is only for someone who logged in: nobody who has not c
   assert.equal(missed.kind, 'missed')
   assert.equal(m.attendanceCounts([missed]).present, 1)
 })
+
+test('who is listed on the live board: the MD and recruiters, never the Administrator account', () => {
+  const att = attendance(person('md', 'Mahesh', [session('s', '04:00', '08:00')], { role: 'manager' }), person('r', 'Ravi'), person('adm', 'Root', [session('t', '04:00', '08:00')], { role: 'admin' }))
+  const names = build(att, null).map((r) => r.name)
+  assert.deepEqual(names, ['Mahesh', 'Ravi'])
+  assert.equal(m.attendanceCounts(build(att, null)).total, 2)
+})

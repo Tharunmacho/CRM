@@ -501,11 +501,11 @@ def duplicate_match(db: Session, existing: Candidate, fields: list[str], user: U
 
 
 def ensure_assignable(db: Session, user_id: str | None) -> User:
-    """The person a supervisor hands a candidate to: an active staff member who is not on leave."""
+    """The person a supervisor hands a candidate to: an active recruiter, or the MD (who may also hold candidates by hand), not on leave."""
     from app.services.attendance_availability import unavailable_staff_ids
     target = db.get(User, user_id) if user_id else None
-    if target is None or target.role != Role.staff or not target.active or target.on_leave or target.id in unavailable_staff_ids(db):
-        raise HTTPException(422, "Choose an active recruiter who is not on leave")
+    if target is None or target.role not in (Role.staff, Role.manager) or not target.active or target.on_leave or target.id in unavailable_staff_ids(db):
+        raise HTTPException(422, "Choose an active recruiter or the MD who is not on leave")
     return target
 
 

@@ -23,13 +23,18 @@ export interface StaffAvailabilityResult {
   staff: AvailableStaff[]
 }
 
-/** Pausing automatic rotation does not prevent a deliberate manual handover. */
+/**
+ * Pausing automatic rotation does not prevent a deliberate manual handover. The MD takes candidates by hand too (never through the automatic
+ * rotation): an active MD account is always offered, the same rule the server applies.
+ */
 export function canReceiveManualAssignment(staff: AvailableStaff) {
-  return staff.active && staff.role === 'staff'
-    && (staff.availability.status === 'available' || staff.availability.status === 'paused')
+  if (!staff.active) return false
+  if (staff.role === 'manager') return staff.availability.status === 'not_assigned'
+  return staff.role === 'staff' && (staff.availability.status === 'available' || staff.availability.status === 'paused')
 }
 
 export function manualAssignmentLabel(staff: AvailableStaff) {
+  if (staff.role === 'manager') return `${staff.name} (MD) — takes over by hand`
   return staff.availability.status === 'paused'
     ? `${staff.name} — Auto-assignment paused · available for manual assignment`
     : `${staff.name} — ${staff.availability.label}`

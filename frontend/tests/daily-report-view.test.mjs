@@ -545,51 +545,76 @@ const taskReport = {
   stageFlowStaff: [{ id: 'a', completed: flowOf({ 1: 5, 2: 2 }), stopped: flowOf({ 2: 1 }) }, { id: 'b', completed: flowOf({ 2: 1, 13: 4 }), stopped: flowOf({}) }],
 }
 
-test('the matrix has one row per recruiter (alphabetical), the 13 stage columns, a Not on an order column and a total in both modes', () => {
-  const waiting = v.buildStageMatrix(taskReport, 'waiting')
+test('the matrix has one row per recruiter (alphabetical), the 13 stage columns, a Not on an order column and a total', () => {
+  const waiting = v.buildStageMatrix(taskReport)
   assert.equal(waiting.stages.length, 13)
   assert.deepEqual(waiting.stages.map(s => s.no), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
-  assert.deepEqual(waiting.stages.map(s => s.short).slice(0, 3), ['Prescreening', 'Forwarded', 'Scheduling'])
+  assert.deepEqual(waiting.stages.map(s => s.short), ['Prescreen', 'Forwarded', 'Interview', 'Result', 'Offer', 'Advance', 'Passport', 'Medical', 'PCC', 'Visa', 'Review', 'Stamping', 'Ticket'])
   assert.deepEqual(waiting.rows.map(r => r.name), ['asha', 'Meena', 'Ravi', 'Other']) // people no longer on the staff list are one "Other" row
   const asha = waiting.rows[0].cells
   assert.deepEqual([asha['0'], asha['1'], asha['13'], asha.total], [2, 3, 1, 6])
   assert.equal(waiting.rows[3].cells['5'], 2)
   assert.equal(waiting.total.total, 12) // asha 6 + ravi 4 + other 2
   assert.equal(waiting.total['0'], 2)
+  assert.equal(waiting.rows[1].cells.total, 0) // a recruiter with nothing still has their row
   for (let no = 1; no <= 13; no++) assert.equal(waiting.total[String(no)], waiting.rows.reduce((all, r) => all + r.cells[String(no)], 0))
-
-  const done = v.buildStageMatrix(taskReport, 'completed')
-  assert.deepEqual(done.rows.map(r => r.name), ['asha', 'Meena', 'Ravi']) // nobody unknown completed anything
-  assert.equal(done.rows[0].cells['0'], null) // "not on an order" means nothing for completed records
-  assert.deepEqual([done.rows[0].cells['1'], done.rows[0].cells['2'], done.rows[0].cells.total], [5, 2, 7])
-  assert.deepEqual([done.rows[2].cells['2'], done.rows[2].cells['13'], done.rows[2].cells.total], [1, 4, 5])
-  assert.equal(done.rows[1].cells.total, 0) // a recruiter with nothing still has their row
-  assert.deepEqual([done.total['1'], done.total['2'], done.total['13'], done.total.total], [5, 3, 4, 12])
-  assert.equal(done.total['0'], null)
+  assert.equal('mode' in waiting, false)
 })
 
 test('one recruiter picked: only that row, whose total row equals it', () => {
-  const m = v.buildStageMatrix(taskReport, 'waiting', 'a')
+  const m = v.buildStageMatrix(taskReport, 'a')
   assert.deepEqual(m.rows.map(r => r.id), ['a'])
   assert.deepEqual(m.total, m.rows[0].cells)
-  const c = v.buildStageMatrix(taskReport, 'completed', 'b')
-  assert.deepEqual(c.rows.map(r => r.name), ['Ravi'])
-  assert.equal(c.total.total, 5)
-  assert.deepEqual(v.buildStageMatrix(taskReport, 'completed', 'nobody').rows, [])
-  // an older server without stageFlowStaff: rows with zeros, never a crash
-  const old = v.buildStageMatrix({ staff: taskReport.staff, stages: taskReport.stages }, 'completed')
-  assert.equal(old.rows.length, 3); assert.equal(old.total.total, 0)
+  assert.deepEqual(v.buildStageMatrix(taskReport, 'nobody').rows, [])
 })
 
-test('"Stage by stage": stages 1 to 13 with waiting, completed, stopped, a share of the waiting column and a total row', () => {
-  const report = { stages: { totals: taskReport.stages.totals.map(t => ({ ...t, count: { 0: 5, 1: 3, 2: 1 }[t.no] ?? 0 })), perStaff: [] },
-    stageFlow: taskReport.stageFlow.map(f => ({ ...f, completed: f.no === 1 ? 6 : f.no === 2 ? 2 : 0, stopped: f.no === 2 ? 1 : 0 })) }
-  const table = v.buildStageTable(report)
+test('"Stage by stage": stages 1 to 13 with waiting, a share and a total row, and no completed or stopped figures', () => {
+  const table = v.buildStageTable(taskReport)
   assert.equal(table.rows.length, 13) // never a "0 · Not on an order yet" row here
   assert.equal(table.rows[0].name, '1 · Stage 1')
-  assert.deepEqual([table.rows[0].waiting, table.rows[0].completed, table.rows[0].stopped, table.rows[0].share], [3, 6, 0, 75])
-  assert.deepEqual([table.rows[1].waiting, table.rows[1].share, table.rows[1].stopped], [1, 25, 1])
-  assert.equal(table.rows[0].drill, 'stage:1'); assert.equal(table.rows[2].drill, undefined)
-  assert.deepEqual(table.total, { waiting: 4, completed: 8, stopped: 1 })
-  assert.deepEqual(v.buildStageTable({}).total, { waiting: null, completed: null, stopped: null }) // an older server: dashes
+  assert.deepEqual(Object.keys(table.rows[0]).sort(), ['drill', 'name', 'no', 'share', 'waiting'])
+  assert.deepEqual(Object.keys(table.total), ['waiting'])
+  assert.deepEqual([table.rows[0].waiting, table.rows[0].share, table.rows[0].drill], [3, 30, 'stage:1'])
+  assert.deepEqual([table.rows[1].waiting, table.rows[1].share], [4, 40])
+  assert.equal(table.rows[2].drill, undefined) // nobody there: nothing to open
+  assert.equal(table.total.waiting, 10) // stages 1 to 13 only: the matrix total less the No order column
+  assert.equal(table.total.waiting, v.buildStageMatrix(taskReport).total.total - v.buildStageMatrix(taskReport).total['0'])
+  assert.deepEqual(v.buildStageTable({ staff: [] }).total, { waiting: null }) // an older server: dashes
+  assert.equal(v.buildStageTable(taskReport, 'a').total.waiting, 4)
+})
+
+// ------------------------------------------------------------------------------ who is listed: recruiters and the MD, never the Administrator account
+
+const withRole = (id, name, role) => ({ id, name, role })
+const peopleReport = {
+  staff: [withRole('adm', 'Admin Root', 'admin'), withRole('md', 'Mahesh', 'manager'), withRole('r1', 'Zoya', 'staff'), withRole('r2', 'Anil', 'staff')].map(row => ({ ...row, tasks: { total: 0, done: 0, pending: 0, overdue: row.id === 'adm' ? 7 : row.id === 'md' ? 2 : 1 } })),
+  tasks: { total: 0, done: 0, pending: 0, overdue: 10 },
+  stages: {
+    totals: Array.from({ length: 14 }, (_, no) => ({ no, key: `k${no}`, label: `Stage ${no}`, count: 0 })),
+    perStaff: [{ id: 'adm', counts: counts({ 0: 5, 1: 5 }), total: 10 }, { id: 'md', counts: counts({ 1: 2, 3: 1 }), total: 3 }, { id: 'r1', counts: counts({ 2: 4 }), total: 4 }, { id: 'r2', counts: counts({ 1: 1, 0: 1 }), total: 2 }],
+  },
+}
+
+test('reportPeople keeps every recruiter and the MD and drops the Administrator account', () => {
+  assert.deepEqual(v.reportPeople(peopleReport.staff).map(r => r.name), ['Mahesh', 'Zoya', 'Anil'])
+  assert.deepEqual(v.reportPeople([{ id: 'x', name: 'No role' }]).map(r => r.id), ['x'])
+  assert.deepEqual([...v.HIDDEN_REPORT_ROLES], ['admin'])
+})
+
+test('Task report: the Administrator is not a row, the MD and recruiters are, and every total adds up from the rows shown', () => {
+  const matrix = v.buildStageMatrix(peopleReport)
+  assert.deepEqual(matrix.rows.map(r => r.name), ['Anil', 'Mahesh', 'Zoya'])
+  assert.equal(matrix.rows.some(r => r.id === 'adm' || r.id === 'other'), false) // the Administrator's candidates are not folded into "Other"
+  assert.equal(matrix.total.total, 3 + 4 + 2)
+  assert.equal(matrix.total['0'], 1)
+  assert.equal(matrix.total['1'], 3)
+  const table = v.buildStageTable(peopleReport)
+  assert.equal(table.total.waiting, 8) // the matrix total (9) less the No order column (1)
+  assert.equal(table.rows[0].waiting, 3)
+  assert.equal(table.rows[0].share, 38)
+  assert.equal(v.buildStageMatrix(peopleReport, 'md').rows.length, 1)
+  assert.equal(v.buildStageMatrix(peopleReport, 'adm').rows.length, 0) // not on the filter either
+  assert.equal(v.shownOverdue(peopleReport), 2 + 1 + 1) // the tile adds up the rows shown, not the server's 10
+  assert.equal(v.shownOverdue({ staff: [], tasks: peopleReport.tasks }), 10)
+  assert.equal(v.shownOverdue({ staff: [] }), null)
 })

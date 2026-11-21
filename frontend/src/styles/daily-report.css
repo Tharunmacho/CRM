@@ -16,6 +16,7 @@
 /* The period row: a pill group on the left, the client and the Live label on the right */
 .dwr-period { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-bottom: 16px; }
 .dwr-period-main, .dwr-period-end { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.dwr-period-end:only-child { margin-left: auto; }
 .dwr-seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); }
 .dwr-seg button { min-height: 34px; padding: 0 14px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--text-muted); white-space: nowrap; transition: background .14s, color .14s; }
 .dwr-seg button:hover:not([aria-pressed='true']) { background: var(--tint-2); color: var(--text-main); }

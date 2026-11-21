@@ -64,7 +64,9 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
   const [allOk, setAllOk] = useState(true)
   const range = useMemo(() => resolveRange(choice, today, allOk), [choice, today, allOk])
   const allTime = asksAllTime(choice, allOk)
-  const query = { from: range.from, to: range.to, staff: supervisor ? staff : 'all', client, all: allTime }
+  // The Task report counts what is waiting now: neither the period nor the client changes it, so its row hides both and the client is not applied there.
+  const periodMatters = view !== 'daily'
+  const query = { from: range.from, to: range.to, staff: supervisor ? staff : 'all', client: periodMatters ? client : 'all', all: allTime }
   const state = useDailyReport(query, store.me.id)
   const { data, error } = state
   const scope: DailyReport['scope'] = data?.scope ?? (supervisor ? 'team' : 'self')
@@ -109,7 +111,7 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
       <Button onClick={state.refresh} disabled={state.loading && !!data}><RefreshCw size={15} className={state.loading && data ? 'animate-spin' : undefined} aria-hidden="true" />Refresh</Button>
     </>} />
     {tabs}
-    <PeriodRow choice={choice} onChoice={setChoice} client={client} clients={clientOptions} onClient={setClient}
+    <PeriodRow filters={periodMatters} choice={choice} onChoice={setChoice} client={client} clients={clientOptions} onClient={setClient}
       live={<LiveBadge updatedAt={state.updatedAt} busy={state.loading && !!data} />} />
 
     <div className="dw-alerts">

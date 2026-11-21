@@ -65,7 +65,11 @@ html:root:root:root .dwr .dwm-table tbody :is(td, th):not(:last-child), html:roo
 html:root:root:root .dwr .dwm-table thead th { height: 52px; padding: 4px 6px; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-transform: uppercase; white-space: normal; word-break: keep-all; }
 html:root:root:root .dwr .dwm-table thead th:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--on-primary) 60%, var(--primary)); }
 html:root:root:root .dwr .dwm-table .dwm-h-no { display: block; font-size: 14px; font-weight: 700; line-height: 1.15; }
-html:root:root:root .dwr .dwm-table .dwm-h-name { display: block; font-size: 10.5px; font-weight: 600; letter-spacing: .03em; line-height: 1.2; white-space: nowrap; }
+html:root:root:root .dwr .dwm-table .dwm-h-name { display: block; font-size: 10px; font-weight: 600; letter-spacing: 0; line-height: 1.2; white-space: nowrap; text-transform: none; overflow: hidden; text-overflow: clip; }
+html:root:root:root .dwr .dwm-table.is-matrix thead th.is-num { padding-inline: 2px; }
+html:root:root:root .dwr .dwm-table.is-matrix :is(thead th.dwr-name-head, tbody th.dwr-name, tfoot th.dwr-name) { padding-left: 12px; padding-right: 6px; }
+html:root:root:root .dwr .dwm-table.is-matrix .dwr-person { gap: 8px; }
+html:root:root:root .dwr .dwm-table.is-matrix .record-avatar { width: 28px; height: 28px; font-size: 10.5px; }
 html:root:root:root .dwr .dwm-table :is(thead th.dwr-name-head, tbody th.dwr-name, tfoot th.dwr-name) { padding-left: 16px; padding-right: 10px; text-align: left; }
 html:root:root:root .dwr .dwm-table :is(th.dwr-name-head, th.dwr-name) { position: sticky; left: 0; z-index: 1; }
 html:root:root:root .dwr .dwm-table thead th.dwr-name-head { z-index: 2; background: var(--primary); }

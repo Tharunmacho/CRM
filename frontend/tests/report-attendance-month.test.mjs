@@ -128,3 +128,16 @@ test('the live board line under the status: logged in now, logged out, not clock
   assert.deepEqual(rows.presenceLabel({ ...base, kind: 'pending' }), { label: 'Not clocked in', live: false })
   assert.deepEqual(rows.presenceLabel({ ...base, kind: 'off' }), { label: '', live: false })
 })
+
+test('who is listed: the MD and recruiters are rows, the Administrator account is not, and the tiles add up the rows shown', () => {
+  const data = month(
+    person('adm', 'Root', { role: 'admin', summary: summary({ attendedDays: 99, scheduledDays: 99, absenceDays: 9 }) }),
+    person('md', 'Mahesh', { role: 'manager', summary: summary({ attendedDays: 10, scheduledDays: 20 }) }),
+    person('r', 'Ravi', { summary: summary({ attendedDays: 10, scheduledDays: 10 }) }),
+  )
+  assert.deepEqual(m.buildOverviewRows(data).map((row) => row.name), ['Mahesh', 'Ravi'])
+  const tiles = m.monthTiles(data)
+  assert.equal(tiles.people, 2)
+  assert.equal(tiles.percentage, 66.7)
+  assert.equal(tiles.absent, 0)
+})

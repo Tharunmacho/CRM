@@ -293,7 +293,7 @@ def test_a_candidate_who_cannot_be_left_without_a_recruiter_blocks_the_unassign_
     assert delete(env, "admin", "a", reassignTo="b").status_code == 200
 
 
-@pytest.mark.parametrize("recipient, words", [("a", "different active recruiter"), ("admin", "different active recruiter"), ("md", "different active recruiter")])
+@pytest.mark.parametrize("recipient, words", [("a", "different active recruiter"), ("admin", "different active recruiter")])   # the MD may take over: see below
 def test_the_recipient_must_be_another_active_recruiter(env, recipient, words):
     give_work(env, "a")
     response = delete(env, "admin", "a", reassignTo=recipient)
@@ -489,3 +489,19 @@ def test_the_desk_snapshot_flags_the_former_user_and_old_tombstones_so_no_list_s
     flagged = sorted(person["name"] for person in people if person.get("deleted"))
     assert flagged == ["B Person (former user)", "Former user"]
     assert all(not person.get("deleted") for person in people if person["id"] in {"admin", "admin2", "md", "c", "d"})
+
+
+def test_the_md_can_take_over_a_deleted_recruiters_work_but_an_admin_account_cannot(env):
+    give_work(env, "a")
+    refused = delete(env, "admin", "a", reassignTo="admin2")
+    assert refused.status_code == 422 and "recruiter or the MD" in refused.text
+    with env.factory() as db:
+        assert not db.get(User, "a").deleted and db.get(Candidate, "cand-a-0").owner_id == "a", "nothing moved when the hand-over was refused"
+    taken = delete(env, "admin", "a", reassignTo="md")
+    assert taken.status_code == 200, taken.text
+    body = taken.json()
+    assert (body["candidates"], body["tasks"], body["toUserId"]) == (3, 3, "md")
+    with env.factory() as db:
+        assert {c.owner_id for c in db.scalars(select(Candidate))} == {"md"}
+        assert {t.owner_id for t in db.scalars(select(Task).where(Task.completed_at.is_(None)))} == {"md"}
+        assert db.get(Lead, "lead-a").owner_id == "md"

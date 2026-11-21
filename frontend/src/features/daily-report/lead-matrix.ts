@@ -1,4 +1,5 @@
 import type { DailyReport, StaffRow } from './daily-report-types'
+import { reportPeople } from './daily-report-view'
 
 /*
  * The Lead sheet report's matrix: one row per recruiter, one column per lead status in the Lead sheet's own order (the nine statuses, then the status
@@ -57,10 +58,11 @@ export function leadMatrix(report: Source, staff: string, roster: StaffRow[] = [
     return Object.fromEntries(columns.map(c => [c.key, found ? found[c.key] ?? 0 : null]))
   }
   const team = report.scope === 'team'
-  let people = report.staff
+  // Recruiters and the MD are rows; the Administrator account is not (the owner: "admin alone no need to show").
+  let people = reportPeople(report.staff)
   if (staff) {
-    people = report.staff.filter(row => row.id === staff)
-    if (!people.length) people = roster.filter(row => row.id === staff)
+    people = people.filter(row => row.id === staff)
+    if (!people.length) people = reportPeople(roster).filter(row => row.id === staff)
   }
   const rows: MatrixRow[] = [...people].sort((a, b) => a.name.localeCompare(b.name)).map(row => {
     const assigned = row.leads?.assigned ?? null
@@ -68,8 +70,12 @@ export function leadMatrix(report: Source, staff: string, roster: StaffRow[] = [
     return { id: row.id, name: row.name, unassigned: false, idle: !!row.idle, assigned, counts: countsOf(row.id), contacted, pct: contactedShare(assigned, contacted) }
   })
   const whole = team && !staff
-  if (whole && hasCounts && per.has(UNASSIGNED_ID)) {
-    rows.push({ id: UNASSIGNED_ID, name: 'Unassigned', unassigned: true, idle: false, assigned: null, counts: countsOf(UNASSIGNED_ID), contacted: null, pct: null })
+  // Leads held by the Administrator account have no recruiter either: they join the Unassigned row, so the Total still ties to the Lead sheet screen.
+  const shown = new Set(reportPeople(report.staff).map(row => row.id))
+  const unowned = [UNASSIGNED_ID, ...report.staff.filter(row => !shown.has(row.id)).map(row => row.id)].filter(id => per.has(id))
+  if (whole && hasCounts && unowned.length) {
+    const counts = Object.fromEntries(columns.map(c => [c.key, unowned.reduce((all, id) => all + (per.get(id)?.[c.key] ?? 0), 0)]))
+    rows.push({ id: UNASSIGNED_ID, name: 'Unassigned', unassigned: true, idle: false, assigned: null, counts, contacted: null, pct: null })
   }
   if (!rows.length) return { columns, rows, total: null, hasCounts }
   const assigned = sumOrNull(rows.filter(r => !r.unassigned).map(r => r.assigned))

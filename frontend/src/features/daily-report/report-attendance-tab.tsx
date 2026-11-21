@@ -13,6 +13,7 @@ import { ScrollEdges } from '@/screens/tasks/daily-table'
 import { StatStrip, type StatTileData } from '@/screens/tasks/daily-stat-strip'
 import { clockTime, monthTitle, shiftMonth } from '../attendance/format'
 import { attendanceLabels, type AttendanceRequest, type EmployeeMonth, type MonthlyAttendance } from '../attendance/policy-model'
+import { reportPeople } from './daily-report-view'
 import { minutesText } from './attendance-rows'
 import { buildOverviewRows, dailyRecordRows, dailyRecordTotals, monthTiles, overviewCsv, overviewCsvName, percentText, type OverviewRow } from './attendance-month'
 import { saveCsv } from './daily-report-api'
@@ -43,7 +44,7 @@ export function AttendanceReportTab() {
   const [loadedAt, setLoadedAt] = useState<string | null>(null)
   const [opened, setOpened] = useState('')
 
-  const people = useMemo(() => store.users.filter((user) => user.role === 'staff' && !user.deleted && (user.active || user.id === pick)).sort((a, b) => a.name.localeCompare(b.name)), [store.users, pick])
+  const people = useMemo(() => reportPeople(store.users).filter((user) => !user.deleted && (user.active || user.id === pick)).sort((a, b) => a.name.localeCompare(b.name)), [store.users, pick])
   const changeMonth = useCallback((value: string) => { if (MONTH_RE.test(value) && value >= '2000-01' && value <= '2100-12') setMonth(value) }, [])
 
   useEffect(() => {

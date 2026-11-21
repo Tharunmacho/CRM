@@ -430,14 +430,9 @@ export function stageProgress(report: Pick<DailyReport, 'stages' | 'stageFlow'>)
 
 /* ---------------------------------------------------------------- Task report: the 13 stages, one row per recruiter */
 
-/** What a cell of the matrix counts: stage records completed in the period, or candidates waiting at the stage now. */
-export type StageMode = 'completed' | 'waiting'
-export const STAGE_MODES: readonly { key: StageMode; label: string }[] = [
-  { key: 'completed', label: 'Completed in this period' }, { key: 'waiting', label: 'Waiting now' },
-]
 /** One short word (never wrapping mid-word) over each stage number; the full name is the heading's title. */
 export const STAGE_SHORT: readonly string[] = [
-  'Prescreening', 'Forwarded', 'Scheduling', 'Result', 'Offer', 'Advance', 'Passport', 'Medical', 'PCC', 'Arrival', 'Review', 'Stamping', 'Ticket',
+  'Prescreen', 'Forwarded', 'Interview', 'Result', 'Offer', 'Advance', 'Passport', 'Medical', 'PCC', 'Visa', 'Review', 'Stamping', 'Ticket',
 ]
 export interface MatrixStage { no: number; short: string; name: string }
 export interface MatrixRow {
@@ -446,60 +441,74 @@ export interface MatrixRow {
   /** Keys '0' (not on an order; null in Completed mode, where it means nothing), '1' to '13', and 'total'. */
   cells: Record<string, number | null>
 }
-export interface StageMatrix { mode: StageMode; stages: MatrixStage[]; rows: MatrixRow[]; total: MatrixRow['cells'] }
+export interface StageMatrix { stages: MatrixStage[]; rows: MatrixRow[]; total: MatrixRow['cells'] }
 
 export function matrixStages(report: Pick<DailyReport, 'stages' | 'stageFlow'>): MatrixStage[] {
   const label = (no: number) => report.stages?.totals.find(item => item.no === no)?.label || report.stageFlow?.find(item => item.no === no)?.label || STAGE_NAMES[no - 1]
   return Array.from({ length: STAGE_NAMES.length }, (_, i) => ({ no: i + 1, short: STAGE_SHORT[i], name: label(i + 1) }))
 }
 
+/** Roles that are never a row of a report tab: the Administrator account runs the system, it does not hold candidates or leads (the MD does show). */
+export const HIDDEN_REPORT_ROLES: ReadonlySet<string> = new Set(['admin'])
+/** The people a report tab lists as rows and in its recruiter filter: every Recruiter and the MD, not the Administrator account. */
+export function reportPeople<T extends { role: string }>(rows: readonly T[]): T[] {
+  return rows.filter(row => !HIDDEN_REPORT_ROLES.has(String(row.role ?? '').trim().toLowerCase()))
+}
+
 /**
- * The Task report's main table: ONE ROW PER RECRUITER (alphabetical, so a person keeps their place when the mode changes), a "not on an order"
- * column, the 13 stages and a total. Completed mode counts the stage records the person completed in the period (`stageFlowStaff`), Waiting
- * mode the candidates they hold now (`stages.perStaff`). `staff` narrows it to one recruiter ('' for everyone). Figures of people who are
- * not in the staff list (a former employee) are kept together in an "Other" row, so the total row always equals the sum of the column.
+ * The Task report's main table: ONE ROW PER PERSON (recruiters and the MD, alphabetical), a "not on an order" column, the 13 stages and a total,
+ * counting the candidates each person holds now (`stages.perStaff`). `staff` narrows it to one person ('' for everyone). Figures of people who
+ * are not in the staff list at all (a former employee) are kept together in an "Other" row. The Administrator's own figures are not a row and
+ * not in the Total, so the Total row always equals the sum of the rows shown.
  */
-export function buildStageMatrix(report: Pick<DailyReport, 'staff' | 'stages' | 'stageFlow' | 'stageFlowStaff'>, mode: StageMode, staff = ''): StageMatrix {
+export function buildStageMatrix(report: Pick<DailyReport, 'staff' | 'stages' | 'stageFlow'>, staff = ''): StageMatrix {
   const stages = matrixStages(report)
   const waiting = new Map((report.stages?.perStaff ?? []).map(item => [item.id, item.counts]))
-  const flow = new Map((report.stageFlowStaff ?? []).map(item => [item.id, item.completed]))
-  const source = mode === 'waiting' ? waiting : flow
-  const people = report.staff.filter(row => !staff || row.id === staff).map(row => ({ id: row.id, name: row.name }))
+  const known = new Set(report.staff.map(row => row.id))
+  const people = reportPeople(report.staff).filter(row => !staff || row.id === staff).map(row => ({ id: row.id, name: row.name }))
     .sort((x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: 'base' }))
-  if (!staff) {
-    const known = new Set(report.staff.map(row => row.id))
-    if ([...source.keys()].some(id => !known.has(id))) people.push({ id: 'other', name: 'Other' })
-  }
+  if (!staff && [...waiting.keys()].some(id => !known.has(id))) people.push({ id: 'other', name: 'Other' })
   const cellsOf = (counts: Record<string, number> | undefined): MatrixRow['cells'] => {
-    const cells: MatrixRow['cells'] = { '0': mode === 'waiting' ? counts?.['0'] ?? 0 : null }
+    const cells: MatrixRow['cells'] = { '0': counts?.['0'] ?? 0 }
     let total = cells['0'] ?? 0
     for (const stage of stages) { const n = counts?.[String(stage.no)] ?? 0; cells[String(stage.no)] = n; total += n }
     cells.total = total
     return cells
   }
   const rows: MatrixRow[] = people.map(person => {
-    if (person.id !== 'other') return { ...person, cells: cellsOf(source.get(person.id)) }
-    const known = new Set(report.staff.map(row => row.id))
+    if (person.id !== 'other') return { ...person, cells: cellsOf(waiting.get(person.id)) }
     const merged: Record<string, number> = {}
-    for (const [id, counts] of source) if (!known.has(id)) for (const [no, n] of Object.entries(counts)) merged[no] = (merged[no] ?? 0) + n
+    for (const [id, counts] of waiting) if (!known.has(id)) for (const [no, n] of Object.entries(counts)) merged[no] = (merged[no] ?? 0) + n
     return { ...person, cells: cellsOf(merged) }
   })
-  const total: MatrixRow['cells'] = { '0': mode === 'waiting' ? 0 : null, total: 0 }
+  const total: MatrixRow['cells'] = { '0': 0, total: 0 }
   for (const stage of stages) total[String(stage.no)] = 0
   for (const row of rows) for (const [key, value] of Object.entries(row.cells)) if (value != null) total[key] = (total[key] ?? 0) + value
-  return { mode, stages, rows, total }
+  return { stages, rows, total }
 }
 
-export interface StageTableRow { no: number; name: string; waiting: number | null; completed: number | null; stopped: number | null; share: number; drill?: string }
-export interface StageTable { rows: StageTableRow[]; total: { waiting: number | null; completed: number | null; stopped: number | null } }
-/** The second table, "Stage by stage": stages 1 to 13 for the current selection (the report is already narrowed to the person picked). The share is of the waiting column. */
-export function buildStageTable(report: Pick<DailyReport, 'stages' | 'stageFlow'>): StageTable {
-  const progress = stageProgress(report)
-  const rows = progress.rows.filter(row => row.no >= 1).map((row): StageTableRow => ({ no: row.no, name: row.name, waiting: row.now, completed: row.completed, stopped: row.stopped, share: 0, ...(row.drill ? { drill: row.drill } : {}) }))
-  const add = (pick: (row: StageTableRow) => number | null) => (rows.some(row => pick(row) != null) ? rows.reduce((all, row) => all + (pick(row) ?? 0), 0) : null)
-  const total = { waiting: add(row => row.waiting), completed: add(row => row.completed), stopped: add(row => row.stopped) }
-  for (const row of rows) row.share = sharePct(row.waiting ?? 0, total.waiting ?? 0)
-  return { rows, total }
+export interface StageTableRow { no: number; name: string; waiting: number | null; share: number; drill?: string }
+export interface StageTable { rows: StageTableRow[]; total: { waiting: number | null } }
+/**
+ * The second table, "Stage by stage": stages 1 to 13, the candidates waiting now. It adds up the same people as the matrix above it
+ * (recruiters and the MD, or the one picked), so its Total equals the matrix total less the "No order" column. Null (a dash) when the server sent no stage counts.
+ */
+export function buildStageTable(report: Pick<DailyReport, 'staff' | 'stages' | 'stageFlow'>, staff = ''): StageTable {
+  const matrix = buildStageMatrix(report, staff)
+  const has = !!report.stages
+  const rows = matrix.stages.map((stage): StageTableRow => {
+    const waiting = has ? matrix.total[String(stage.no)] ?? 0 : null
+    return { no: stage.no, name: `${stage.no} · ${stage.name}`, waiting, share: 0, ...((waiting ?? 0) > 0 ? { drill: `stage:${stage.no}` } : {}) }
+  })
+  const total = has ? rows.reduce((all, row) => all + (row.waiting ?? 0), 0) : null
+  for (const row of rows) row.share = sharePct(row.waiting ?? 0, total ?? 0)
+  return { rows, total: { waiting: total } }
+}
+
+/** Overdue tasks of the people shown (recruiters and the MD, the Administrator's own tasks left out); the server's total when no row carries task counts. */
+export function shownOverdue(report: Pick<DailyReport, 'staff' | 'tasks'>): number | null {
+  const people = reportPeople(report.staff).filter(row => row.tasks)
+  return people.length ? people.reduce((all, row) => all + row.tasks!.overdue, 0) : report.tasks ? report.tasks.overdue : null
 }
 
 /* ---------------------------------------------------------------- Lead sheet by status (Daily report) */
