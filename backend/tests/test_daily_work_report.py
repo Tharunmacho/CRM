@@ -767,6 +767,26 @@ def test_the_management_table_leads_tasks_and_the_pipeline_right_now(env):
     assert "tasks" not in get(env, "ravi", "/mine").json()
 
 
+def test_stage_flow_per_staff_is_credited_to_the_person_who_completed_it_and_adds_up_to_the_stage_totals(env):
+    body = report(env, **{"from": "2026-11-05", "to": "2026-11-05"})
+    flow = {x["no"]: x for x in body["stageFlow"]}
+    people = {x["id"]: x for x in body["stageFlowStaff"]}
+    assert set(people) <= {"asha", "ravi", "meena"}
+    for entry in people.values():   # every stage 1..13 is present for each person, as strings
+        assert list(entry["completed"]) == [str(n) for n in range(1, 14)] and list(entry["stopped"]) == list(entry["completed"])
+    for no in range(1, 14):
+        assert sum(x["completed"][str(no)] for x in people.values()) == flow[no]["completed"]
+        assert sum(x["stopped"][str(no)] for x in people.values()) == flow[no]["stopped"]
+    assert sum(sum(x["completed"].values()) for x in people.values()) == sum(x["completed"] for x in flow.values()) > 0
+    # c14 belongs to ravi but asha completed its forwarding: the credit goes to the person who completed it
+    assert people["asha"]["completed"]["2"] == 2 and people["ravi"]["completed"]["2"] == flow[2]["completed"] - 2
+    assert people["meena"]["completed"]["10"] == 2 and people["meena"]["stopped"]["10"] == 1   # visa arrived, and c10 visa rejected (a completed record that ends the placement)
+    # one recruiter picked: only their own row, and a recruiter's own report is the same
+    one = report(env, staff="asha", **{"from": "2026-11-05", "to": "2026-11-05"})
+    assert [x["id"] for x in one["stageFlowStaff"]] == ["asha"] and one["stageFlowStaff"][0] == people["asha"]
+    assert [x["id"] for x in report(env, "ravi", **{"from": "2026-11-05", "to": "2026-11-05"})["stageFlowStaff"]] == ["ravi"]
+
+
 def test_a_running_day_is_compared_with_the_same_elapsed_time_of_the_previous_one(env):
     day = {"from": "2026-11-05", "to": "2026-11-05"}
     early = report(env, **day)                       # 14:00 Thursday

@@ -70,102 +70,6 @@ const headings = html => [...withoutSections(html).slice(0, html.indexOf('Lead s
 /** The cells of every person row: the row heading plus its td cells. */
 const personRows = html => withoutSections(html).split('<tr class="dw-staff-row').slice(1).map(row => row.split('</tr>')[0]).map(row => count(row, /<th scope="row"/g) + count(row, /<td\b/g))
 
-test('Daily report: the client wording as tiles, in the client order, then Day closed; nothing printed under a number', () => {
-  const html = render(views.DailyView)
-  assert.deepEqual(tileLabels(html), [
-    'Resumes forwarded to clients', 'Resumes prescreened today', 'Workers shortlisted by clients', 'Online interviews conducted',
-    'Offer letters received', 'Visas received', 'Workers travelled', 'Day closed',
-  ])
-  assert.equal(count(html, /class="dwb-stats has-4"/g), 2) // two rows of four, like the Tasks strip
-  assert.equal(count(html, /class="dwb-stat-detail"/g), 0) // no caption line under any card
-  const t = text(html.slice(0, html.indexOf('aria-label="Task progress by stage"'))) // the tiles and the Team board: the sections below have their own tests
-  assert.match(t, /Day closed 1 of 3/) // the value text stays in the number line, with its progress bar
-  assert.ok(html.includes('class="dwb-meter"'))
-  assert.ok(!/vs yesterday|no change|of 5 interviews|staff have submitted|Not submitted yet —/.test(t.replace(/\bNot submitted\b/g, '')), 'the captions are not printed')
-  assert.ok(!/Assigned|Overdue|Pending|Stage|Not contacted|Contacted|Call back/.test(t), 'nothing from the lead sheet, tasks or stages')
-  // yesterday (a single day that is not today) says plain "prescreened"
-  assert.ok(tileLabels(render(views.DailyView, { report: { ...report, period: { ...report.period, from: '2026-11-16', to: '2026-11-16' } } })).includes('Resumes prescreened'))
-})
-
-test('the information that is not printed is in each tile\'s hover text', () => {
-  const html = render(views.DailyView)
-  const tile = label => html.slice(html.lastIndexOf('<li>', html.indexOf(label)), html.indexOf(label))
-  assert.match(tile('Resumes forwarded to clients'), /title="no change"/)
-  assert.match(tile('Resumes prescreened today'), /title="−2 vs yesterday"/)
-  assert.match(tile('Workers shortlisted by clients'), /title="\+4 vs yesterday"/)
-  assert.match(tile('Online interviews conducted'), /title="of 5 interviews\. 2 interviews were recorded without a mode and are not counted as online\."/)
-  assert.match(tile('Offer letters received'), /title="−1 vs yesterday"/)
-  assert.match(tile('Visas received'), /title="\+1 vs yesterday"/)
-  assert.match(tile('Day closed'), /title="1 of 3 recruiters submitted\. Not submitted yet — Anil Kumar, Zoya Khan"/)
-})
-
-test('Daily report table: short headings (full wording in the title), groups, avatars, drill buttons and pills', () => {
-  const html = render(views.DailyView)
-  assert.deepEqual(headings(html), ['Recruiter', 'Forwarded', 'Prescreened', 'Shortlisted', 'Online interviews', 'Offers', 'Visas', 'Travelled', 'Day closed'])
-  assert.ok(html.includes('title="Resumes forwarded to clients. '))
-  const t = text(html)
-  assert.match(t, /Everyone's figures/)
-  assert.ok(!/3 people|select a number to see/.test(t), 'no subtitle under the heading')
-  assert.deepEqual([...html.matchAll(/class="dw-group-title">[\s\S]*?<\/span>/g)].map(m => text(`<span ${m[0]}`)), ['Active today 2', 'No activity 1'])
-  assert.ok(html.includes('dw-group is-done'))
-  assert.deepEqual(personRows(html), [9, 9, 9])
-  assert.ok(/<button type="button" class="dwr-link"[^>]*>11</.test(html))
-  assert.ok(!/<button[^>]*>0</.test(html)) // zeros are a light dash, never a button
-  assert.equal(count(html, /data-tone="green"/g), 1) // Meera submitted
-  assert.equal(count(html, /data-tone="amber"/g), 2) // Anil and Zoya have not
-  assert.match(t, /Submitted 18:42/)
-  assert.ok(!/<th scope="row"[^>]*>Total/.test(withoutSections(html))) // the tiles are the total: no Total row
-})
-
-test('no footer sentences: the day-close names, the interviews note and the legends are not printed; two small links sit in the card header', () => {
-  const html = render(views.DailyView, { onHistory: noop })
-  const t = text(html)
-  assert.ok(!/Day close:|were recorded without a mode|Counted when a stage|not submitted yet/i.test(t.replace(/Not submitted/g, '')), 'no footer notes')
-  assert.equal(count(html, /<footer/g), 0)
-  const from = html.indexOf('aria-label="Everyone&#x27;s figures"')
-  const head = html.slice(from, html.indexOf('<table', from))
-  assert.match(head, /Show the interviews/)
-  assert.match(head, /Submitted reports/)
-  assert.match(head, /class="dwr-textlink" title="2 interviews were recorded without a mode and are not counted as online\."/)
-  assert.match(head, /Filter by recruiter/)
-})
-
-test('Team card: heading only, attention first, the Tasks status pills, a share bar, and "All recruiters"', () => {
-  const html = render(views.DailyView)
-  const board = html.slice(html.indexOf('class="dw-panel dwb-board"'), html.indexOf('</section>', html.indexOf('class="dw-panel dwb-board"')))
-  const names = [...board.matchAll(/<b title="([^"]+)">/g)].map(m => m[1])
-  assert.deepEqual(names, ['Anil Kumar', 'Zoya Khan', 'Meera Nair']) // not reported and active, then no activity, then reported
-  assert.deepEqual([...board.matchAll(/class="dwb-chip is-[\w-]+">[\s\S]*?<\/span>/g)].map(m => text(`<span ${m[0]}`)), ['Not reported yet', 'No activity', 'Reported'])
-  assert.ok(board.includes('dwb-card is-behind') && board.includes('dwb-card is-none') && board.includes('dwb-card is-on-track'))
-  const t = text(board)
-  assert.match(t, /12 actions today 32%/)
-  assert.match(t, /25 actions today 68%/)
-  assert.match(t, /Nothing recorded today/)
-  assert.match(t, /All recruiters/)
-  assert.ok(!/People who have not reported|Select one to see/.test(t), 'no subtitle')
-})
-
-test('a recruiter sees their own tiles, their own row, and no Team card', () => {
-  const own = { ...report, scope: 'self', compliance: null, staff: [report.staff[0]] }
-  const html = render(views.DailyView, { report: own })
-  const t = text(html)
-  assert.ok(!/Team|All recruiters/.test(t))
-  assert.match(t, /Your figures/)
-  assert.match(t, /Day closed Yes/)
-  assert.ok(html.includes('title="Submitted 18:42"')) // the detail is the tile's hover text
-  assert.ok(!/aria-pressed/.test(html)) // a name is not a filter for a recruiter
-  assert.deepEqual(personRows(html), [9])
-})
-
-test('a period of several days has no Day closed column or tile', () => {
-  const week = { ...report, period: { ...report.period, from: '2026-11-11', to: '2026-11-17' } }
-  const html = render(views.DailyView, { report: week })
-  assert.deepEqual(headings(html), ['Recruiter', 'Forwarded', 'Prescreened', 'Shortlisted', 'Online interviews', 'Offers', 'Visas', 'Travelled'])
-  assert.ok(!tileLabels(html).includes('Day closed'))
-  assert.deepEqual(personRows(html), [8, 8, 8])
-  assert.ok(text(html).includes('Active in this period'))
-})
-
 test('Lead sheet monitoring: five tiles tied to the Lead sheet screen, a table with Unassigned and a Total row, headings only', () => {
   const html = render(views.LeadSheetView)
   assert.deepEqual(tileLabels(html), ['Total leads', 'New leads', 'Assigned', 'Contacted', 'Not contacted'])
@@ -214,9 +118,7 @@ test('an older server: the lead tiles go back to the four-tile set', () => {
 
 test('every table uses one column template: header and row cells line up, and numeric columns are right-aligned in both', () => {
   const tables = {
-    daily: render(views.DailyView, { onDrillClient: noop }),
     lead: render(views.LeadSheetView),
-    candidates: render(views.CandidateMonitoringView),
   }
   for (const [name, html] of Object.entries(tables)) {
     for (const table of html.split('<table').slice(1).filter(piece => piece.includes('dwr-table'))) {
@@ -240,25 +142,6 @@ test('every table uses one column template: header and row cells line up, and nu
   }
 })
 
-test('the Candidate table: the name column is the remainder, every figure column is as wide as the longest word of its heading, everything centred', async () => {
-  const html = render(views.CandidateMonitoringView)
-  const table = html.slice(html.indexOf('<table'))
-  assert.ok(!/min-width/.test(table.slice(0, table.indexOf('<thead>'))), 'no inline min-width: the table fits its panel')
-  const widths = [...table.matchAll(/<col style="width:([\d.]+)px/g)].map(m => Number(m[1]))
-
-  assert.equal(widths.length, 17) // Done, Pending, Overdue, No order, stages 1 to 12, Total; the Recruiter column has no width of its own (auto: it takes the rest)
-  assert.ok(table.includes('<col style="width:auto"/>') || table.includes('<col style="width:auto" />'))
-  const sum = widths.reduce((a, b) => a + b, 0)
-  assert.ok(sum < 1080 - 120 && sum > 500, 'the figure columns leave the Recruiter column its longest word at the narrowest table width (' + sum + ')')
-  assert.ok(widths[3] > widths[4], 'No order (a longer heading) is wider than a stage number')
-  assert.match(table, /<th scope="col" class="is-num">Total<\/th>/) // the Total heading is a figure heading: centred like its numbers
-  const css = await readFile(new URL('../src/styles/daily-report.css', import.meta.url), 'utf8')
-  assert.match(css, /thead th:is\(\.is-num, \.is-tail\) \{ padding: 4px 8px; text-align: var\(--table-align, center\); \}/)
-  assert.match(css, /td\.is-num \{ padding: 8px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: var\(--table-align, center\);/)
-  assert.match(css, /\.dwr-table\.dw-table\.dw-main thead th \{[^}]*height: 44px;/)
-  assert.match(css, /td\.is-num > \.dw-none[^{]*\{ display: block; margin-inline: auto; text-align: var\(--table-align, center\); \}/) // the dash is centred like a number
-})
-
 test('headings are the Tasks look: the primary blue band, bold uppercase 11.5px, one line; group bands bold', async () => {
   const css = await readFile(new URL('../src/styles/daily-report.css', import.meta.url), 'utf8')
   const rule = /:root \.dwr \.dwr-table\.dw-table\.dw-main thead th \{([^}]*)\}/.exec(css)
@@ -280,34 +163,16 @@ test('headings are the Tasks look: the primary blue band, bold uppercase 11.5px,
   assert.equal(weightOf('.dr-drill .dr-drill-table thead th, .dr-drill .dr-mini thead th').colour, 'var(--text-main)')
 })
 
-test('Candidate monitoring: candidates and tasks only; the stage names are the header hover texts, not a legend line', () => {
-  const html = render(views.CandidateMonitoringView)
-  assert.deepEqual(tileLabels(html), ['Candidates in progress', 'Tasks done', 'Tasks pending', 'Tasks overdue'])
-  assert.deepEqual(headings(html), ['Recruiter', 'Done', 'Pending', 'Overdue', 'No order', ...Array.from({ length: 12 }, (_, i) => String(i + 1)), 'Total'])
-  assert.deepEqual(personRows(html), [18, 18, 18])
-  const t = text(html)
-  assert.match(t, /Candidates in progress 36/)
-  assert.ok(!/Stages:|not on an order yet|1 Prescreening|select a number/.test(t), 'no legend line, no captions')
-  assert.equal(count(html, /dwr-legend/g), 0)
-  assert.ok(/<th scope="col" class="is-num" title="Stage 3: Interview scheduling\./.test(html)) // the stage header '3' carries the stage name
-  assert.ok(/<th scope="col" class="is-num" title="Not on an order yet/.test(html))
-  assert.ok(html.includes('title="Right now, whatever the period. 5 not on an order yet"'))
-  assert.ok(!/Lead|Contacted|Interested|Assigned|Day closed/.test(t), 'nothing about leads')
-  assert.ok(html.includes('dwr-table is-dense'))
-})
-
 test('without the additive keys the views say so in one short sentence', () => {
   const old = JSON.parse(JSON.stringify(report))
   delete old.leadSheet; delete old.tasks; delete old.stages
   for (const row of old.staff) { delete row.leads; delete row.tasks }
-  assert.match(text(render(views.CandidateMonitoringView, { report: old })), /^This part needs the latest server version\.$/)
   assert.match(text(render(views.LeadSheetView, { report: old })), /This part needs the latest server version\./)
-  assert.deepEqual(personRows(render(views.DailyView, { report: old })), [9, 9, 9]) // the Daily report needs none of them
 })
 
 test('the page: titles, the Tasks-style header with no subtitle, tabs and period row, and the Tasks CSS reused', async () => {
   const page = await readFile(new URL('../src/features/daily-report/daily-report-page.tsx', import.meta.url), 'utf8')
-  assert.match(page, /daily: 'Report', lead: 'Lead sheet monitoring', stages: 'Candidate monitoring'/)
+  assert.match(page, /daily: 'Task report', lead: 'Lead sheet report'/)
   assert.ok(page.indexOf('<PageHeader') < page.indexOf('{tabs}') && page.indexOf('{tabs}') < page.indexOf('<PeriodRow'))
   assert.ok(!/subtitle|dwr-when|description=/.test(page), 'no subtitle under the title')
   assert.match(page, /Export Excel/)
@@ -332,8 +197,7 @@ test('"staff" is "recruiter" in everything the person reads on the report screen
     assert.deepEqual(offenders, [], name)
   }
   assert.ok((await read('daily-report-view.ts')).includes("'Recruiter'"))
-  assert.match(text(render(views.DailyView)), /All recruiters/)
-  assert.ok(!/\bstaff\b/i.test(text(render(views.DailyView)) + text(render(views.LeadSheetView)) + text(render(views.CandidateMonitoringView))))
+  assert.ok(!/\bstaff\b/i.test(text(render(views.LeadSheetView))))
 })
 
 test('the colours are the app tokens: status pills only for status, no hard-coded hues', async () => {
@@ -346,35 +210,6 @@ test('the colours are the app tokens: status pills only for status, no hard-code
     assert.doesNotMatch(source, /#[0-9a-fA-F]{6}\b|rgb\(|hsl\(|text-(red|amber|green|orange|violet|rose|yellow)/, name)
   }
   assert.doesNotMatch(css, /overflow-y|max-height: calc/)
-})
-
-test('By client card: below Everyone\'s figures, the same table style, hidden while a client filter is on', () => {
-  const html = render(views.DailyView, { onDrillClient: noop })
-  const t = text(html)
-  assert.match(t, /By client/)
-  assert.ok(!/What was done for each client/.test(t), 'no subtitle')
-  assert.ok(html.indexOf("aria-label=\"By client\"") > html.indexOf("aria-label=\"Everyone's figures\""))
-  const card = html.slice(html.indexOf('aria-label="By client"'), html.indexOf('aria-label="Lead sheet by status"'))
-  assert.deepEqual([...card.matchAll(/<th scope="col"[^>]*>([^<]*)</g)].map(m => m[1]), ['Client', 'Forwarded', 'Prescreened', 'Shortlisted', 'Online interviews', 'Offers', 'Visas', 'Travelled', 'Total'])
-  assert.match(text(card), /Al Noor Contracting[^G]*22/) // busiest first with its total
-  assert.ok(text(card).indexOf('Al Noor') < text(card).indexOf('Gulf Build'))
-  assert.ok(/<button type="button" class="dwr-link"[^>]*>10</.test(card)) // a number opens the drill-down
-  assert.equal(count(card, /<tr class="dw-staff-row/g), 2)
-  assert.ok(!html.includes('aria-label="By client"') === false)
-  assert.ok(!render(views.DailyView, { onDrillClient: noop, clientFilter: 'co-1' }).includes('aria-label="By client"'))
-  const none = { ...report }; delete none.byClient
-  assert.ok(!render(views.DailyView, { report: none, onDrillClient: noop }).includes('aria-label="By client"'))
-})
-
-test('the Day closed pill opens the report, "changed" is flagged, and "Submitted reports" is a small link in the card header', () => {
-  const html = render(views.DailyView, { onSubmission: noop, onHistory: noop })
-  assert.equal(count(html, /class="dwr-pillbtn"/g), 1) // only the one who submitted
-  assert.ok(/class="dwr-pillbtn"[^>]*aria-label="Meera Nair: Submitted 18:42\. Show their report"/.test(html))
-  assert.equal(count(html, /class="dwr-changed"/g), 1)
-  assert.match(html, /title="Numbers changed after this report was submitted \(now 6 forwarded, was 5\)"/)
-  assert.match(text(html), /Submitted reports/)
-  // without the handlers the pill is plain, as before
-  assert.equal(count(render(views.DailyView), /class="dwr-pillbtn"/g), 0)
 })
 
 test('the panels: a report panel and a paged history list on the same drawer shell, a history call that degrades', async () => {

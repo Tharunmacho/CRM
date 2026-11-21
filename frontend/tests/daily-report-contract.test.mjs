@@ -88,7 +88,7 @@ test('weekly buckets: the series carries bucket week and the screen draws no cha
   }
 })
 
-test('Reports is Daily report | Lead sheet monitoring | Candidate monitoring only; Accounts and the legacy reports are behind constants', async () => {
+test('Reports is Task report | Lead sheet report | Attendance | Client tracker; Accounts and the legacy reports are behind constants', async () => {
   const page = await read('screens/reports/reports.tsx')
   assert.ok(page.includes('pageTabs(accounts)'))
   assert.ok(page.includes('<DailyReportPage view={view} tabs={tabs} />'))
@@ -97,34 +97,29 @@ test('Reports is Daily report | Lead sheet monitoring | Candidate monitoring onl
   const tabs = await read('features/reports/report-tabs.ts')
   assert.match(tabs, /export const SHOW_LEGACY_REPORTS = false/)
   assert.match(tabs, /export const SHOW_ACCOUNTS_TAB = false/)
-  assert.ok(tabs.includes("label: 'Daily report' }, { key: 'lead', label: 'Lead sheet monitoring' }, { key: 'stages', label: 'Candidate monitoring' }"))
+  assert.ok(tabs.includes("label: 'Task report' }, { key: 'lead', label: 'Lead sheet report' }, { key: 'attendance', label: 'Attendance' }"))
   const other = await read('screens/reports/other-reports.tsx')
   assert.ok(other.includes('SHOW_LEGACY_REPORTS ? REPORTS.filter')) // the code is kept; only the tabs are gated
   assert.match(other, /: ACCOUNT_TABS/)
 })
 
-test('the Daily report is built from the Tasks screen parts: header, tabs, period row, summary tiles, Team card, table card', async () => {
+test('the Task report is built from the Tasks screen parts: header, tabs, period row, summary tiles, matrix table, stage-by-stage table', async () => {
   const shell = await read('features/daily-report/daily-report-page.tsx')
-  assert.ok(shell.indexOf('<PageHeader') < shell.indexOf('{tabs}') && shell.indexOf('{tabs}') < shell.indexOf('<PeriodRow') && shell.indexOf('<PeriodRow') < shell.indexOf('<DailyView'))
+  assert.ok(shell.indexOf('<PageHeader') < shell.indexOf('{tabs}') && shell.indexOf('{tabs}') < shell.indexOf('<PeriodRow') && shell.indexOf('<PeriodRow') < shell.indexOf('<TaskReportView'))
+  const task = await read('features/daily-report/report-task.tsx')
+  assert.ok(task.indexOf('<Tiles') > -1 && task.indexOf('<Tiles') < task.indexOf('dwm-table') && task.indexOf('dwm-table') < task.indexOf('is-flow'))
+  assert.match(task, /from '@\/screens\/tasks\/daily-table'/) // the Tasks table's scroll edges
+  assert.match(task, /onDrill\(`stage:\$\{no\}`/) // a waiting number opens its list
+  assert.doesNotMatch(task, /leadSheet|LEAD_COLS|Daily report|Candidate monitoring|Lead sheet monitoring/)
   const views = await read('features/daily-report/report-views.tsx')
-  const daily = views.slice(views.indexOf('export function DailyView'), views.indexOf('/* ---------------------------------------------------------------- Lead sheet monitoring'))
-  assert.ok(daily.indexOf('<Tiles') > -1 && daily.indexOf('<Tiles') < daily.indexOf('<PeopleBoard') && daily.indexOf('<PeopleBoard') < daily.indexOf('<FigureTable'))
-  assert.doesNotMatch(daily, /leadSheet|taskStage|stageColumns|LEAD_COLS|stageLegend/) // nothing that is not on the client list
-  const leadView = views.slice(views.indexOf('export function LeadSheetView'), views.indexOf('/* ---------------------------------------------------------------- Candidate monitoring'))
-  assert.doesNotMatch(leadView, /stage|taskStage|dailyCols|tasks/i) // leads only
-  const candidates = views.slice(views.indexOf('export function CandidateMonitoringView'))
-  assert.doesNotMatch(candidates, /LEAD_COLS|leadCells|leadSheet|contacted/i) // candidates and tasks only
-  const table = await read('features/daily-report/report-table.tsx')
-  assert.ok(table.includes('onDrill(col.drill!')) // a number opens its list
-  assert.match(table, /onPickName/) // a name filters to the person
-  assert.ok(!/total=\{/.test(daily)) // the Daily report has no Total row: the tiles are the total
+  assert.doesNotMatch(views, /export function (DailyView|CandidateMonitoringView)/)
 })
 
-test('a recruiter sees only their own figures and no Team card, and a small My day card under them', async () => {
-  const views = await read('features/daily-report/report-views.tsx')
-  assert.ok(views.includes('{team && <PeopleBoard'))
+test('a recruiter sees only their own row (no recruiter filter) and a small My day card under it', async () => {
+  const task = await read('features/daily-report/report-task.tsx')
+  assert.ok(task.includes('{team && <Select'))
   const shell = await read('features/daily-report/daily-report-page.tsx')
-  assert.ok(shell.includes("data.scope === 'self' && <MyDayCard"))
+  assert.ok(shell.includes("view === 'daily' && data.scope === 'self' && <MyDayCard"))
 })
 
 test('the screen handles a refused or unknown person and links from older addresses', async () => {

@@ -50,7 +50,7 @@ export function nameWordWidth(names: string[]): number {
   return Math.max(0, ...names.flatMap(wordsOf).map(word => wordWidth(word, '600 13px', 0, 7.6)))
 }
 
-function hueOf(name: string) {
+export function hueOf(name: string) {
   return [...name].reduce((total, character) => total + character.charCodeAt(0), 0) % 6
 }
 

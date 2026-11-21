@@ -314,7 +314,7 @@ def read_stages(session, p: Period, zone: str, staff_id: str | None, client_id: 
 
 
 def read_stage_flow(session, p: Period, staff_id: str | None, client_id: str | None) -> list:
-    """(stage, completed, stopped) for EVERY stage: the stage records completed in the period (never reopened, with a person to credit,
+    """(stage, credited person, completed, stopped) per stage and person: the stage records completed in the period (never reopened, with a person to credit,
     filtered like the figures), and how many of them ended the placement (the stage's own stopping outcomes). The complete stage-by-stage
     progress of the Daily report: how many were prescreened, forwarded ... up to the air ticket."""
     AS = m.ApplicationStage
@@ -326,7 +326,7 @@ def read_stage_flow(session, p: Period, staff_id: str | None, client_id: str | N
         conditions.append(AS.application_id.in_(
             select(m.Application.id).join(m.Order, m.Order.id == m.Application.order_id).where(m.Order.company_id == client_id)))
     stopped = case(*[(and_(AS.stage == no, AS.outcome.in_(sorted(outcomes))), 1) for no, outcomes in STOPPED_OUTCOMES.items() if outcomes], else_=0)
-    return session.execute(select(AS.stage, func.count(), func.coalesce(func.sum(stopped), 0)).where(*conditions).group_by(AS.stage)).all()
+    return session.execute(select(AS.stage, who, func.count(), func.coalesce(func.sum(stopped), 0)).where(*conditions).group_by(AS.stage, who)).all()
 
 
 _ACTIVITY = f"""
@@ -421,6 +421,11 @@ UNION ALL
 SELECT 'unowned', CAST(NULL AS varchar), CAST(NULL AS date), 'new', CAST(NULL AS boolean), count(*)
   FROM crm_leads l WHERE l.owner_id IS NULL AND l.created_at >= :cur_start AND l.created_at < :end AND CAST(:staff AS varchar) IS NULL
 UNION ALL
+SELECT 'status_by', l.owner_id, CAST(NULL AS date), l.status || '|' || COALESCE(l.status_label, ''), CAST(NULL AS boolean), count(*)
+  FROM crm_leads l
+ WHERE CAST(:staff AS varchar) IS NULL OR l.owner_id = CAST(:staff AS varchar)
+ GROUP BY l.owner_id, l.status, l.status_label
+UNION ALL
 SELECT 'new_p', CAST(NULL AS varchar), CAST(NULL AS date), CAST(NULL AS text), l.created_at >= :cur_start, count(*)
   FROM crm_leads l
  WHERE (CAST(:staff AS varchar) IS NULL OR l.owner_id = CAST(:staff AS varchar))
@@ -432,6 +437,35 @@ SELECT 'new_p', CAST(NULL AS varchar), CAST(NULL AS date), CAST(NULL AS text), l
 def read_leads(session, p: Period, zone: str, staff_id: str | None, now: datetime) -> list:
     return session.execute(_LEADS_SQL, {"staff": staff_id, "unit": p.unit, "tz": zone, "prev_start": p.prev_start, "cur_start": p.start,
                                         "prev_until": p.prev_until, "end": p.end, "now": now}).all()
+
+
+_TEMPLATE_FIRST = ("ringing", "no incoming calls", "not eligible")   # the built-in status templates, in the Lead sheet's order
+
+
+def _count_status_by(status_by, status_names, uid, packed: str, n) -> None:
+    """One grouped row of the status-per-owner part: `<built-in code>|<template name or empty>` -> the column key. A lead that holds a status
+    template shows (and counts) under the template's name, like the Lead sheet's own Status cell; the others under their built-in code."""
+    code, _, label = packed.partition("|")
+    if label:
+        key = "t:" + label.casefold()
+        status_names.setdefault(key, label)
+    else:
+        key = code
+    status_by[uid][key] += int(n)
+
+
+def lead_status_matrix(status_by, status_names, listed_ids, include_unassigned: bool) -> dict:
+    """`statusColumns` (the Lead sheet's nine statuses in its order, then the status templates that hold leads: Ringing, No incoming calls,
+    Not eligible first) and `byStatusPerStaff` (every listed person's leads by that column, plus the row 'unassigned' for leads nobody owns).
+    Every lead is in exactly one column, so a row adds up to the person's `leads.assigned` and the rows to leadSheet.totalLeads."""
+    templates = sorted({key for rows in status_by.values() for key in rows if key.startswith("t:")},
+                       key=lambda key: (_TEMPLATE_FIRST.index(key[2:]) if key[2:] in _TEMPLATE_FIRST else len(_TEMPLATE_FIRST), key))
+    columns = [{"key": key, "label": LEAD_STATUS_LABELS[key], "template": False} for key in LEAD_STATUS_ORDER]
+    columns += [{"key": key, "label": status_names[key], "template": True} for key in templates]
+    per_staff = [{"id": uid, "counts": {c["key"]: int(status_by.get(uid, {}).get(c["key"], 0)) for c in columns}} for uid in listed_ids]
+    if include_unassigned:
+        per_staff.append({"id": "unassigned", "counts": {c["key"]: int(status_by.get(None, {}).get(c["key"], 0)) for c in columns}})
+    return {"statusColumns": columns, "byStatusPerStaff": per_staff}
 
 
 def read_tasks(session, p: Period, staff_id: str | None, now: datetime) -> list:
@@ -561,7 +595,8 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
         reads["clients"] = lambda s: read_clients(s, p, staff_id)
         reads["tasks"] = lambda s: read_tasks(s, p, staff_id, now)
         reads["stage_now"] = lambda s: read_stage_now(s, staff_id)
-    reads["stage_flow"] = lambda s: read_stage_flow(s, p, staff_id, client)
+    if not force_self:   # the day-close submit path asks for the person's own figures only: no stage-by-stage read for it
+        reads["stage_flow"] = lambda s: read_stage_flow(s, p, staff_id, client)
     if single:
         reads["submissions"] = lambda s: read_submissions(s, p.first, zone, staff_id)
     raw = dict(zip(reads, parallel_reads(db, *reads.values())))
@@ -592,6 +627,8 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
     assigned_in, notc_in, backlog = defaultdict(int), defaultdict(int), defaultdict(int)
     prev_assigned = prev_new = new_in = 0
     unowned: dict[str, int] = {"total": 0, "never": 0, "new": 0}
+    status_by: dict[str | None, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    status_names: dict[str, str] = {}
     for part, uid, day, key, flag, n in raw["leads"]:
         if part == "series":
             series["leadsContacted"][day] += n
@@ -614,6 +651,8 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
             owned_untouched[uid] += n if flag else 0
         elif part == "status":
             by_status[key] += n
+        elif part == "status_by":
+            _count_status_by(status_by, status_names, uid, key, n)
         elif part == "assigned_p":
             if flag:
                 assigned_in[uid] += n
@@ -766,6 +805,7 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
         "previous": None if p.all_time else {"assignedInPeriod": prev_assigned, "contacted": prev_totals["leadsContacted"],
                                              "newInPeriod": prev_new},
         "byStatus": [{"key": key, "label": LEAD_STATUS_LABELS[key], "count": by_status.get(key, 0)} for key in LEAD_STATUS_ORDER],
+        **lead_status_matrix(status_by, status_names, [r["id"] for r in rows], include_unassigned=not staff_id),
     }
     team_tasks = None
     if "tasks" in raw:
@@ -781,7 +821,17 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
         stages = {"totals": [{"no": no, "key": STAGE_NOW_KEYS[no][0], "label": STAGE_NOW_KEYS[no][1],
                               "count": sum(x["counts"][str(no)] for x in per_staff)} for no in range(0, TOTAL_STAGES + 1)],
                   "perStaff": per_staff}
-    flow = {no: (int(done), int(ended)) for no, done, ended in raw["stage_flow"]}
+    flow: dict[int, tuple[int, int]] = {}
+    flow_staff: dict[str, dict[str, dict[str, int]]] = {}
+    for no, who, done, ended in raw.get("stage_flow", []):
+        total_done, total_ended = flow.get(no, (0, 0))
+        flow[no] = (total_done + int(done), total_ended + int(ended))
+        person = flow_staff.setdefault(who, {"completed": {}, "stopped": {}})
+        person["completed"][str(no)] = int(done)
+        person["stopped"][str(no)] = int(ended)
+    stage_flow_staff = [{"id": uid, "completed": {str(no): person["completed"].get(str(no), 0) for no in range(1, TOTAL_STAGES + 1)},
+                         "stopped": {str(no): person["stopped"].get(str(no), 0) for no in range(1, TOTAL_STAGES + 1)}}
+                        for uid, person in sorted(flow_staff.items())]
     stage_flow = [{"no": definition.no, "key": definition.key, "label": definition.title,
                    "completed": flow.get(definition.no, (0, 0))[0], "stopped": flow.get(definition.no, (0, 0))[1]} for definition in STAGES]
     for r in rows:   # the working counters are not part of the answer
@@ -799,6 +849,7 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
         "funnel": [{"key": key, "label": LABELS[key], "value": totals[key]} for key in FUNNEL_ORDER],
         "staff": rows, "compliance": compliance, "clients": clients, "leadSheet": lead_sheet, "byClient": by_client,
         "stageFlow": stage_flow,
+        "stageFlowStaff": stage_flow_staff,
     }
     if team_tasks is not None:
         report["tasks"] = team_tasks

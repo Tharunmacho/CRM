@@ -39,7 +39,7 @@ test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (superviso
 test('the column plan fits the 1111px panel of a 1440px window and gives every column its measured longest word', () => {
   const sum = (list) => list.reduce((total, c) => total + c.width, 0)
   const without = (supervisor) => daily.taskColumnsFor(supervisor, false)
-  assert.ok(sum(without(true)) <= 1108, `${sum(without(true))}px`)
+  assert.ok(sum(without(true)) <= 1111, `${sum(without(true))}px`)
   assert.ok(sum(without(false)) <= 1030, 'the plan without the Recruiter column (no Recruiter column) is narrower still')
   assert.ok(sum(without(true)) === daily.taskPlanWidth(true, false) && daily.taskColumnsFor(true, false).some((c) => c.key === 'notes'), 'NOTES is in the narrow plan too')
   const width = (key) => daily.taskColumnsFor(true).find((c) => c.key === key).width
@@ -50,9 +50,9 @@ test('the column plan fits the 1111px panel of a 1440px window and gives every c
   assert.ok(width('position') >= 91, '"SUPERVISOR" is 78px at 13px / 500')
   assert.ok(width('agency') >= 99, '"LAVOROTECH" is 86px at 13px / 500')
   assert.ok(width('staff') >= 87, '"Srivathsala" is 74px at 13px / 500 (the RECRUITER header is 65px)')
-  assert.ok(width('no') >= 42, 'the "S NO" header is 29px at 11.5px / 600 with its letter spacing')
-  assert.ok(width('actions') >= 116, 'the 72px Open / Complete button, the 4px gap and the 36px menu (112px) are not clipped')
-  assert.ok(width('remarks') >= 103, 'the dropdown keeps room for the start of a remark (its full text is the tooltip)')
+  assert.ok(width('no') >= 48, 'the "S NO" header is 29px at 11.5px / 600 with its letter spacing, with 8px on each side')
+  assert.ok(width('actions') >= 124, 'the 72px Open / Complete button, the 4px gap and the 36px menu (112px) keep 6px on each side')
+  assert.ok(width('remarks') >= 98, 'the dropdown keeps room for the start of a remark (its full text is the tooltip)')
   assert.ok(width('doc') >= 90, 'the typed dd/mm/yyyy date (62px at 11px) fits')
   assert.ok(width('stage') >= 106, 'the stage chip keeps room for "Prescreening" (77px + 16px chip padding), the outcome chip for "Travelled" and the TODAY chip under it')
   assert.ok(width('today') >= 104, 'the TODAY chip keeps room for "Moved 10:45" on one line (75px + 16px chip padding)')
@@ -62,7 +62,7 @@ test('the column plan fits the 1111px panel of a 1440px window and gives every c
 test('NOTES is a column of every table; TODAY is a column only when the panel holds the whole plan (otherwise its chip is in STAGE)', () => {
   const notes = daily.TASK_LIST_COLUMNS.find((c) => c.key === 'notes')
   assert.equal(notes.roomy, undefined, 'NOTES is never dropped')
-  assert.ok(notes.width >= 140, 'a note wraps in its own cell')
+  assert.ok(notes.width >= 134, 'a note wraps in its own cell')
   assert.deepEqual(daily.taskColumnsFor(true, false).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'remarks', 'notes', 'actions'])
   assert.deepEqual(daily.taskColumnsFor(false, false).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'agency', 'stage', 'remarks', 'notes', 'actions'])
   for (const supervisor of [true, false]) {
@@ -496,7 +496,7 @@ test('the professional pass: one 60px row, a 44px one-line header, one padding f
   assert.match(rule(`${P} thead th`), /text-align: center/, 'the headings are centred over their columns')
   assert.match(rule(`${P} tbody td`), /text-align: center/, 'and so are the cells')
   assert.doesNotMatch(rule(`${P} thead th`), /text-align: left/)
-  assert.match(rule(`${P} thead th`), /padding: 0 8px 0 var\(--tw-pad-l\)/)
+  assert.match(rule(`${P} thead th`), /padding: 0 var\(--tw-pad-r\) 0 var\(--tw-pad-l\)/)
   assert.match(rule(`${P} thead th`), /border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/, 'the header edge is the strong line')
   assert.match(rule(`${P} tbody td`), /padding: 8px var\(--tw-pad-r\) 8px var\(--tw-pad-l\)/, 'the same left edge as the header')
   assert.match(css, /\.tw-table\.dw-table\.dw-main \{[^}]*width: 100%; min-width: 0; border-collapse: separate/, 'the table fills its panel and never scrolls sideways')

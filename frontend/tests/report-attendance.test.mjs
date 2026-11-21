@@ -131,3 +131,24 @@ test('labels', () => {
   assert.equal(m.kindOfCode('MP'), 'missed')
   assert.equal(m.kindOfCode('??'), null)
 })
+
+test('"Missed check-out" is only for someone who logged in: nobody who has not clocked in is missed, and the Present count agrees', () => {
+  // today, no login, the policy says missed punch: "not clocked in yet", not present
+  const today = m.buildAttendanceRows({ day: TODAY, today: TODAY, attendance: { ...attendance(person('u1', 'Asha')), date: TODAY },
+    month: month(['u1', policyDay('MP', { date: TODAY })]) })
+  assert.equal(today[0].kind, 'pending')
+  assert.equal(m.attendanceCounts(today).present, 0)
+  // a finished day without any login is absent
+  const [past] = build(attendance(person('u1', 'Asha')), month(['u1', policyDay('MP')]))
+  assert.equal(past.kind, 'absent')
+  // logged in today and still in: present, nothing missed yet
+  const live = m.buildAttendanceRows({ day: TODAY, today: TODAY, attendance: { ...attendance(person('u2', 'Ravi', [{ ...session('s1', '04:00', null), checkedInAt: `${TODAY}T04:00:00Z` }])), date: TODAY },
+    month: month(['u2', policyDay('MP', { date: TODAY })]) })
+  assert.equal(live[0].kind, 'present')
+  assert.equal(m.attendanceCounts(live).present, 1)
+  assert.equal(m.attendanceCounts(live).stillIn, 1)
+  // logged in and out on a finished day but the policy flags a missed punch: still shown as missed, and counted as attended
+  const [missed] = build(attendance(person('u3', 'Meena', [session('s1', '04:00', '05:00')])), month(['u3', policyDay('MP')]))
+  assert.equal(missed.kind, 'missed')
+  assert.equal(m.attendanceCounts([missed]).present, 1)
+})

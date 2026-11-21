@@ -41,19 +41,19 @@ const NEEDS_SERVER = 'This part needs the latest server version.'
 const ICONS: Record<string, LucideIcon> = { forwarded: Send, prescreened: ClipboardCheck, shortlisted: UserCheck, interviewsOnline: Video, offers: FileText, visas: Stamp, travelled: Plane }
 
 /** An empty or unavailable view: one short sentence. */
-function Empty({ title }: { title: string }) {
+export function Empty({ title }: { title: string }) {
   return <section className="dw-panel dw-state" role="status"><p className="dwr-empty-title">{title}</p></section>
 }
 
 /** Five or fewer tiles in one row, more as rows of four, in the Tasks screen's summary-strip style. Nothing is printed under a number: the
  *  explanation of a tile is its hover text (title). */
-function Tiles({ tiles, label }: { tiles: StatTileData[]; label: string }) {
+export function Tiles({ tiles, label }: { tiles: StatTileData[]; label: string }) {
   const rows = (tiles.length <= 5 ? [tiles] : [tiles.slice(0, 4), tiles.slice(4)]).filter(row => row.length > 0)
   return <>{rows.map((row, index) => <StatStrip key={index} tiles={row} label={rows.length > 1 ? `${label}, row ${index + 1}` : label} />)}</>
 }
 
 /** The panel head of a table card: the heading with an icon, and on the right any small text links and the "All recruiters" filter. */
-function PanelHead({ title, staff, roster, onPickStaff, team, links }: { title: string; staff: string; roster: StaffRow[]; onPickStaff: (id: string) => void; team: boolean; links?: ReactNode }) {
+export function PanelHead({ title, staff, roster, onPickStaff, team, links }: { title: string; staff: string; roster: StaffRow[]; onPickStaff: (id: string) => void; team: boolean; links?: ReactNode }) {
   return <div className="dw-panel-head">
     <div><h2><Users size={16} aria-hidden="true" /> {title}</h2></div>
     <div className="dwr-head-tools">
@@ -67,80 +67,7 @@ function PanelHead({ title, staff, roster, onPickStaff, team, links }: { title: 
 }
 
 /** A tile that opens its list when there is something behind its number. */
-const opens = (value: number | null | undefined, open: () => void) => ((value ?? 0) > 0 ? { onSelect: open, actionLabel: 'Show the list' } : {})
-
-/* ---------------------------------------------------------------- Daily report */
-
-/**
- * The client's Daily CRM Work Report: the seven figures in the client's order as summary tiles and Day closed, the team (who has
- * reported), task progress by stage, everyone's figures in a table, the lead sheet by status and the day's attendance. With one
- * recruiter picked, all of it is that person's alone. How each figure moved, who has not closed the day
- * and the interviews without a mode are the tiles' hover texts, not printed text.
- */
-export function DailyView({ report, allTime = false, roster, today, timeZone, scope, staff, onPickStaff, onDrill, onDrillClient, clientFilter = 'all', onSubmission, onHistory }: ViewProps) {
-  const single = !allTime && report.period.from === report.period.to
-  const todayOnly = single && report.period.to === today
-  const team = report.scope === 'team'
-  const cols = dailyCols(report.metrics, todayOnly)
-  const totals = totalCells(report, report.staff)
-  const vs = allTime ? {} : totalVs(report.metrics)
-  const label = vsLabel(report.period, today)
-  const interviews = metricOf(report.metrics, 'interviews')?.value ?? 0
-  const note = interviewsNote(report)
-  const tiles: StatTileData[] = cols.map(col => {
-    const value = totals[col.id] ?? 0
-    const caption = col.id === 'interviewsOnline' ? (interviews > 0 ? `of ${numberText(interviews)} interviews` : '') : changeLine(vs[col.id], label)
-    const title = [caption, col.id === 'interviewsOnline' ? note : ''].filter(Boolean).join('. ')
-    return { key: col.id, label: col.label, value: numberText(value), icon: ICONS[col.id], title: title || undefined, ...(col.drill ? opens(value, () => onDrill(col.drill!, null)) : {}) }
-  })
-  const compliance = single && team ? report.compliance : null
-  const mine = !team && single ? report.staff[0] : undefined
-  const closed = mine ? dayClosed(mine, true, timeZone) : null
-  if (compliance) tiles.push({ key: 'closed', label: 'Day closed', value: compliance.submitted, unit: `of ${compliance.expected}`, icon: CheckCircle2, tone: 'green', progress: { done: compliance.submitted, total: compliance.expected }, title: dayCloseTitle(compliance) })
-  else if (closed && closed.kind !== 'none') tiles.push({ key: 'closed', label: 'Day closed', value: closed.kind === 'submitted' ? 'Yes' : 'Not yet', icon: CheckCircle2, tone: closed.kind === 'submitted' ? 'green' : 'blue', title: closed.text })
-
-  // One recruiter picked: the Team board, the table and its heading are that person's alone (the roster only fills the filter's list).
-  const picked = team && staff ? report.staff.filter(row => row.id === staff) : []
-  const shown = team && staff ? (picked.length ? picked : roster.filter(row => row.id === staff)) : report.staff
-  const pickedName = staff ? shown[0]?.name : undefined
-  const figuresTitle = !team ? 'Your figures' : staff ? (pickedName ? `${pickedName}'s figures` : 'Their figures') : "Everyone's figures"
-  const groups: FigureGroup[] = figureGroups(shown, single, todayOnly).map(group => ({
-    key: group.key, title: group.title, tone: group.key === 'active' ? 'done' as const : undefined,
-    icon: group.key === 'active' ? <CheckCircle2 size={15} aria-hidden="true" /> : <Minus size={15} aria-hidden="true" />,
-    rows: group.rows.map((row): FigureRow => {
-      const state = dayClosed(row, single, timeZone)
-      const pill = <Badge tone={state.kind === 'submitted' ? 'green' : 'amber'} variant="chip">{state.text}</Badge>
-      const tail = state.kind === 'none' ? <span className="dw-none">{state.text}</span>
-        : state.kind === 'submitted' && onSubmission
-          ? <><button type="button" className="dwr-pillbtn" onClick={() => onSubmission(row.id)} aria-label={`${row.name}: ${state.text}. Show their report`}>{pill}</button>{row.changedSinceSubmit && <small className="dwr-changed" title={changedSinceText(row)}>changed</small>}</>
-          : pill
-      return { id: row.id, name: row.name, idle: row.idle, cells: dailyCells(row), tail }
-    }),
-  }))
-  const byClient = clientRows(report)
-  return <>
-    <Tiles tiles={tiles} label="The day's figures" />
-    {team && <PeopleBoard staff={shown} single={single} todayOnly={todayOnly} selected={staff || 'all'} onSelect={id => onPickStaff(id === 'all' ? '' : id)} />}
-    <StageProgressPanel report={report} onDrill={onDrill} />
-    <section className="dw-panel" aria-label={figuresTitle}>
-      <PanelHead title={figuresTitle} staff={staff} roster={roster} onPickStaff={onPickStaff} team={team} links={<>
-        {note && <button type="button" className="dwr-textlink" title={note} onClick={() => onDrill('interviews', null)}>Show the interviews</button>}
-        {onHistory && <button type="button" className="dwr-textlink" onClick={onHistory}>Submitted reports</button>}
-      </>} />
-      {groups.length === 0
-        ? <p className="dwb-none">Nobody in this selection.</p>
-        : <FigureTable caption="Daily CRM work report: each person's figures for the period" cols={cols} tailHead={single ? DAY_CLOSED_COL.label : undefined} groups={groups}
-          selectedId={staff} scope={scope} onDrill={onDrill} onPickName={team ? onPickStaff : undefined} />}
-    </section>
-    {byClient.length > 0 && showByClient(byClient, clientFilter) && onDrillClient && <section className="dw-panel" aria-label="By client">
-      <div className="dw-panel-head"><div><h2><Building2 size={16} aria-hidden="true" /> By client</h2></div></div>
-      <FigureTable caption="By client: the figures of the period for each client" cols={cols} tailHead="Total" tailNumeric nameHeader="Client" scope={`${scope}|clients`} onDrill={(metric, id) => id && onDrillClient(metric, id)}
-        groups={[{ key: 'clients', title: '', icon: null, rows: byClient.map((row): FigureRow => ({ id: row.id, name: row.name, cells: row.cells, tail: <strong className="tnum">{numberText(row.cells.total)}</strong> })) }]} />
-    </section>}
-    <LeadStatusPanel report={report} />
-    <AttendancePanel day={attendanceDay(report.period, allTime, today)} staff={staff} team={team} timeZone={timeZone} onPickStaff={onPickStaff} />
-  </>
-}
+export const opens = (value: number | null | undefined, open: () => void) => ((value ?? 0) > 0 ? { onSelect: open, actionLabel: 'Show the list' } : {})
 
 /* ---------------------------------------------------------------- Lead sheet monitoring */
 
@@ -221,36 +148,5 @@ export function LeadSheetView({ report, roster, today, scope, staff, onPickStaff
             <tbody>{status.map(item => <tr key={item.key}><th scope="row" className="dwr-status-name">{item.label}</th><td className="is-num tnum">{numberText(item.count)}</td><td className="is-num tnum">{item.pct}%</td></tr>)}</tbody></table>}
       </section>
       : <p className="dwr-quiet">{NEEDS_SERVER}</p>}
-  </>
-}
-
-/* ---------------------------------------------------------------- Candidate monitoring */
-
-/** Candidates and tasks only: who holds how many at each of the 12 stages (and none on an order yet), and their tasks. */
-export function CandidateMonitoringView({ report, roster, scope, staff, onPickStaff, onDrill }: ViewProps) {
-  const cols = taskStageCols(report)
-  const hasStages = !!report.stages && cols.length > 3
-  const hasTasks = !!report.tasks || report.staff.some(row => row.tasks)
-  if (!hasStages && !hasTasks) return <Empty title={NEEDS_SERVER} />
-  const team = report.scope === 'team'
-  const totals = taskStageTotals(report)
-  const { inProgress, notOnOrder } = stageSummary(report)
-  const tiles: StatTileData[] = [
-    { key: 'progress', label: 'Candidates in progress', value: numberText(inProgress), icon: Layers, title: notOnOrder > 0 ? `Right now, whatever the period. ${numberText(notOnOrder)} not on an order yet` : 'Right now, whatever the period' },
-    { key: 'done', label: 'Tasks done', value: numberText(totals.done), icon: CheckCircle2, tone: 'green', title: 'Completed in this period', ...opens(totals.done, () => onDrill('tasksDone', null)) },
-    { key: 'pending', label: 'Tasks pending', value: numberText(totals.pending), icon: ClipboardCheck, title: 'Open now and not yet due, whatever the period', ...opens(totals.pending, () => onDrill('tasksPending', null)) },
-    { key: 'overdue', label: 'Tasks overdue', value: numberText(totals.overdue), icon: Clock3, tone: (totals.overdue ?? 0) > 0 ? 'red' : 'green', title: 'Open now and past their time, whatever the period', ...opens(totals.overdue, () => onDrill('tasksOverdue', null)) },
-  ]
-  const rows: FigureRow[] = taskStageRows(report).map(row => ({ id: row.id, name: row.name, cells: row.cells, tail: <strong className="tnum">{numberText(row.cells.total)}</strong> }))
-  const groups: FigureGroup[] = rows.length ? [{ key: 'all', title: '', icon: null, rows }] : []
-  return <>
-    <Tiles tiles={tiles} label="Candidates and tasks at a glance" />
-    <section className="dw-panel" aria-label="Everyone's candidates">
-      <PanelHead title="Everyone's candidates" staff={staff} roster={roster} onPickStaff={onPickStaff} team={team} />
-      {groups.length === 0
-        ? <p className="dwb-none">Nobody in this selection.</p>
-        : <FigureTable caption="Candidate monitoring: each person's tasks and how many candidates are at each stage right now" cols={cols} tailHead={hasStages ? STAGE_TOTAL_COL.label : undefined} tailWidth={STAGE_TOTAL_COL.width} tailNumeric groups={groups}
-          selectedId={staff} scope={scope} onDrill={onDrill} onPickName={team ? onPickStaff : undefined} dense nameWidth={200} />}
-    </section>
   </>
 }

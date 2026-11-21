@@ -103,7 +103,12 @@ export function buildRow(person: StaffAttendance, policy: PolicyDay | null, day:
   let kind: AttendanceKind | null = policy ? kindOfCode(policy.status) : null
   // The policy calls a day "absent" before it has finished; someone logged in, or a day still open, is not absent
   if (kind === 'absent' && (open || (!attended && day >= today) || policy?.provisional)) kind = attended ? 'present' : 'pending'
-  if (kind === 'missed' && !attended && day < today) kind = 'absent'
+  // "Missed check-out" is for someone who DID log in and never logged out on a finished day. Nobody who has not clocked in is ever
+  // "missed" (a past day without any login is absent, today without one is "not clocked in yet"), and someone still logged in today has missed nothing yet.
+  if (kind === 'missed') {
+    if (!attended) kind = day < today ? 'absent' : 'pending'
+    else if (open && day >= today) kind = 'present'
+  }
   if (!kind) kind = attended ? 'present' : day >= today ? 'pending' : 'absent'
   // A day off with no check-ins stays a day off; a check-in on it is just attendance
   if ((kind === 'off' || kind === 'holiday' || kind === 'leave') && attended && !policy) kind = 'present'
@@ -134,7 +139,7 @@ export function buildRow(person: StaffAttendance, policy: PolicyDay | null, day:
 }
 
 /** Roles that have no attendance of their own (an Admin does not clock in; an MD does, like a recruiter). */
-const NO_OWN_ATTENDANCE = new Set(['admin'])
+export const NO_OWN_ATTENDANCE = new Set(['admin'])
 
 /**
  * The rows of the table: everyone the check-in response lists (or only `staff`), the policy record folded in where it is there, ordered by
@@ -151,7 +156,7 @@ export function buildAttendanceRows({ day, today, staff = '', attendance, month 
 export function attendanceCounts(rows: AttendanceRow[]): AttendanceCounts {
   const counts: AttendanceCounts = { present: 0, late: 0, absent: 0, leave: 0, stillIn: 0, total: rows.length }
   for (const row of rows) {
-    if (row.kind === 'present' || row.kind === 'late' || row.kind === 'early' || row.kind === 'duty' || row.kind === 'missed') counts.present += 1
+    if (row.kind === 'present' || row.kind === 'late' || row.kind === 'early' || row.kind === 'duty' || (row.kind === 'missed' && row.sessions.length > 0)) counts.present += 1
     if (row.kind === 'late') counts.late += 1
     if (row.kind === 'absent') counts.absent += 1
     if (row.kind === 'leave') counts.leave += 1
@@ -171,4 +176,12 @@ export function punctualityText(row: Pick<AttendanceRow, 'lateMinutes' | 'earlyM
 export function minutesText(minutes: number) {
   const value = Math.max(0, Math.round(minutes || 0))
   return value < 60 ? `${value}m` : `${Math.floor(value / 60)}h ${String(value % 60).padStart(2, '0')}m`
+}
+
+/** The live line under the status: where the person is right now ("Logged in now", "Logged out", "Not clocked in"). */
+export function presenceLabel(row: Pick<AttendanceRow, 'stillIn' | 'sessions' | 'kind'>): { label: string; live: boolean } {
+  if (row.stillIn) return { label: 'Logged in now', live: true }
+  if (row.sessions.length) return { label: 'Logged out', live: false }
+  if (row.kind === 'leave' || row.kind === 'off' || row.kind === 'holiday') return { label: '', live: false }
+  return { label: 'Not clocked in', live: false }
 }

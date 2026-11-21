@@ -57,22 +57,24 @@ test('the sidebar has one Reports item and /staff-report only redirects', async 
   assert.doesNotMatch(page, /Weekly staff report|navigate\('\/staff-report'\)/)
 })
 
-test('the page tabs are the three report views and the Client tracker; Accounts and the legacy reports are behind constants', () => {
-  const three = ['Daily report', 'Lead sheet monitoring', 'Candidate monitoring', 'Client tracker']
+test('the page tabs are Task report, Lead sheet report, Attendance and the Client tracker, in that order; Accounts and the legacy reports are behind constants', () => {
+  const three = ['Task report', 'Lead sheet report', 'Attendance', 'Client tracker']
   assert.deepEqual(t.pageTabs(false).map(x => x.label), three)
   assert.deepEqual(t.pageTabs(true).map(x => x.label), three) // even for the admin: Accounts is not a visible tab
   assert.equal(t.SHOW_ACCOUNTS_TAB, false)
   assert.equal(t.SHOW_LEGACY_REPORTS, false)
   // switched on, they come back
-  assert.deepEqual(t.pageTabs(true, false, true).map(x => x.key), ['daily', 'lead', 'stages', 'tracker', 'accounts'])
-  assert.deepEqual(t.pageTabs(true, true, true).map(x => x.key), ['daily', 'lead', 'stages', 'tracker', 'accounts', 'legacy'])
-  assert.deepEqual(t.pageTabs(false, false, true).map(x => x.key), ['daily', 'lead', 'stages', 'tracker']) // never for a non-admin
+  assert.deepEqual(t.pageTabs(true, false, true).map(x => x.key), ['daily', 'lead', 'attendance', 'tracker', 'accounts'])
+  assert.deepEqual(t.pageTabs(true, true, true).map(x => x.key), ['daily', 'lead', 'attendance', 'tracker', 'accounts', 'legacy'])
+  assert.deepEqual(t.pageTabs(false, false, true).map(x => x.key), ['daily', 'lead', 'attendance', 'tracker']) // never for a non-admin
 })
 
-test('which tab an address opens: no tab is the Daily report; old Fee/Advance collections links still open for the admin; old report keys fall back', () => {
+test('which tab an address opens: no tab is the Task report (so is the old Candidate monitoring link); old Fee/Advance collections links still open for the admin; old report keys fall back', () => {
   assert.equal(t.pageTabFromParams(q(''), true, false), 'daily')
   assert.equal(t.pageTabFromParams(q('tab=lead'), false, false), 'lead')
-  assert.equal(t.pageTabFromParams(q('tab=stages'), false, false), 'stages')
+  assert.equal(t.pageTabFromParams(q('tab=attendance'), false, false), 'attendance')
+  assert.equal(t.pageTabFromParams(q('tab=stages'), false, false), 'daily') // the removed Candidate monitoring tab opens the Task report
+  assert.equal(t.pageTabFromParams(q('from=2026-11-20&to=2026-11-20'), true, false), 'daily') // the end-of-day notification link
   assert.equal(t.pageTabFromParams(q('tab=tracker'), false, false), 'tracker') // every signed-in person; the server limits what a recruiter sees
   for (const tab of ['accounts', 'collections', 'advance']) {
     assert.equal(t.pageTabFromParams(q(`tab=${tab}`), true, false), 'accounts', tab)

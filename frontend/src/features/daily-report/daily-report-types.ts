@@ -89,6 +89,9 @@ export interface LeadSheetSummary {
   /** Additive: leads never contacted, by the Lead sheet screen's own rule (its Not contacted card). */
   neverContacted?: number
   byStatus: { key: string; label: string; count: number }[]
+  /** Additive: the columns of the lead matrix (the nine statuses, then the status templates that hold leads) and every recruiter's leads by column; the row 'unassigned' is the leads nobody owns. */
+  statusColumns?: { key: string; label: string; template?: boolean }[]
+  byStatusPerStaff?: { id: string; counts: Record<string, number> }[]
   /** Additive, period-aware: new leads, leads assigned and not yet contacted in the period, the backlog (assigned, never contacted), and the same figures for the previous period. */
   newInPeriod?: number; assignedInPeriod?: number; notContactedInPeriod?: number; backlog?: number
   previous?: { assignedInPeriod: number; contacted: number; newInPeriod: number }
@@ -96,6 +99,8 @@ export interface LeadSheetSummary {
 export interface StageTotal { no: number; key: string; label: string; count: number }
 /** One of the 13 stages over the period (additive `stageFlow`): stage records completed in it, and how many of those ended the placement. */
 export interface StageFlow { no: number; key: string; label: string; completed: number; stopped: number }
+/** Per credited person (the one who completed the stage record), stages 1 to 13 as string keys: completed in the period, and how many of those ended the placement. */
+export interface StageFlowStaff { id: string; completed: Record<string, number>; stopped: Record<string, number> }
 export interface StageBreakdown { totals: StageTotal[]; perStaff: { id: string; counts: Record<string, number>; total: number }[] }
 
 export interface DailyReport {
@@ -115,6 +120,8 @@ export interface DailyReport {
   stages?: StageBreakdown
   /** Additive: per stage 1 to 13, the stage records completed in the period and how many of those ended the placement. */
   stageFlow?: StageFlow[]
+  /** Additive: the same per credited person (the Task report's matrix in its Completed mode). */
+  stageFlowStaff?: StageFlowStaff[]
   byClient?: ClientRow[]
 }
 

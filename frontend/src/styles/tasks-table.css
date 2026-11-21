@@ -31,7 +31,7 @@
   :root .dw .tw-table.dw-table.dw-main { --tw-pad-l: 6px; --tw-pad-r: 6px; width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
 
   /* ---- header: 44px, one line, one left edge with the cells ---- */
-  :root .dw .tw-table.dw-table.dw-main thead th { height: 44px; padding: 0 8px 0 var(--tw-pad-l); overflow: hidden; border-left: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1; text-align: center; text-transform: uppercase; text-wrap: nowrap; white-space: nowrap; overflow-wrap: normal; }
+  :root .dw .tw-table.dw-table.dw-main thead th { height: 44px; padding: 0 var(--tw-pad-r) 0 var(--tw-pad-l); overflow: hidden; border-left: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1; text-align: center; text-transform: uppercase; text-wrap: nowrap; white-space: nowrap; overflow-wrap: normal; }
   :root .dw .tw-table.dw-table.dw-main thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
 
   /* ---- body: rows of at least 60px that grow with a second line, vertically centred, one padding, a visible var(--table-line) line under EVERY row (the last one too), no column lines ---- */
@@ -42,7 +42,7 @@
   :root .dw .tw-table.dw-table.dw-main .dw-row:hover > td.is-actions { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
 
   /* S NO: narrow, tabular numerals (every column is centred, header and cells share the centre) */
-  :root .dw .tw-table.dw-table.dw-main :is(th, td):first-child { padding-inline: 6px; text-align: center; }
+  :root .dw .tw-table.dw-table.dw-main :is(th, td):first-child { padding-inline: 8px; text-align: center; }
   :root .dw .tw-table.dw-table.dw-main td.is-num { font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-muted); }
 
   /* text columns: wrap onto a second line, and only after two lines an ellipsis (the full text is always the tooltip) */

@@ -1,0 +1,14 @@
+/* Reports > Lead sheet report (features/daily-report/report-lead.tsx). The table itself is the Task report's (.dwm-table in report-tables.css); only the extras are here. */
+
+/* a status heading is one or two lines, broken between words only; each line never wraps */
+html:root:root:root .dwr .dwl-table .dwl-h { display: block; font-size: 11px; font-weight: 700; letter-spacing: .03em; line-height: 1.25; white-space: nowrap; }
+
+/* the Contacted % figure: the meter beside its number, centred like every other figure */
+html:root:root:root .dwr .dwl-table td.is-num .dwr-pct { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; }
+html:root:root:root .dwr .dwl-table td.is-num .dwr-pct .dwb-meter { flex: 0 1 44px; min-width: 24px; }
+
+html:root:root:root .dwr .dwl-panel .dw-table .is-idle .dwr-who { opacity: .75; }
+
+/* "Calls and follow-ups": two plain figures under the status table */
+html:root:root:root .dwr .dwr-lead-calls { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0; padding: 12px 4px 2px; font-size: 13px; color: var(--text-muted, inherit); }
+html:root:root:root .dwr .dwr-lead-calls b { color: var(--text-main, inherit); font-size: 14px; }

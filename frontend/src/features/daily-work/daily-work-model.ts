@@ -540,7 +540,7 @@ export const TASK_CARD_BREAKPOINT = 1080
  * table 1111px) and shows the TODAY chip inside the STAGE cell, under the stage chip and its dashes. A phone card has a TODAY row of its own.
  */
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
-  { key: 'no', title: 'S NO', width: 42 },
+  { key: 'no', title: 'S NO', width: 48 },
   { key: 'doc', title: 'DOC', width: 90 },
   { key: 'client', title: 'CLIENT', width: 99 },
   { key: 'position', title: 'JOB', width: 92 },
@@ -549,9 +549,9 @@ export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
   { key: 'agency', title: 'AGENCY', width: 99 },
   { key: 'stage', title: 'STAGE', width: 106 },
   { key: 'today', title: 'TODAY', width: 104, roomy: true },
-  { key: 'remarks', title: 'REMARKS', width: 103 },
-  { key: 'notes', title: 'NOTES', width: 140 },
-  { key: 'actions', title: 'Actions', width: 116, quiet: true },
+  { key: 'remarks', title: 'REMARKS', width: 98 },
+  { key: 'notes', title: 'NOTES', width: 134 },
+  { key: 'actions', title: 'Actions', width: 124, quiet: true },
 ]
 
 /** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own); `roomForToday` keeps the TODAY column. */

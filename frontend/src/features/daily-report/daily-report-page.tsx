@@ -10,7 +10,8 @@ import { MyDayCard } from './my-day-card'
 import { PeriodRow } from './daily-report-toolbar'
 import { HistoryDrawer, SubmissionPanel } from './submission-panels'
 import { LiveBadge } from './report-parts'
-import { CandidateMonitoringView, DailyView, LeadSheetView } from './report-views'
+import { LeadReportView } from './report-lead'
+import { TaskReportView } from './report-task'
 import { useDailyReport } from './use-daily-report'
 import {
   AGENCY_TIMEZONE, apiQuery, asksAllTime, choiceFromParams, DEFAULT_CHOICE, dayInZone, drillTitle, isOutdatedServer, parseChoice, resolveRange, serialiseChoice, type RangeChoice,
@@ -21,9 +22,10 @@ import '@/styles/daily-work.css'
 import '@/styles/daily-work-board.css'
 import '@/styles/daily-report.css'
 
-export type ReportView = 'daily' | 'lead' | 'stages'
+/** 'daily' is the Task report (the default tab), 'lead' the Lead sheet report. */
+export type ReportView = 'daily' | 'lead'
 const STORAGE_KEY = 'crm.daily-report.range'
-const TITLES: Record<ReportView, string> = { daily: 'Report', lead: 'Lead sheet monitoring', stages: 'Candidate monitoring' }
+const TITLES: Record<ReportView, string> = { daily: 'Task report', lead: 'Lead sheet report' }
 
 function readChoice(): RangeChoice {
   try { return parseChoice(window.localStorage.getItem(STORAGE_KEY)) } catch { return DEFAULT_CHOICE }
@@ -38,9 +40,9 @@ function Skeleton() {
 }
 
 /**
- * The three monitoring views of the Reports page (Daily CRM Work Report, Lead sheet monitoring, Candidate monitoring) share
+ * The two period views of the Reports page (Task report, Lead sheet report) share
  * one live read: the same period, staff and client choices, one header and one period row. The page keeps its state when you
- * move between the tabs. `tabs` is the tab strip the Reports screen puts under the header.
+ * move between the two tabs. `tabs` is the tab strip the Reports screen puts under the header.
  */
 export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs: ReactNode }) {
   const store = useStore()
@@ -118,9 +120,8 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
 
     {!data && !error && <Skeleton />}
     {data && common && <div className={stale ? 'dwr-body is-stale' : 'dwr-body'} aria-busy={stale}>
-      {view === 'daily' && <DailyView {...common} />}
-      {view === 'lead' && <LeadSheetView {...common} />}
-      {view === 'stages' && <CandidateMonitoringView {...common} />}
+      {view === 'daily' && <TaskReportView {...common} />}
+      {view === 'lead' && <LeadReportView {...common} />}
       {view === 'daily' && data.scope === 'self' && <MyDayCard today={today} timeZone={timeZone} refreshKey={state.version} onSubmitted={state.refresh} focus={params.get('focus') === 'myday'} />}
     </div>}
 
