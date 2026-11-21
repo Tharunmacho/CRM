@@ -500,7 +500,9 @@ def _walk(value, wanted: set[str], found: list):
     value = _dump(value)
     if isinstance(value, dict):
         for key, inner in value.items():
-            if re.sub(r"[^a-z0-9]", "", str(key).lower()) in wanted and isinstance(_dump(inner), (str, int, date)):
+            # A flag is never a value: the reader's "field_review": {"aadhaar_number": true} (the number needs a look) is not the number.
+            if (re.sub(r"[^a-z0-9]", "", str(key).lower()) in wanted and isinstance(_dump(inner), (str, int, date))
+                    and not isinstance(_dump(inner), bool)):
                 found.append(_dump(inner))
             else:
                 _walk(inner, wanted, found)

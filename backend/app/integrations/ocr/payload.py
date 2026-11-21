@@ -36,6 +36,7 @@ MIN_DPI = 150
 TARGET_BYTES = 3_000_000  # above this the pictures are re-encoded
 QUALITY = 85
 _COVER = 0.85            # a picture that covers this share of the page makes it a scanned page
+_LAYER = 0.005           # another picture covering this share of the page is part of what the page shows (see _layers)
 _TURNS = {90: Image.Transpose.ROTATE_90, 180: Image.Transpose.ROTATE_180, 270: Image.Transpose.ROTATE_270}  # counter-clockwise
 
 
@@ -73,6 +74,19 @@ def _largest_image(page) -> tuple[dict | None, float]:
             best, best_area = info, area
     page_area = max(1.0, page.rect.width * page.rect.height)
     return best, best_area / page_area
+
+
+def _layers(page) -> list[dict]:
+    """Every picture of the page that is a real part of what it shows (not a speck). A page of ONE picture is a plain scan. A scan
+    made by a layered ("mixed raster content") scanner app is a background picture with the ink (the text, the stamps, the
+    signatures) stored as separate 1-bit pictures drawn over it: keeping only the largest picture keeps a nearly blank page."""
+    page_area = max(1.0, page.rect.width * page.rect.height)
+    out = []
+    for info in page.get_image_info(xrefs=True):
+        x0, y0, x1, y1 = info["bbox"]
+        if info.get("xref") and max(0.0, x1 - x0) * max(0.0, y1 - y0) / page_area >= _LAYER:
+            out.append(info)
+    return out
 
 
 def _stored_picture_bytes(src) -> int:
@@ -118,12 +132,14 @@ def _picture(src, xref: int):
     return Image.frombytes(mode, (pixmap.width, pixmap.height), pixmap.samples), None, current, pixmap.width, pixmap.height
 
 
-def _scan_page(src, out, page, info: dict, turn: int, force: bool, stats: dict, *, max_side: int, quality: int, min_dpi: int) -> None:
+def _scan_page(src, out, page, info: dict, turn: int, force: bool, stats: dict, *, max_side: int, quality: int, min_dpi: int,
+               layered: int = 0) -> None:
     width, height = page.rect.width, page.rect.height
     if turn in (90, 270):
         width, height = height, width
     limit = max(max_side, min(MAX_SIDE_CAP, math.ceil(min_dpi * max(width, height) / 72)))
-    found = _picture(src, info["xref"]) if page.rotation == 0 and _axis_aligned(info) else None
+    # A layered scan is drawn as it is shown (every layer), at the sharpest layer's resolution (never above the limit).
+    found = _picture(src, info["xref"]) if not layered and page.rotation == 0 and _axis_aligned(info) else None
     stream, pixmap, recoded = None, None, False
     if found is not None:
         image, jpeg, current, pixels_w, pixels_h = found
@@ -151,7 +167,7 @@ def _scan_page(src, out, page, info: dict, turn: int, force: bool, stats: dict, 
             else:
                 stream, recoded = encoded, True
     else:  # turned, mirrored, masked or an unusual colour space in the original: draw the page as it is shown and keep that
-        target = min(max(info["width"], info["height"]) or limit, limit)
+        target = min(max(layered, info["width"], info["height"]) or limit, limit)
         scale = target / max(page.rect.width, page.rect.height)
         rendered = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False)
         image = Image.frombytes("RGB", (rendered.width, rendered.height), rendered.samples)
@@ -173,7 +189,11 @@ def _build(src, turns: list[int], force: bool, *, max_side: int, quality: int, m
             page, turn = src[index], turns[index] % 360
             info, cover = _largest_image(page)
             if info is not None and info.get("xref") and cover >= _COVER:
-                _scan_page(src, out, page, info, turn, force, stats, max_side=max_side, quality=quality, min_dpi=min_dpi)
+                layers = _layers(page)
+                # More than one picture: the page is their composite, so it is drawn (see _layers).
+                sharpest = max((max(item["width"], item["height"]) for item in layers), default=0) if len(layers) > 1 else 0
+                _scan_page(src, out, page, info, turn, force, stats, max_side=max_side, quality=quality, min_dpi=min_dpi,
+                           layered=sharpest)
                 stats["scans"] += 1
             else:
                 out.insert_pdf(src, from_page=index, to_page=index)
@@ -272,8 +292,10 @@ def unsendable(source: bytes, candidates: dict[int, tuple], unread: set[int] | N
                                 dropped[number] = "blank"
                                 continue
                     if scanned:
-                        # The stored bytes of the picture (and its size): identical scans give identical bytes, and nothing is decoded.
-                        digest = hashlib.sha256(src.xref_stream_raw(info["xref"])).hexdigest() + f":{info['width']}x{info['height']}"
+                        # The stored bytes of every picture of the page (and their sizes): identical scans give identical bytes, and
+                        # nothing is decoded. The ink layers of a layered scan count, so two pages with one background differ.
+                        digest = "|".join(hashlib.sha256(src.xref_stream_raw(layer["xref"])).hexdigest() + f":{layer['width']}x{layer['height']}"
+                                          for layer in sorted(_layers(page), key=lambda item: item["xref"]) or [info])
                         key = (tuple(candidates[number]), page.rotation, digest)
                         if key in seen:
                             dropped[number] = f"duplicate of page {seen[key]}"

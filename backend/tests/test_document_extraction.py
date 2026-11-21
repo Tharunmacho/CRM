@@ -506,8 +506,10 @@ def test_provider_success_with_incomplete_page_coverage_requires_review(environm
     output = environment.extract(data)
 
     assert output["status"] == "needs_review"
-    assert output["extractions"] == {}
-    assert output["warnings"]
+    # The reader did answer: what it found is applied (never the whole answer thrown away), the pages are named for review.
+    assert output["extractions"]["resume"]["fields"]
+    assert any("answered for only part of the resume pages 1-2" in warning for warning in output["warnings"])
+    assert output["coverage"]["issues"] and output["coverage"]["complete"] is False
     assert environment.saved[-1]["provider_jobs"]["resume"]["result"] == payload
     assert environment.extract(data)["status"] == "needs_review"
     assert len(environment.submissions) == len(environment.polls) == 1
@@ -790,3 +792,174 @@ def test_explicit_retry_preserves_paid_late_parts_even_when_no_primary_remains(e
     assert state["provider_jobs"]["resume++"]["job_id"] == paid["job_id"]
     assert state["provider_jobs"]["resume++"]["result"] == paid["result"]
     assert len(environment.submissions) == len(environment.polls) == 1
+
+
+# ---------------------------------------------------------------------------- partial answers are kept; supporting pages are read
+
+APPLICATION_FORM = """JOB APPLICATION FORM
+Position applied for: Mechanical fitter
+Full Name: Alex Example
+Father's Name: Parent Example
+Date of Birth: 01 January 1990
+Languages known: English, Hindi
+Salary expected: 500 per month
+Educational qualification: SSLC
+"""
+EXPERIENCE_LETTER = """To whom it may concern
+This is to certify that Alex Example has worked with us as a Fitter from 01 March 2020 to 31 March 2024.
+Designation: Fitter. Human Resources Manager, Example Contracting Company
+"""
+GATE_PASS = """Plant gate pass reference sheet number 77 issued for access to the maintenance workshop on the second shift only"""
+OTHER_PERSON_LETTER = """To whom it may concern
+This is to certify that Brian Different has worked with us as a Welder from 01 March 2020 to 31 March 2024.
+Name: Brian Different
+Designation: Welder. Human Resources Manager, Another Contracting Company
+"""
+
+
+def per_job_answers(environment, build):
+    """Each job gets its own answer, made by ``build(mode, pages, number)`` (number counts the jobs of the mode); a dict with a
+    ``__status__`` key sets the job's status instead."""
+    sizes, taken = {}, {}
+    original = environment.jobs.submit
+
+    def submit(document, *, mode, idempotency_key):
+        accepted = original(document, mode=mode, idempotency_key=idempotency_key)
+        with fitz.open(stream=document.data, filetype="pdf") as sent:
+            taken[mode] = taken.get(mode, 0) + 1
+            sizes[accepted.job_id] = (mode, sent.page_count, taken[mode])
+        return accepted
+
+    def get(job_id):
+        mode, count, number = sizes[job_id]
+        answer = build(mode, count, number)
+        status = answer.pop("__status__", "succeeded") if isinstance(answer, dict) else "succeeded"
+        return SimpleNamespace(status=status, result=answer)
+
+    environment.jobs.submit, environment.jobs.get = submit, get
+    return sizes
+
+
+def resume_answer(count, **changes):
+    answer = result("resume", count)
+    for name, value in changes.items():
+        if isinstance(value, dict):
+            answer.setdefault(name, {}).update(value)
+        else:
+            answer[name] = value
+    return answer
+
+
+@pytest.mark.parametrize("kind", ["resume", "aadhaar"])
+def test_a_partial_answer_is_applied_with_a_review_note_naming_the_pages(environment, kind):
+    data = pdf(CV, CV) if kind == "resume" else pdf(AADHAAR, AADHAAR_BACK)
+    answer = result(kind, 2)
+    answer["pages"][1]["text"] = ""  # the reader answered, but one page came back empty
+    environment.results[kind] = answer
+
+    output = environment.extract(data)
+
+    assert output["status"] == "needs_review"
+    assert output["extractions"][kind]["fields"]["name"] == "Alex Example"
+    note = next(warning for warning in output["warnings"] if "answered for only part of" in warning)
+    assert "pages 1-2" in note and "check the rest" in note
+    assert any("answered for only part of" in issue for issue in output["coverage"]["issues"])
+    assert output["extractions"][kind]["raw"] == answer  # what the reader returned is stored exactly
+
+
+def test_an_answer_with_nothing_in_it_applies_nothing_and_says_so_with_a_review_note(environment):
+    answer = result("resume", 2)
+    answer["pages"][1]["text"] = ""
+    answer.update(name=None, designation=None, total_experience_months=0)
+    environment.results["resume"] = answer
+
+    output = environment.extract(pdf(CV, CV))
+
+    assert output["status"] == "needs_review" and output["extractions"] == {}
+    assert any("returned nothing usable for the resume pages 1-2" in warning for warning in output["warnings"])
+
+
+def test_application_form_letters_and_unidentified_pages_are_read_along_with_the_resume(environment):
+    sizes = per_job_answers(environment, lambda mode, count, number: (
+        resume_answer(count) if number == 1 else
+        resume_answer(count, name="Alexander Sample", personal_info={"father_name": "Parent Example", "marital_status": "single"})))
+
+    output = environment.extract(pdf(CV, APPLICATION_FORM, EXPERIENCE_LETTER, GATE_PASS), candidate_filing=True)
+
+    # The identified page goes in the resume's own job; the other three pages go together in a job of their own.
+    assert sorted(count for mode, count, _n in sizes.values() if mode == "resume") == [1, 3]
+    resume = output["extractions"]["resume"]
+    assert resume["selected_pages"] == [1]  # filing is unchanged: the resume document is still the identified page only
+    assert resume["source"]["selected_pages"] == [1, 2, 3, 4]
+    assert resume["source"]["provider_page_sources"] == [1, 2, 3, 4]
+    # What only the supporting pages gave is applied; where they disagree, the identified page's value is the one kept ...
+    assert resume["fields"]["name"] == "Alex Example"
+    assert resume["fields"]["father_name"] == "Parent Example"
+    # ... and the disagreement is flagged for a person.
+    assert any("different values for name" in issue for issue in output["coverage"]["issues"])
+    assert output["status"] == "needs_review"
+    pages = output["coverage"]["pages"]
+    assert pages["best_effort"] == [2, 3, 4] and pages["unresolved"] == [] and pages["ignored"] == []
+    assert not any(page["blocking"] for page in pages["not_sent"])
+    assert any("Pages 2-4 are not a résumé, passport or Aadhaar page" in warning for warning in output["warnings"])
+    assert environment.saved[-1]["extra_read_plan"] == {"v": 1, "resume": [2, 3, 4]}
+
+
+def test_an_application_form_on_its_own_is_read_and_a_second_visit_pays_for_nothing_again(environment):
+    environment.results["resume"] = result("resume", 1)
+    data = pdf(APPLICATION_FORM)
+
+    output = environment.extract(data, candidate_filing=True)
+
+    assert output["status"] == "complete"
+    assert output["extractions"]["resume"]["fields"]["name"] == "Alex Example"
+    assert output["extractions"]["resume"]["selected_pages"] == []  # no resume page: nothing is filed as the resume
+    assert output["coverage"]["pages"]["best_effort"] == [1]
+    assert len(environment.submissions) == 1
+    # Replaying the same visit (from the saved state) uses the saved plan and the saved result.
+    again = environment.extract(data, candidate_filing=True, state=deepcopy(environment.saved[-1]))
+    assert again["extractions"]["resume"]["fields"] == output["extractions"]["resume"]["fields"]
+    assert len(environment.submissions) == 1
+
+
+def test_letters_and_unidentified_pages_of_a_file_without_an_identified_page_are_not_sent(environment):
+    # Nothing in the file says it is a candidate's: an unrelated letter is not paid for as a resume.
+    output = environment.extract(pdf(EXPERIENCE_LETTER, GATE_PASS), candidate_filing=True)
+
+    assert environment.submissions == []
+    assert output["extractions"] == {}
+
+
+def test_a_page_that_names_another_person_is_not_read_into_this_candidate(environment):
+    sizes = per_job_answers(environment, lambda mode, count, number: resume_answer(count))
+    cv = CV.replace("Alex Example", "Name: Alex Example")
+
+    output = environment.extract(pdf(cv, OTHER_PERSON_LETTER, GATE_PASS), candidate_filing=True)
+
+    assert sorted(count for mode, count, _n in sizes.values() if mode == "resume") == [1, 1]
+    assert output["coverage"]["pages"]["best_effort"] == [3]
+    assert 2 in output["coverage"]["pages"]["unresolved"] + output["coverage"]["pages"]["ignored"]
+
+
+def test_pages_beyond_the_limit_are_left_for_a_person_not_silently_sent(environment):
+    environment.settings.veris_extra_read_pages = 1
+    per_job_answers(environment, lambda mode, count, number: resume_answer(count))
+
+    output = environment.extract(pdf(CV, APPLICATION_FORM, EXPERIENCE_LETTER), candidate_filing=True)
+
+    assert output["coverage"]["pages"]["best_effort"] == [2]  # the application form first
+    assert 3 in output["coverage"]["pages"]["ignored"] + output["coverage"]["pages"]["unresolved"]
+
+
+def test_a_failed_read_of_the_supporting_pages_keeps_the_resume_and_flags_the_pages(environment):
+    per_job_answers(environment, lambda mode, count, number: resume_answer(count) if number == 1 else {"__status__": "failed"})
+
+    output = environment.extract(pdf(CV, APPLICATION_FORM, GATE_PASS), candidate_filing=True, final_attempt=True)
+
+    assert output["status"] == "needs_review"
+    assert output["extractions"]["resume"]["fields"]["name"] == "Alex Example"
+    assert output["extractions"]["resume"]["source"]["selected_pages"] == [1]
+    note = next(warning for warning in output["warnings"] if "could not read them" in warning)
+    assert "Pages 2-3" in note
+    assert output["coverage"]["pages"]["best_effort"] == []
+    assert any("Pages 2-3" in issue for issue in output["coverage"]["issues"])

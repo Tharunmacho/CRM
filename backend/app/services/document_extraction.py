@@ -1038,9 +1038,10 @@ def _merge_kind(kind: str, record: dict, state: dict, save) -> dict | None:
     record["status"] = "succeeded"
     if not covered:
         record["coverage_status"] = "needs_review"
-        # A passport answer that is missing a page (a back page that came back without text) still holds what the other page
-        # gave: it is merged and used, flagged for review, never thrown away. Any other kind waits for the page.
-        if _mode(kind) != "passport" or not any(_found("passport", chunk["result"]) for chunk in chunks):
+        # An answer that is missing a page (a passport back page that came back without text, a résumé page the reader left
+        # empty) still holds what the other pages gave: it is merged and used, flagged for review, never thrown away.
+        # Only an answer in which nothing at all was found is given up.
+        if not any(_found(_mode(kind), chunk["result"]) for chunk in chunks):
             return None
     merged, conflicts, notes = merge_results(_mode(kind), parts)
     record["result"] = merged
@@ -1050,8 +1051,10 @@ def _merge_kind(kind: str, record: dict, state: dict, save) -> dict | None:
         "conflicts": conflicts, "notes": notes,
     }
     for chunk in chunks:
-        if not chunk.get("provider_page_sources"):
-            chunk.pop("result", None)  # split-view chunks retain their exact provider payload as well
+        # Split-view chunks retain their exact provider payload as well; so does every chunk of an answer that did not cover its
+        # pages, so that an explicit retry reads the chunk that came back short again and keeps the paid work of the others.
+        if covered and not chunk.get("provider_page_sources"):
+            chunk.pop("result", None)
     return merged
 
 
@@ -1322,7 +1325,8 @@ def _cross_check(kind: str, patterns: dict, payload: dict) -> dict:
 
 def _coverage(report: dict, selected_by_kind: dict, extractions: dict, *, settings, chosen: bool = False,
               probes: dict | None = None, review: list[str] | None = None,
-              page_reasons: dict[int, str] | None = None, hinted: set[int] | frozenset = frozenset()) -> tuple[dict, list[str], list[str]]:
+              page_reasons: dict[int, str] | None = None, hinted: set[int] | frozenset = frozenset(),
+              best_effort: list[int] | None = None) -> tuple[dict, list[str], list[str]]:
     """The account of what was sent and what became of every Veris field, and the reasons (if any) to review."""
     sent = sorted({page for pages in selected_by_kind.values() for page in pages})
     not_sent = [] if chosen else _page_notes(report, set(sent), page_reasons, hinted)
@@ -1379,7 +1383,10 @@ def _coverage(report: dict, selected_by_kind: dict, extractions: dict, *, settin
         "pages": {"total": report.get("page_count"), "sent": sent, "not_sent": not_sent,
                   "ignored": ignored, "unresolved": unresolved,
                   # Pages the local check could not identify, sent to a mode as candidates; the reader decides.
-                  "probed": probed},
+                  "probed": probed,
+                  # Pages that are none of the three kinds (application form, letters, cards, unidentified pages), read along
+                  # with the résumé so that nothing on them is lost; what they gave never replaces a value of the identified pages.
+                  "best_effort": sorted(set(best_effort or []))},
         "kinds": kinds, "unmapped": unmapped, "issues": issues, "notes": notes, "failed": list(review or []),
         "complete": not issues and not any(p["blocking"] for p in not_sent),
     }
@@ -1411,13 +1418,17 @@ def _finish(state: dict, save: Callable[[dict], None], report: dict, extractions
 
 def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save, settings, designations,
                unsaved: bool = False, finalize: bool = True, classified: dict | None = None,
-               degrade: bool = False, final_attempt: bool = False, keep_local_files: bool = False):
+               degrade: bool = False, final_attempt: bool = False, keep_local_files: bool = False,
+               extra_pages: dict[str, list[int]] | None = None):
     """Send each kind's pages to Veris (resuming checkpointed jobs), validate coverage and map
     the fields. Returns (extractions, warnings, every_kind_covered, reasons_to_review).
 
     With ``degrade``, a kind that ended in a terminal provider failure does not fail the file while another kind was
     read: it is named in the reasons to review (and the warnings) and the others are mapped. Nothing read at all
     still raises unless the caller can file the locally identified pages for review. ``final_attempt`` says no automatic attempt is left.
+
+    ``extra_pages`` (kind -> pages that are not the kind's own, read best effort along with it; see ``_extra_read_pages``) are
+    sent as their own part: the dict is updated to the pages that were read.
 
     With ``finalize`` the state is saved once at the end; a caller that saves right after (``_finish``) passes False."""
     extractions: dict = {}
@@ -1427,19 +1438,23 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
     # Pages found after a kind was first sent (the reading went on while its first pages were already with Veris) are
     # sent as a late part ("resume+") and merged with the first part; pages already sent stay sent.
     _without_skipped(state, selected_by_kind, classified or {})
-    parts, final = _split_parts(selected_by_kind, state)
+    extras = extra_pages if extra_pages is not None else {}
+    parts, final = _split_parts(selected_by_kind, state, extras)
     selected_by_kind.update(final)
     kinds = [kind for kind, selected in final.items() if selected]
+    # The parts that only hold pages read best effort (see _extra_read_pages): a part of those never takes the identified
+    # pages' result down with it, and where the two disagree the identified pages' value is the one kept.
+    extra_keys = {key for key, pages in parts.items() if extras.get(_mode(key)) and set(pages) <= set(extras[_mode(key)])}
 
     def ready(kind, payload) -> bool:
         """A kind whose jobs are all in: its fields are put in the saved state now, before the other kinds finish."""
-        if kind.endswith("+") or any(key != kind and _mode(key) == kind for key in parts):
+        if kind.endswith("+") or any(key != kind and _mode(key) == kind and key not in extra_keys for key in parts):
             return False
         try:
             response = _MODELS[kind].model_validate(payload)
         except ValidationError:
             return False
-        if not _chunk_covered(response, len(selected_by_kind[kind])):
+        if not _chunk_covered(response, len(parts.get(kind) or selected_by_kind[kind])):
             return False
         try:
             fields, _notices = _map_fields(kind, response, designations)
@@ -1458,7 +1473,23 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
     )
     # A passport page found not needed during this pass (see _skip_passport_page) is no longer a page of the kind.
     _without_skipped(state, selected_by_kind, final, parts, classified or {})
-    lost = {_mode(key) for key in failures or {}}
+    gone_extra = {key for key in failures or {} if key in extra_keys}
+    lost = {_mode(key) for key in failures or {} if key not in gone_extra}
+    for kind in {_mode(key) for key in gone_extra}:
+        pages = sorted(page for key in gone_extra if _mode(key) == kind for page in parts[key])
+        left = [key for key in parts if _mode(key) == kind and key not in gone_extra]
+        for key in gone_extra:
+            parts.pop(key, None)
+        extras[kind] = [page for page in extras.get(kind, []) if page not in pages]
+        selected_by_kind[kind] = [page for page in selected_by_kind[kind] if page not in pages]
+        final[kind] = selected_by_kind[kind]
+        note = (f"Pages {_ranges(pages)} are not {_KIND_NAMES.get(kind, kind)} pages; the document reader could not read them, so "
+                "nothing from them was used. Check them in the stored original.")
+        warnings.append(note)
+        review.append(note)
+        covered = False
+        if not left:
+            lost.add(kind)
     if lost:
         if not keep_local_files and not any(payload is not None for key, payload in payloads.items() if _mode(key) not in lost):
             raise _first_failure(state, failures)  # nothing usable was read: the failure is not hidden
@@ -1469,7 +1500,8 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
         log.warning("%s: could not read the %s (reader codes: %s); what was read is kept and the file goes to review",
                     _who(), ", ".join(sorted(lost, key=_order)), provider_codes(state))
     late_merge: dict[str, dict] = {}
-    first_parts = {kind: min((key for key in parts if _mode(key) == kind), key=len) for kind in kinds}
+    first_parts = {kind: min((key for key in parts if _mode(key) == kind), key=len) for kind in kinds if kind not in lost}
+    source_order: dict[str, list[int]] = {}  # kind -> the pages in the order the merged result numbers them (when it differs)
     for kind in kinds:
         keys = sorted((key for key in parts if _mode(key) == kind), key=len)
         if kind in lost:
@@ -1480,7 +1512,10 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
         if any(payloads.get(key) is None for key in keys):
             payloads[kind] = None
             continue
-        place = {page: index for index, page in enumerate(final[kind], 1)}
+        # The identified pages come first, so that their values are the ones kept where a page read best effort disagrees.
+        order = [page for page in final[kind] if page not in extras.get(kind, ())] + [page for page in final[kind] if page in extras.get(kind, ())]
+        source_order[kind] = order
+        place = {page: index for index, page in enumerate(order, 1)}
         pieces = []
         for key in keys:
             payload = payloads[key]
@@ -1500,7 +1535,10 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
         payload = payloads[kind]
         if payload is None:
             covered = False
-            warnings.append(f"The {kind} result did not cover every selected page. No fields from it were applied.")
+            note = (f"The document reader returned nothing usable for the {_KIND_NAMES.get(kind, kind)} pages {_ranges(selected)}. "
+                    "Check them in the stored original or enter the details by hand.")
+            warnings.append(note)
+            review.append(note)
             continue
         try:
             response = _MODELS[kind].model_validate(payload)
@@ -1522,8 +1560,20 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
                 warnings.append(note)
                 review.append(note)
                 positions = [min(index, len(selected)) for index in range(1, len(response.pages) + 1)]
+            elif _found(kind, payload):
+                # The reader answered, but not for every page it was sent (a page came back empty or the page numbers do not
+                # match). What it did find is kept and applied, never thrown away; the pages are named for a person to check.
+                note = (f"The document reader answered for only part of the {_KIND_NAMES.get(kind, kind)} pages {_ranges(selected)} "
+                        "(some pages came back empty). The details it found were kept; check the rest against those pages of the original.")
+                warnings.append(note)
+                review.append(note)
+                positions = [number if type(number) is int and 1 <= number <= len(selected) else min(index, len(selected))
+                             for index, number in enumerate((page.page_number for page in response.pages), 1)]
             else:
-                warnings.append(f"The {kind} result did not cover every selected page. No fields from it were applied.")
+                note = (f"The document reader returned nothing usable for the {_KIND_NAMES.get(kind, kind)} pages {_ranges(selected)}. "
+                        "Check them in the stored original or enter the details by hand.")
+                warnings.append(note)
+                review.append(note)
                 continue
         else:
             record["coverage_status"] = "complete"
@@ -1554,7 +1604,7 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
             "source": {
                 "local_inspection": {**source_report, "selected_pages": list(selected)},
                 "source_sha256": _for(kind, source_hash), "selected_pages": list(selected),
-                "provider_page_sources": [selected[position - 1] for position in positions],
+                "provider_page_sources": [source_order.get(kind, selected)[position - 1] for position in positions],
             },
             # The pages the local check identified; ``source`` names every page sent (candidates included).
             "selected_pages": list((classified or {}).get(kind, selected)),
@@ -1574,8 +1624,12 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
     return extractions, warnings, covered, review
 
 
-def _split_parts(selected_by_kind: dict, state: dict) -> tuple[dict, dict]:
+def _split_parts(selected_by_kind: dict, state: dict, extras: dict | None = None) -> tuple[dict, dict]:
     """Keep every saved provider intent unchanged; newly found pages get a new late part.
+
+    ``extras`` (kind -> pages read best effort, see ``_extra_read_pages``): on the first dispatch of a kind they are not sent in
+    the kind's own job but in a late part of their own, so that a failure or a poor answer for them cannot take the identified
+    pages' result down, and the identified pages' answer comes first when the two are merged.
 
     Reinspection may add or remove a classification. Neither changes the bytes/pages of an
     already submitted primary or late job. All saved parts remain in the final page account.
@@ -1593,6 +1647,11 @@ def _split_parts(selected_by_kind: dict, state: dict) -> tuple[dict, dict]:
             parts[key] = pages
             sent.update(pages)
         extra = sorted(set(selected) - sent)
+        own = [page for page in extra if page not in (extras or {}).get(kind, ())]
+        if not sent and own and len(own) < len(extra):
+            parts[kind] = own
+            sent.update(own)
+            extra = [page for page in extra if page not in own]
         if extra:
             key = kind
             while key in parts:
@@ -2056,6 +2115,51 @@ def _settle_probes(inspected, probes: dict, classified: dict, extractions: dict,
     return promoted
 
 
+# Pages that are none of the three kinds but still carry the candidate's details: the content kinds below are read along with the
+# résumé (the reader's résumé mode takes any text about a person) so an application form's name, date of birth and address, or an
+# experience letter's employer, trade and period of service are not lost because the page was filed as a supporting document.
+_EXTRA_READ_KINDS = ("application_form", "experience_certificate")
+_EXTRA_READ_LIMIT = 12   # at most this many such pages of one file are sent (the setting veris_extra_read_pages changes it)
+_EXTRA_MIN_CHARS = 20    # an unidentified page needs this many letters and digits of local text to be worth a read
+
+
+def _extra_read_pages(inspected, supporting: dict, identified: dict, held: dict, identities: list[dict], limit: int) -> list[int]:
+    """The pages of a candidate's file, none of them a résumé, passport or Aadhaar page, to read along with the résumé.
+
+    * an application form page (always) and an experience letter or certificate (when the file has an identified page);
+    * a page the local check read but could not identify, and one it could not read at all (when the file has an identified page);
+    never a page that names another person than the identified pages (see ``person_split.incompatible``), a blank page, a page
+    the recruiter or the content classifier gave another kind (medical, visa, ticket...) or one left out for the page cap.
+    Application forms first, then letters, then unidentified pages; at most ``limit``. Returns the page numbers, sorted."""
+    has_identity = any(identified.get(kind) for kind in _IDENTITY_KINDS)
+    taken = {number for pages in identified.values() for number in pages}
+    ranked: list[tuple[int, int]] = []
+    for page in inspected.pages:
+        number = page.page_number
+        if number in taken:
+            continue
+        text = page.text or held.get(str(number)) or ""
+        slot = supporting.get(str(number))
+        if slot is not None:
+            if slot not in _EXTRA_READ_KINDS or not (has_identity or slot == "application_form"):
+                continue
+            rank = _EXTRA_READ_KINDS.index(slot)
+        elif page.status == "read" and page.document_type == "unknown":
+            if not has_identity or sum(character.isalnum() for character in text) < _EXTRA_MIN_CHARS:
+                continue
+            rank = len(_EXTRA_READ_KINDS)
+        elif page.status == "unread" and has_identity and _probe_candidate(page):
+            rank = len(_EXTRA_READ_KINDS) + 1
+        else:
+            continue
+        if text.strip():
+            who = page_identity(text)
+            if who["mixed"] or any(incompatible(who, known) for known in identities):
+                continue
+        ranked.append((rank, number))
+    return sorted(number for _rank, number in sorted(ranked)[:max(0, limit)])
+
+
 def extract_attachment(
     data: bytes, *, state: dict, save: Callable[[dict], None], settings,
     designations: list[str] | None = None, partial: bool = True, ignore_decorative: bool = False,
@@ -2159,7 +2263,7 @@ def _extract_attachment(
         # instead of removing keys (otherwise old plans could reappear on retry).
         state.update(inspection_signature="", person_detection_version=0, passport_plan={}, passport_skipped=[],
                      local_patterns={}, local_filled=False, page_rotations={}, payload_drops={}, probe_plan={}, suspected_pages={},
-                     partial_extractions={}, extractions={}, coverage={}, warnings=[], output=None, documents={})
+                     partial_extractions={}, extractions={}, coverage={}, warnings=[], output=None, documents={}, extra_read_plan={})
     options = {
         "tesseract_cmd": settings.tesseract_cmd, "languages": settings.ocr_languages,
         "max_pages": settings.ocr_max_pages, "page_timeout": settings.ocr_page_timeout_seconds,
@@ -2267,10 +2371,19 @@ def _extract_attachment(
         return _finish(state, save, report, {}, "needs_review", warnings)
 
     classified = {kind: list(pages) for kind, pages in document_pages.items()}
+    extras: dict[str, list[int]] = {}
     if candidate_filing:
         education = [int(n) for n, kind in report["supporting_pages"].items() if kind == "education_certificate"]
         classified["resume"] = sorted({*classified["resume"], *education})
-        _restrict_saved_jobs(state, classified)
+        plan = state.get("extra_read_plan") or {}
+        if partial and (fresh_inspection or plan.get("v") != 1):
+            # Decided once (page numbers only) so that every visit plans the same pages, also from a restored inspection.
+            plan = {"v": 1, "resume": _extra_read_pages(
+                inspected, report["supporting_pages"], classified, held, state.get("person_identities") or [],
+                int(_setting(settings, "veris_extra_read_pages", _EXTRA_READ_LIMIT)))}
+            state["extra_read_plan"] = plan
+        extras = {"resume": sorted(plan["resume"])} if partial and plan.get("resume") else {}
+        _restrict_saved_jobs(state, {**classified, "resume": sorted({*classified["resume"], *extras.get("resume", [])})})
         state.update(probe_plan={}, suspected_pages={})
     if candidate_filing or not partial:
         probes = {}
@@ -2292,8 +2405,9 @@ def _extract_attachment(
         classified["passport"] = [n for n in passport_pages if n in classified["passport"]]
     if narrowed:
         probes = {kind: pages for kind, pages in probes.items() if kind != "passport"}  # nothing is added to a narrowed attempt
-    selected_by_kind = {kind: sorted({*pages, *probes.get(kind, [])}) for kind, pages in classified.items()}
+    selected_by_kind = {kind: sorted({*pages, *probes.get(kind, []), *extras.get(kind, [])}) for kind, pages in classified.items()}
     payload_drops = _payload_drops(state, inspected, selected_by_kind, fresh_inspection)
+    extras = {kind: [page for page in pages if page in selected_by_kind.get(kind, ())] for kind, pages in extras.items()}
     for kind in classified:
         classified[kind] = [page for page in classified[kind] if page not in payload_drops]
     if not any(selected_by_kind.values()):
@@ -2315,7 +2429,8 @@ def _extract_attachment(
         # warning, with the page numbers and what to do about it.
         hinted = (set(inspected.unknown_pages) - supporting_reasons.keys() if candidate_filing else
                   {int(number) for number, text in held.items() if identity_hint(text)} & set(inspected.unknown_pages))
-        gaps = sorted((set(inspected.unread_pages) | hinted) - probed_pages)
+        read_along = {page for pages in extras.values() for page in pages}  # sent to the reader with the résumé (see _extra_read_pages)
+        gaps = sorted((set(inspected.unread_pages) | hinted) - probed_pages - read_along)
         if gaps:
             warnings.append(
                 f"Pages {', '.join(map(str, gaps[:20]))} could not be read or classified and were not extracted. "
@@ -2329,9 +2444,16 @@ def _extract_attachment(
     extractions, notices, covered, review = _run_kinds(
         selected_by_kind, inspected, report, source_hash, state=state, save=save,
         settings=settings, designations=designations, unsaved=fresh_inspection, finalize=False, classified=classified,
-        degrade=True, final_attempt=final_attempt, keep_local_files=candidate_filing,
+        degrade=True, final_attempt=final_attempt, keep_local_files=candidate_filing, extra_pages=extras,
     )
     warnings.extend(notices)
+    read_along = sorted(page for kind, pages in extras.items() if kind in extractions for page in pages)
+    if read_along:
+        warnings.append(
+            f"Page{'s' if len(read_along) > 1 else ''} {_ranges(read_along)} {'are' if len(read_along) > 1 else 'is'} not a résumé, passport or "
+            "Aadhaar page (an application form, a letter, a card or a page that could not be identified). "
+            f"{'They were' if len(read_along) > 1 else 'It was'} also read by the document reader so that no detail on "
+            f"{'them' if len(read_along) > 1 else 'it'} is lost. Check what was taken from them against the original.")
     if not covered:
         status = "needs_review"
     for kind, extraction in extractions.items():
@@ -2360,7 +2482,7 @@ def _extract_attachment(
     page_reasons.update(_passport_reasons(state, inspected, set(selected_by_kind["passport"])))
     page_reasons.update(supporting_reasons)
     coverage, issues, shown = _coverage(report, selected_by_kind, extractions, settings=settings, probes=probes, review=review,
-                                        page_reasons=page_reasons, hinted=hinted)
+                                        page_reasons=page_reasons, hinted=hinted, best_effort=read_along)
     warnings.extend([*issues, *shown])
     if issues:
         status = "needs_review"

@@ -44,7 +44,9 @@ def intake(schema_database, tmp_path, monkeypatch):
         def submit(self, document, *, mode, idempotency_key):
             with sessions() as db:
                 state = db.scalar(select(DocumentExtractionJob.state))
-                assert state["provider_jobs"][mode]["idempotency_key"] == idempotency_key
+                # (a kind can have a late part of its own, "resume+", beside the kind's job)
+                assert any(part["idempotency_key"] == idempotency_key for record in state["provider_jobs"].values()
+                           for part in record.get("chunks") or [record])
             env.submissions.append((mode, idempotency_key))
             with fitz.open(stream=document.data, filetype="pdf") as sent:
                 env.results.setdefault(mode, result(mode, sent.page_count))
@@ -53,7 +55,8 @@ def intake(schema_database, tmp_path, monkeypatch):
             mode = job_id.removeprefix("job-")
             with sessions() as db:
                 state = db.scalar(select(DocumentExtractionJob.state))
-                assert state["provider_jobs"][mode]["job_id"] == job_id
+                assert any(part.get("job_id") == job_id for record in state["provider_jobs"].values()
+                           for part in record.get("chunks") or [record])
             env.polls.append(job_id)
             return SimpleNamespace(status=env.statuses.get(mode, "succeeded"), result=deepcopy(env.results[mode]), error=env.errors.get(mode))
     class Provider:
@@ -513,6 +516,7 @@ def test_an_unidentified_page_is_held_for_review_and_stale_guesses_are_not_filed
     from test_document_extraction import UNCLASSIFIED
     monkeypatch.setattr(document_extraction, "_probe_pages", lambda inspected: {"passport": [2], "aadhaar": [2]})
     intake.settings.veris_early_dispatch = False
+    intake.settings.veris_extra_read_pages = 0   # the page is not sent along with the resume (see the test below for when it is)
     job = upload(intake, pdf(CV, UNCLASSIFIED))
     start(intake, job["id"]); process(intake, job["id"])
     with intake.sessions() as db:
