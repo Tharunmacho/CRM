@@ -116,12 +116,13 @@ export function hoursFigure(minutes: number) {
 }
 
 /** "Asha, Mon 3 Nov: Late, late 25m, 10:25 to 19:05, 8h 00m" for the hover text and the screen-reader name of a grid cell. */
-export function cellTitle(name: string, date: GridDate, cell: GridCell, clock: (stamp: string) => string): string {
+export function cellTitle(name: string, date: GridDate, cell: GridCell, clock: (stamp: string) => string, today?: string): string {
   const label = `${name}, ${new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(date.date + 'T12:00:00Z'))}`
   if (!cell.mark) return label
   const parts = [MARK_WORDS[cell.mark]]
   if (cell.lateMinutes > 0 && cell.mark !== 'A') parts.push(`late ${minutesText(cell.lateMinutes)}`)
-  if (cell.checkIn) parts.push(`${clock(cell.checkIn)} to ${cell.checkOut ? clock(cell.checkOut) : 'now'}`)
+  // "now" is only true for a day that is still running; on a finished day a login without a logout is a missing check-out
+  if (cell.checkIn) parts.push(`${clock(cell.checkIn)} to ${cell.checkOut ? clock(cell.checkOut) : today && date.date < today ? 'no check-out' : 'now'}`)
   if (cell.workedMinutes > 0) parts.push(minutesText(cell.workedMinutes))
   return `${label}: ${parts.join(', ')}`
 }

@@ -15,7 +15,7 @@ const LETTER: Record<DayMark, string> = { P: 'P', LT: 'LT', M: 'M', A: 'A', L: '
  * The monthly grid: one row per recruiter, one column per day of the month (P present, LT late, M missed check-out, A absent, L leave,
  * W weekly off, H holiday), then their present days, late days and average and total hours. A recruiter's name opens their day-by-day record.
  */
-export function MonthGridTable({ grid, zone, onOpen }: { grid: MonthGrid; zone: string; onOpen: (id: string) => void }) {
+export function MonthGridTable({ grid, zone, onOpen, today }: { grid: MonthGrid; zone: string; onOpen: (id: string) => void; /** The agency's current day: a login without a logout before it reads "no check-out", not "now". */ today?: string }) {
   const clock = (value: string) => clockTime(value, zone)
   return <div className="rm-scroll am-gridbox" role="region" aria-label="Monthly attendance grid, scroll sideways if the month does not fit" tabIndex={0}>
     <table className="rm-table am-grid" aria-label="Monthly attendance, one row per recruiter and one column per day">
@@ -44,7 +44,7 @@ export function MonthGridTable({ grid, zone, onOpen }: { grid: MonthGrid; zone: 
           </th>
           {grid.dates.map((date, i) => {
             const cell = person.cells[i]
-            const title = cellTitle(person.name, date, cell, clock)
+            const title = cellTitle(person.name, date, cell, clock, today)
             return <td key={date.date} className={cn('am-day', cell.mark && `m-${cell.mark}`, date.weekend && 'is-weekend', date.future && 'is-future')} title={title}>
               {cell.mark ? <><span aria-hidden="true">{LETTER[cell.mark]}</span><span className="sr-only">{`${date.day}: ${MARK_WORDS[cell.mark]}`}</span></> : null}
             </td>

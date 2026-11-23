@@ -5,6 +5,22 @@ import { agencyDay } from '@/shared/lib/task-time'
 export const DAY_CHECK_MS = 15_000
 
 /**
+ * The current time in milliseconds, kept moving while the page stays open (every 10 seconds, and the moment the tab comes back). It lets a live
+ * reading age on screen between two reads: a person whose last heartbeat is older than 90 seconds stops showing as online without waiting for the
+ * next answer from the server.
+ */
+export function useNowMs(intervalMs = 10_000): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const tick = () => setNow(Date.now())
+    const timer = window.setInterval(tick, intervalMs)
+    document.addEventListener('visibilitychange', tick)
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', tick) }
+  }, [intervalMs])
+  return now
+}
+
+/**
  * What a day or month choice becomes when the agency's day changes: a choice that was the old "today" follows the new one (so a page left
  * open overnight is on today, not on yesterday), a choice somebody picked by hand stays where it is.
  */

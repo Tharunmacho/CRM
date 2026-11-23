@@ -195,8 +195,10 @@ const text = (file) => readFile(new URL(file, import.meta.url), 'utf8')
 test('the Attendance tab is lean: four summary cards, a filter row, Export Excel, no CSV, no legend, subtitles or helper sentences', async () => {
   const tab = await text('../src/features/daily-report/report-attendance-tab.tsx')
   assert.match(tab, /SummaryCards/)
-  for (const label of ['Absent', 'Late arrivals', 'Average hours', 'Missed check‑outs']) assert.ok(tab.includes(`label: '${label}'`), label)
-  assert.equal((tab.match(/label: '/g) ?? []).length, 4)
+  for (const label of ['Late arrivals', 'Average hours', 'Missed check‑outs']) assert.ok(tab.includes(`label: '${label}'`), label)
+  // the first card says who has not logged in: "Not in yet" while the day is running, "Absent" once it is over
+  assert.ok(tab.includes("label: isToday ? 'Not in yet' : 'Absent'"))
+  assert.equal((tab.match(/label: '/g) ?? []).length + (tab.match(/label: isToday/g) ?? []).length, 4)
   assert.doesNotMatch(tab, /GridLegend|rm-foot|Open attendance|rm-updated|rm-count|rm-head p|<h2>[^<]*<\/h2><p>/)
   assert.match(tab, /Export Excel/)
   assert.match(tab, /downloadApiFile\(monthExportPath\(month, staff\), monthExportName\(month\)\)/)

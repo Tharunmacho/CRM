@@ -15,7 +15,7 @@ import { TaskReportView } from './report-task'
 import { useAgencyToday } from './use-agency-today'
 import { useDailyReport } from './use-daily-report'
 import {
-  AGENCY_TIMEZONE, apiQuery, asksAllTime, choiceFromParams, DEFAULT_CHOICE, drillTitle, isOutdatedServer, parseChoice, reportPeople, resolveRange, serialiseChoice, type RangeChoice,
+  AGENCY_TIMEZONE, apiQuery, asksAllTime, choiceFromParams, DEFAULT_CHOICE, drillTitle, isOutdatedServer, parseChoice, reportPeople, resolveRange, serialiseChoice, showsReport, type RangeChoice,
 } from './daily-report-view'
 import type { DailyReport, StaffRow } from './daily-report-types'
 import '@/styles/tasks-page.css'
@@ -95,11 +95,14 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
     finally { setExporting(false) }
   }
 
-  const outdated = !data && !!error && isOutdatedServer(error.status)
-  const blocking = !data && !!error && !outdated
-  const stale = !!data && !state.current
+  // `data` is the newest answer, but it answers THIS question only when `state.current`: after the period, the recruiter or the tab changes it is the
+  // previous question's answer, and showing it under the new heading would present another period's numbers as this one's (a "Today" that reads
+  // yesterday's work). So a different question shows the loading state, never the old figures; a live refresh of the same question keeps its numbers.
+  const answers = showsReport(state)
+  const outdated = !answers && !!error && isOutdatedServer(error.status)
+  const blocking = !answers && !!error && !outdated
   const scopeKey = `${view}|${apiQuery(query)}`
-  const common = data ? { report: data, allTime, roster, today, timeZone, scope: scopeKey, staff: staff === 'all' ? '' : staff, onPickStaff: (id: string) => setStaff(id || 'all'), clientFilter: 'all', onDrill: (metric: string, id: string | null) => setDrill({ metric, staff: id, client: null }),
+  const common = answers && data ? { report: data, allTime, roster, today, timeZone, scope: scopeKey, staff: staff === 'all' ? '' : staff, onPickStaff: (id: string) => setStaff(id || 'all'), clientFilter: 'all', onDrill: (metric: string, id: string | null) => setDrill({ metric, staff: id, client: null }),
     onDrillClient: (metric: string, id: string) => setDrill({ metric, staff: null, client: id }), onSubmission: (id: string) => setSubmissionOf(id), onHistory: () => setHistory(true) } : null
 
   return <div className="tk dw dwb dwr">
@@ -114,13 +117,13 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
       live={<LiveBadge updatedAt={state.updatedAt} busy={state.loading && !!data} />} />
 
     <div className="dw-alerts">
-      {(error || exportError) && !blocking && !outdated && <p className="is-warn" role="alert"><AlertCircle size={16} aria-hidden="true" />{exportError || error?.message}{error && data ? ' Showing the last loaded result.' : ''} <button type="button" className="dwr-textlink" onClick={exportError ? () => void exportFile() : state.refresh}>Try again</button></p>}
+      {(error || exportError) && !blocking && !outdated && <p className="is-warn" role="alert"><AlertCircle size={16} aria-hidden="true" />{exportError || error?.message}{error && answers ? ' Showing the last loaded result.' : ''} <button type="button" className="dwr-textlink" onClick={exportError ? () => void exportFile() : state.refresh}>Try again</button></p>}
       {outdated && <p className="is-warn" role="status"><AlertCircle size={16} aria-hidden="true" />The new report needs the latest server version. It will appear here once the server is updated. <button type="button" className="dwr-textlink" onClick={state.refresh}>Check again</button></p>}
       {blocking && <p className="is-warn" role="alert"><AlertCircle size={16} aria-hidden="true" />{error?.message || 'The report could not be loaded.'} <button type="button" className="dwr-textlink" onClick={state.refresh}>Try again</button></p>}
     </div>
 
-    {!data && !error && <Skeleton />}
-    {data && common && <div className={stale ? 'dwr-body is-stale' : 'dwr-body'} aria-busy={stale}>
+    {!answers && !error && <Skeleton />}
+    {answers && data && common && <div className="dwr-body">
       {view === 'daily' && <TaskReportView {...common} />}
       {view === 'lead' && <LeadReportView {...common} />}
       {view === 'daily' && data.scope === 'self' && <MyDayCard today={today} timeZone={timeZone} refreshKey={state.version} onSubmitted={state.refresh} focus={params.get('focus') === 'myday'} />}

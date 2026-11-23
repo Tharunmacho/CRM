@@ -4,6 +4,8 @@ import { TOTAL_STAGES } from '@/shared/workflow/stages'
 import { Select } from '@/shared/ui/primitives'
 import { formatFormDate, STAGE_NAMES } from '../form-model'
 import { PROCESS_EMPTY_LINE, stageRows, stagesDoneText } from '../process-stages'
+import { prescreenRows, type PrescreenState } from '../prescreening'
+import { closedFootnote } from '@/features/workflow/reopen-application'
 import type { ApplicationFormData } from '../types'
 
 type StageForm = Pick<ApplicationFormData, 'tracking' | 'application' | 'documents' | 'deployment'>
@@ -17,7 +19,7 @@ export function StageControl({ form, canOpen, onOpen }: StageProps) {
   const closed = application && !['active', '', 'deployed'].includes(application.status)
   // A job the candidate was only moved off (unmapped, or swapped for another job) is not a rejection or a decline: say what happened.
   const movedOff = closed && ['unmapped', 'changed_job'].includes(application?.closureReason ?? '')
-  const label = !application ? 'Choose a job first' : deployed ? 'Deployed' : movedOff ? 'Removed from this job' : closed ? 'Application closed' : STAGE_NAMES[current] || `Stage ${current}`
+  const label = !application ? 'Prescreening (no job needed)' : deployed ? 'Deployed' : movedOff ? 'Removed from this job' : closed ? 'Application closed' : STAGE_NAMES[current] || `Stage ${current}`
   return (
     <div className="af-assign-field af-stage-field" data-assign="stage">
       <div className="af-assign-label"><label htmlFor="af-assign-stage">Current stage</label><span className="af-stage-manual">Manual</span></div>
@@ -32,8 +34,9 @@ export function StageControl({ form, canOpen, onOpen }: StageProps) {
 }
 
 /** Selecting any stage replaces its feedback card in place. */
-export function RecruitmentStages({ form, canOpen, onOpen, selectedStage }: StageProps & { selectedStage: number | null }) {
-  const rows = stageRows(form, canOpen)
+export function RecruitmentStages({ form, canOpen, onOpen, selectedStage, prescreenOpen = false, prescreenState = 'not_started' }: StageProps & { selectedStage: number | null; prescreenOpen?: boolean; prescreenState?: PrescreenState }) {
+  // With no job Prescreening (stage 1) is the open stage; stages 2-13 stay locked (a client and a job are required from stage 2).
+  const rows = prescreenRows(stageRows(form, canOpen), prescreenOpen && !form.application, prescreenState)
   const current = selectedStage || form.tracking.summary.currentStage || form.application?.currentStage || 1
   return (
     <section className="af-recruitment-stages" id="af-process" aria-labelledby="af-process-title">
@@ -63,7 +66,7 @@ export function RecruitmentStages({ form, canOpen, onOpen, selectedStage }: Stag
           </li>
         ))}
       </ol>
-      <p className="af-stage-footnote">{form.application ? 'Documents are tracked separately and do not block stage changes.' : PROCESS_EMPTY_LINE}</p>
+      <p className="af-stage-footnote">{form.application ? closedFootnote(form.application.status) ?? 'Documents are tracked separately and do not block stage changes.' : PROCESS_EMPTY_LINE}</p>
     </section>
   )
 }

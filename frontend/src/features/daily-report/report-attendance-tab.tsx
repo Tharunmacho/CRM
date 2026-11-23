@@ -12,7 +12,7 @@ import { reportPeople } from './daily-report-view'
 import { boardFigures, boardFilter, buildAttendanceRows, hoursCardText, type BoardFilter } from './attendance-rows'
 import { buildMonthGrid, monthExportName, monthExportPath } from './attendance-month'
 import { useDayAttendance, useMonthAttendance } from './use-attendance-data'
-import { followDay, useAgencyToday } from './use-agency-today'
+import { followDay, useAgencyToday, useNowMs } from './use-agency-today'
 import { AttendanceBoard } from './report-attendance'
 import { DailyRecord, MonthGridTable } from './attendance-grid'
 import '@/styles/report-mgmt-tabs.css'
@@ -59,7 +59,8 @@ export function AttendanceReportTab() {
   const zone = monthState.data?.timezone || dayState.attendance?.timezone || timeZone
   const title = monthTitle(month)
 
-  const allRows = useMemo(() => buildAttendanceRows({ day: date, today, staff, attendance: dayState.attendance, month: dayState.month, zone }), [date, today, staff, dayState.attendance, dayState.month, zone])
+  const nowMs = useNowMs()
+  const allRows = useMemo(() => buildAttendanceRows({ day: date, today, staff, attendance: dayState.attendance, month: dayState.month, zone, nowMs }), [date, today, staff, dayState.attendance, dayState.month, zone, nowMs])
   const figures = useMemo(() => boardFigures(allRows), [allRows])
   const rows = useMemo(() => boardFilter(allRows, filter), [allRows, filter])
   const grid = useMemo(() => buildMonthGrid(monthState.data, today, zone, staff), [monthState.data, today, zone, staff])
@@ -69,7 +70,7 @@ export function AttendanceReportTab() {
 
   const choose = (next: BoardFilter) => setFilter((current) => (current === next ? 'all' : next))
   const cards = [
-    { label: 'Absent', value: figures.notIn, detail: isToday ? 'no login today' : dayName, icon: UserX, tone: figures.notIn ? 'red' as const : 'blue' as const, active: filter === 'out', onSelect: () => choose('out') },
+    { label: isToday ? 'Not in yet' : 'Absent', value: figures.notIn, detail: isToday ? 'no login so far today' : dayName, icon: UserX, tone: figures.notIn ? 'red' as const : 'blue' as const, active: filter === 'out', onSelect: () => choose('out') },
     { label: 'Late arrivals', value: figures.late, detail: isToday ? 'today' : dayName, icon: Clock3, tone: figures.late ? 'amber' as const : 'blue' as const, active: filter === 'late', onSelect: () => choose('late') },
     { label: 'Average hours', value: hoursCardText(figures.averageSeconds), detail: grid.totals.workedDays ? `${hoursCardText(grid.totals.averageMinutes * 60)} a day in ${title.split(' ')[0]}` : isToday ? 'today' : dayName, icon: Timer, tone: 'violet' as const },
     { label: 'Missed check‑outs', value: grid.totals.missed, detail: title, icon: LogOut, tone: grid.totals.missed ? 'amber' as const : 'blue' as const },
@@ -123,7 +124,7 @@ export function AttendanceReportTab() {
       </div>
       {dayState.loading && !dayState.attendance ? <div className="rm-state"><p role="status">Loading attendance…</p></div>
         : dayState.error && !dayState.attendance ? <div className="rm-state"><TriangleAlert size={22} aria-hidden="true" /><p role="alert" className="rm-state-title">{dayState.error}</p><p>It will try again by itself, or press Refresh.</p></div>
-          : <AttendanceBoard rows={rows} zone={zone} staff={staff} onOpen={setOpened}
+          : <AttendanceBoard rows={rows} zone={zone} staff={staff} day={date} onOpen={setOpened}
             empty={filter !== 'all' ? 'Nobody matches the card you chose. Press Clear to see everyone.' : staff ? 'This person has no attendance record for the day.' : 'Nobody has a record for this day.'} />}
     </section>
 
@@ -134,7 +135,7 @@ export function AttendanceReportTab() {
       {monthBusy ? <div className="rm-state"><p role="status">Loading the month…</p></div>
         : monthState.error && !monthState.data ? <div className="rm-state"><TriangleAlert size={22} aria-hidden="true" /><p role="alert" className="rm-state-title">{monthState.error}</p><p>It will try again by itself, or press Refresh.</p></div>
           : !grid.people.length ? <div className="rm-state" role="status"><p className="rm-state-title">No attendance for this month</p><p>{staff ? 'This person has no attendance record for the month.' : 'No recruiter has a record for this month yet.'}</p></div>
-            : <MonthGridTable grid={grid} zone={zone} onOpen={setOpened} />}
+            : <MonthGridTable grid={grid} zone={zone} onOpen={setOpened} today={today} />}
     </section>
 
     <Sheet open={!!employee} onClose={() => setOpened('')} title={employee ? `${employee.name}: day by day` : 'Daily record'} width="xl">

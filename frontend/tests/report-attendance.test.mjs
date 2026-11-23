@@ -72,12 +72,34 @@ test('absent on a past day, not clocked in yet today, weekly off, holiday and le
   assert.equal(build(nobody, month(['u1', policyDay('WFH')]))[0].label, 'Work from home')
 })
 
-test('still logged in: an open session means here, with no last logout, even when the policy says absent', () => {
-  const [row] = build(attendance(person('u1', 'Asha', [session('s1', '04:00', null)])), month(['u1', policyDay('A', { provisional: true })]))
+const sessionOn = (day, id, from, to) => ({ id, checkedInAt: `${day}T${from}:00Z`, checkedOutAt: to ? `${day}T${to}:00Z` : null, durationSeconds: to ? (Date.parse(`${day}T${to}:00Z`) - Date.parse(`${day}T${from}:00Z`)) / 1000 : 600 })
+
+test('still logged in (today): an open session means here, with no last logout, even when the policy says absent', () => {
+  const [row] = m.buildAttendanceRows({ day: TODAY, today: TODAY, attendance: attendance(person('u1', 'Asha', [sessionOn(TODAY, 's1', '04:00', null)])), month: month(['u1', policyDay('A', { provisional: true, date: TODAY })]) })
   assert.equal(row.stillIn, true)
+  assert.equal(row.unclosed, false)
   assert.equal(row.lastOut, null)
   assert.equal(row.kind, 'present')
   assert.equal(m.attendanceCounts([row]).stillIn, 1)
+})
+
+test('a past day whose shift was never checked out is a missed check-out: not "still logged in", no last logout, no hours', () => {
+  // the server counts no hours for it (durationSeconds 0, unclosed true), and the person's CURRENT clock state ('checked_in') is about today, not this day
+  const open = { ...sessionOn(DAY, 's1', '04:00', null), durationSeconds: 0, unclosed: true }
+  const asha = person('u1', 'Asha', [open])
+  const [row] = build(attendance(asha), null)
+  assert.equal(row.stillIn, false)
+  assert.equal(row.unclosed, true)
+  assert.equal(row.kind, 'missed')
+  assert.equal(row.lastOut, null)
+  assert.equal(row.workedSeconds, 0)
+  assert.deepEqual(m.presenceLabel(row), { label: 'No check-out', live: false })
+  assert.equal(m.attendanceCounts([row]).stillIn, 0)
+  // a login made TODAY must not turn yesterday's board into "still logged in" (the server lists the current state on every day)
+  const today = { ...person('u2', 'Ben', []), attendance: { status: 'checked_in', sessionId: 'now', checkedInAt: `${TODAY}T04:00:00Z`, lastCheckedOutAt: null, totalSeconds: 0, sessions: [] } }
+  const [ben] = build(attendance(today), null)
+  assert.equal(ben.stillIn, false)
+  assert.equal(ben.kind, 'absent')
 })
 
 test('without policy data the status comes from the sessions', () => {
@@ -104,12 +126,12 @@ test('presence figures come through; untracked people are flagged as such', () =
   assert.equal(rows[1].tracked, false)
 })
 
-test('counts: present includes late, plus absent, leave and still logged in', () => {
+test('counts: present includes late, plus absent and leave; a past-day shift that was never checked out is not "still in"', () => {
   const att = attendance(
     person('a', 'A', [session('s', '04:00', '13:00')]), person('b', 'B', [session('s', '05:00', '13:00')]), person('c', 'C'),
     person('d', 'D'), person('e', 'E', [session('s', '04:00', null)]))
   const mon = month(['a', policyDay('P')], ['b', policyDay('LT', { lateMinutes: 30 })], ['c', policyDay('A')], ['d', policyDay('PL')], ['e', policyDay('P')])
-  assert.deepEqual(m.attendanceCounts(build(att, mon)), { present: 3, late: 1, absent: 1, leave: 1, stillIn: 1, total: 5 })
+  assert.deepEqual(m.attendanceCounts(build(att, mon)), { present: 3, late: 1, absent: 1, leave: 1, stillIn: 0, total: 5 })
 })
 
 test('who is listed: one person when narrowed, admins and idle inactive accounts left out of the team view, ordered by name', () => {
@@ -185,7 +207,7 @@ test('no live signal, an untracked role, or a past day keeps the plain "Not cloc
 })
 
 test('a checked-in recruiter still reads "Logged in now"; being online adds nothing on top', () => {
-  const live = person('u1', 'Asha', [session('s1', '04:00', null)], { presence: presence({ status: 'online' }) })
-  const [row] = build(attendance(live), null, { day: DAY })
+  const live = person('u1', 'Asha', [sessionOn(TODAY, 's1', '04:00', null)], { presence: presence({ status: 'online' }) })
+  const [row] = build(attendance(live), null, { day: TODAY })
   assert.deepEqual(m.presenceLabel(row), { label: 'Logged in now', live: true })
 })

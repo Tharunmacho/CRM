@@ -1,4 +1,4 @@
-import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
+import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { initials } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/cn'
@@ -16,6 +16,14 @@ interface SummaryItem {
   /** Makes the card a toggle that applies (or clears) a list filter. */
   onSelect?: () => void
   active?: boolean
+  /** Makes the whole card a link (a real anchor, so Ctrl/Cmd-click opens a new tab): `href` is the address, `onOpen` is the in-app navigation for a plain click. */
+  href?: string
+  onOpen?: () => void
+  /** The card's tooltip and spoken name when they say more than the label (e.g. "Tasks: 87, 84 overdue"). */
+  title?: string
+  ariaLabel?: string
+  /** Paints the figure in the error ink (overdue work). */
+  danger?: boolean
 }
 
 /**
@@ -26,36 +34,57 @@ interface SummaryItem {
 export function SummaryCards({ items }: { items: SummaryItem[] }) {
   return (
     <div className="workspace-summary" style={{ '--summary-columns': items.length } as CSSProperties}>
-      {items.map(({ label, value, detail, icon: Icon, tone = 'blue', onSelect, active }) => (
-        <section
-          className={cn('summary-card', onSelect && 'is-action', active && 'is-active')}
-          key={label}
-          aria-label={label}
-          {...(onSelect
-            ? {
-                role: 'button',
-                tabIndex: 0,
-                'aria-pressed': !!active,
-                onClick: onSelect,
-                onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    onSelect()
-                  }
-                },
-              }
-            : {})}
-        >
-          <div className="summary-card-top">
-            <span>{label}</span>
-            <span className={`summary-icon tone-${tone}`}>
-              <Icon size={17} strokeWidth={1.8} />
-            </span>
-          </div>
-          <strong className="summary-value tnum">{value}</strong>
-          {detail ? <p>{detail}</p> : null}
-        </section>
-      ))}
+      {items.map(({ label, value, detail, icon: Icon, tone = 'blue', onSelect, active, href, onOpen, title, ariaLabel, danger }) => {
+        const body = (
+          <>
+            <div className="summary-card-top">
+              <span>{label}</span>
+              <span className={`summary-icon tone-${tone}`}>
+                <Icon size={17} strokeWidth={1.8} />
+              </span>
+            </div>
+            <strong className={cn('summary-value tnum', danger && 'is-danger')}>{value}</strong>
+            {detail ? <p>{detail}</p> : null}
+          </>
+        )
+        if (href) {
+          const open = (event: MouseEvent<HTMLAnchorElement>) => {
+            // A plain left click navigates inside the app; Ctrl/Cmd/Shift/middle click keep the browser's own behaviour.
+            if (!onOpen || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+            event.preventDefault()
+            onOpen()
+          }
+          return (
+            <a className="summary-card is-link" key={label} href={href} title={title} aria-label={ariaLabel ?? label} onClick={open}>
+              {body}
+            </a>
+          )
+        }
+        return (
+          <section
+            className={cn('summary-card', onSelect && 'is-action', active && 'is-active')}
+            key={label}
+            aria-label={ariaLabel ?? label}
+            title={title}
+            {...(onSelect
+              ? {
+                  role: 'button',
+                  tabIndex: 0,
+                  'aria-pressed': !!active,
+                  onClick: onSelect,
+                  onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onSelect()
+                    }
+                  },
+                }
+              : {})}
+          >
+            {body}
+          </section>
+        )
+      })}
     </div>
   )
 }

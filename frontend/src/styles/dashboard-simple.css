@@ -1,4 +1,4 @@
-/* Dashboard: a header, seven number cards and one graph. Colour comes from the theme tokens; the hues are mixed with --primary
+/* Dashboard: a header, nine number cards (the shared SummaryCards) and one graph. Colour comes from the theme tokens; the hues are mixed with --primary
    so every palette stays coherent. `.dashref` also carries the chart tokens (--dc-*) used by the graph (dashboard-charts.css). */
 .dashref {
   --dr-amber: color-mix(in srgb, #e39a14 86%, var(--primary));
@@ -29,24 +29,23 @@
 .ds-error { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--error-edge); border-radius: 10px; background: var(--error-fill); color: var(--error-ink); font-size: 13px; }
 .ds-error button { margin-left: auto; border: 1px solid var(--error-edge); border-radius: 6px; background: var(--bg-card); padding: 4px 10px; color: var(--error-ink); font-size: 12px; cursor: pointer; }
 
-/* ---------- Number cards: nine cards, three rows of three on a desktop screen, never an orphan row ---------- */
-.ds-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-/* A compact card of at most two lines: the icon on the left; the label on line 1 and the note on line 2 beside it; the number on the right, centred
-   over both lines; the arrow in the corner. .ds-top is display: contents so the icon and the arrow are items of the card's own grid. */
-.ds-card { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto 16px; grid-template-rows: auto auto; align-content: center; align-items: center; column-gap: 14px; row-gap: 0; min-width: 0; min-height: 68px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--tone) 16%, var(--border-main)); border-radius: 16px; background: linear-gradient(165deg, color-mix(in srgb, var(--tone) 9%, var(--bg-card)) 0%, var(--bg-card) 62%); color: var(--text-main); text-align: left; cursor: pointer; transition: border-color .16s, box-shadow .2s, transform .2s; }
-.ds-card:hover { border-color: color-mix(in srgb, var(--tone) 55%, var(--border-main)); box-shadow: 0 6px 16px color-mix(in srgb, var(--tone) 14%, transparent); transform: translateY(-1px); }
-.ds-card:active { transform: translateY(0); }
-.ds-top { display: contents; }
-.ds-icon { grid-column: 1; grid-row: 1 / span 2; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: color-mix(in srgb, var(--tone) 16%, var(--bg-card)); color: var(--tone); }
-.ds-go { grid-column: 4; grid-row: 1 / span 2; color: var(--text-light); opacity: .5; transition: opacity .16s, transform .2s, color .16s; }
-.ds-card:hover .ds-go, .ds-card:focus-visible .ds-go { opacity: 1; color: var(--tone); transform: translate(2px, -2px); }
-.ds-label { grid-column: 2; grid-row: 1; align-self: end; overflow: hidden; font-size: 13.5px; font-weight: 600; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; color: var(--text-main); }
-.ds-value { grid-column: 3; grid-row: 1 / span 2; margin: 0; font-size: 26px; font-weight: 650; line-height: 32px; letter-spacing: -.04em; text-align: right; font-variant-numeric: tabular-nums; }
-.ds-note { grid-column: 2; grid-row: 2; align-self: start; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; font-size: 12.5px; line-height: 18px; color: var(--text-muted); }
-.ds-detail { font-size: 12.5px; font-weight: 400; color: var(--text-muted); }
-.ds-note.is-danger { color: var(--error-ink); font-weight: 500; }
-.ds-blue { --tone: var(--ds-blue); } .ds-green { --tone: var(--ds-green); } .ds-amber { --tone: var(--ds-amber); }
-.ds-violet { --tone: var(--ds-violet); } .ds-teal { --tone: var(--ds-teal); } .ds-slate { --tone: var(--ds-slate); } .ds-red { --tone: var(--ds-red); }
+/* ---------- Number cards: the SAME cards as the Travelled totals (shared SummaryCards: icon chip and label on top, the big figure under them),
+   nine of them in exactly two rows on a desktop (a 5-column grid of equal widths: five cards, then four flush-left on the same columns),
+   three across when the five no longer fit, two on a tablet, one on a phone; the whole card is a link. ---------- */
+.ds-summary { min-width: 0; }
+.dashsimple .ds-summary .workspace-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; margin-bottom: 0; align-items: stretch; }
+.dashsimple .ds-summary .summary-card { min-height: clamp(150px, 15cqw, 230px); }   /* a squarish tile that grows with the dashboard width (never shorter than a Travelled total card, 150 px; an aspect-ratio would make the tile refuse to shrink below 225 px wide) */
+/* Every tile is ONE centred column on the card's centre axis: the icon on top, the label under it, the big figure below. The label block always has room for two lines, so the
+   figures sit at the same height in every tile of a row. (Only the Dashboard: the shared card keeps its own alignment everywhere else, Travelled included.) */
+:root:root:root .dashsimple .ds-summary .summary-card { align-items: center; justify-content: center; gap: 10px; text-align: center; }
+:root:root:root .dashsimple .ds-summary .summary-card-top { flex-direction: column-reverse; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; min-height: 84px; text-align: center; }
+:root:root:root .dashsimple .ds-summary .summary-card-top > :not(.summary-icon) { flex: 0 0 auto; max-width: 100%; }
+:root:root:root .dashsimple .ds-summary .summary-value { margin-top: 0; text-align: center; }
+.dashsimple .ds-summary .summary-card.is-link { color: inherit; text-decoration: none; cursor: pointer; }
+.dashsimple .ds-summary .summary-card.is-link:hover { border-color: var(--border-hover); }
+.dashsimple .ds-summary .summary-card.is-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.dashsimple .ds-summary .summary-card-top > span:first-child { min-width: 0; overflow-wrap: break-word; word-break: normal; hyphens: none; }
+.dashsimple .ds-summary .summary-value.is-danger { color: var(--error-ink); }
 
 /* ---------- The round graphs ---------- */
 .sg-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -102,29 +101,36 @@
 .sg-open:hover svg { transform: translateX(3px); }
 .sg-open:active { transform: scale(.99); }
 
-/* when the dashboard itself is narrow (a tablet, or a laptop with the menu open; the page width alone cannot tell, the menu may be folded): two cards across, the odd ninth card takes the whole last row, so the text never wraps into a tall narrow column */
-@container dash (max-width: 960px) {
-  .ds-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ds-grid > .ds-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+/* Five equal columns hold the icon, a two-line "Job / requirements" and the figure from a dashboard width of about 930 px (a 1280 px window with the sidebar open leaves
+   ~950 px, five cards of ~178 px): below 1100 px the cards get a tighter padding, gap and icon so the label box is ~110 px and no word is ever split. The skin sets the
+   card padding, gap and icon with `:root:root`, so these rules carry the same prefix. Under 930 px: three across. */
+@container dash (max-width: 1100px) {
+  :root:root .dashsimple .ds-summary .summary-card { padding: 14px 12px 14px; }
+  :root:root .dashsimple .ds-summary .summary-icon { width: 36px; height: 36px; }
+}
+@container dash (max-width: 929px) {
+  :root:root .dashsimple .ds-summary .summary-card { padding: 18px 20px 20px; }
+  :root:root .dashsimple .ds-summary .summary-icon { width: 40px; height: 40px; }
+  .dashsimple .ds-summary .workspace-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dashsimple .ds-summary .workspace-summary > :last-child:nth-child(odd):not(:only-child) { grid-column: auto; }   /* the shared tablet rule would stretch the ninth card over three columns */
+}
+@container dash (max-width: 700px) {
+  .dashsimple .ds-summary .summary-card { min-height: 150px; }   /* two across are wide: keep the 150 px minimum height, no tall slabs */
+  .dashsimple .ds-summary .workspace-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashsimple .ds-summary .workspace-summary > :last-child:nth-child(odd):not(:only-child) { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) { .sg-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 760px) {
   .ds-head h1 { font-size: 24px; line-height: 30px; padding-bottom: 12px; }
-  .ds-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .ds-card { min-height: 60px; padding: 10px 12px; column-gap: 10px; grid-template-columns: 34px minmax(0, 1fr) auto 12px; }
-  .ds-icon { width: 34px; height: 34px; }
-  .ds-go { width: 12px; height: 12px; }
-  .ds-note { -webkit-line-clamp: 2; }
-  .ds-grid > .ds-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
-  .ds-value { font-size: 22px; line-height: 28px; }
+  .dashsimple .ds-summary .workspace-summary { gap: 12px; }
   .sg-card { padding: 16px; }
   .sg-bar-top .sg-seg { width: 100%; overflow-x: auto; }
   .sg-seg button { flex: 1 0 auto; padding: 0 12px; }
 }
-@media (prefers-reduced-motion: reduce) { .ds-card, .ds-go, .sg-arc, .sg-bar s, .sg-open, .sg-row, .sg-seg button { transition: none; animation: none; } .ds-card:hover { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .sg-arc, .sg-bar s, .sg-open, .sg-row, .sg-seg button { transition: none; animation: none; } }
 /* Phones and tablets: body text reads at 14 px and every card, tab and button is at least 44 px. */
 @media (max-width: 1023px), (pointer: coarse) {
-  .ds-label, .ds-note, .sg-head p, .sg-insight, .sg-name { font-size: 14px; }
+  .sg-head p, .sg-insight, .sg-name { font-size: 14px; }
   .sg-seg button { height: 44px; }
   .sg-row { min-height: 44px; }
   .sg-open { height: 44px; }
@@ -135,7 +141,8 @@
   .sg-seg::-webkit-scrollbar { display: none; }
   .sg-seg button { padding: 0 10px; }
 }
-/* A phone: one card per row. Two across leave about 60px for the words, and "Job requirements" and "from prescreening onward" were cut off. */
+/* A phone: one card per row, so a label such as "Job requirements" is never cut off. */
 @media (max-width: 520px) {
-  .ds-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .dashsimple .ds-summary .summary-card { min-height: 150px; }
+  .dashsimple .ds-summary .workspace-summary { grid-template-columns: minmax(0, 1fr); gap: 10px; }
 }

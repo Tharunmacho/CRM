@@ -610,6 +610,16 @@ export function normaliseMyDay(raw: Record<string, unknown>): MyDay {
 
 /* ---------------------------------------------------------------- server and queries */
 
+/**
+ * Whether the report on screen may be drawn: there is an answer AND it answers the question now asked (this period, this recruiter, this tab).
+ * After the period or the recruiter changes the newest answer is still the PREVIOUS question's, and drawing it under the new heading would show
+ * another period's numbers as this one's (a "Today" that reads yesterday's work), so a different question shows the loading state instead.
+ * A live refresh of the same question keeps its answer (`current` stays true), so numbers never blink away while they are being re-read.
+ */
+export function showsReport(state: { data: unknown; current: boolean }): boolean {
+  return !!state.data && state.current
+}
+
 /** A server that does not have the new report yet answers one of these. */
 export const isOutdatedServer = (status: number | undefined) => status === 404 || status === 405 || status === 501 || status === 502
 

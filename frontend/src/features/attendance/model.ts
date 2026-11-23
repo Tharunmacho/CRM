@@ -4,6 +4,8 @@ export interface AttendanceSession {
   checkedInAt: string
   checkedOutAt: string | null
   durationSeconds: number
+  /** A shift that was never checked out and whose day is over (a missed check-out): it carries no hours. */
+  unclosed?: boolean
   correctionReason?: string | null
   correctedBy?: string | null
 }

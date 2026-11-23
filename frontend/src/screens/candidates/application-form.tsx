@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Building2, Eye, Loader2, Printer, Save, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { useStore } from '@/shared/state/crm-store'
+import { refreshSilently } from '@/shared/state/refresh-retry'
 import { useLiveStatus } from '@/shared/state/live'
 import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
@@ -20,6 +21,8 @@ import { DEFAULT_TAB, availableTabs, hashForTab, isDetailTab, missingByTab, tabF
 import { FormTabs, type TabBadge } from '@/features/application-form/components/form-tabs'
 import { ContextStrip } from '@/features/application-form/components/context-strip'
 import { RecruitmentStages, StageControl } from '@/features/application-form/components/recruitment-stages'
+import { PrescreeningPanel } from '@/features/application-form/components/prescreening-panel'
+import type { PrescreenState } from '@/features/application-form/prescreening'
 import type { DocumentKind, FeedbackData, FormDraft, MissingItem, TrackingRow } from '@/features/application-form/types'
 import { FormErrorCard, FormSkeleton } from '@/features/application-form/components/form-states'
 import { SectionHeader } from '@/features/application-form/components/section-header'
@@ -78,6 +81,7 @@ export default function ApplicationFormPage() {
 
   const [leaving, setLeaving] = useState(false)
   const [openStage, setOpenStage] = useState<{ stage: number } | null>(null)
+  const [prescreenState, setPrescreenState] = useState<PrescreenState>('not_started')   // what the Prescreening panel last read (the stage list beside it shows the same)
   const [stageDirty, setStageDirty] = useState(false)
   const [stageBusy, setStageBusy] = useState(false)
   const [busyKinds, setBusyKinds] = useState<DocumentKind[]>([])
@@ -221,8 +225,9 @@ export default function ApplicationFormPage() {
     const saved = await state.changeAssignment(field, change)
     if (!saved) return
     if (field === 'job' || field === 'recruiter') {
-      try { await store.refresh({ keepCurrent: true }) }
-      catch { store.notify('Assignment saved. Refresh the stages to load the latest details.') }
+      // The new placement is on the server already; the stage panel shows "Loading the stages…" and re-reads by itself until it appears.
+      // Nothing here blocks the person or asks for a manual Refresh: a failed re-read is retried quietly in the background.
+      void refreshSilently(() => store.refresh({ keepCurrent: true }))
     }
     const now = saved.application
     const stale = (applicationId && now?.id !== applicationId) || (orderId && now?.orderId !== orderId)
@@ -328,17 +333,17 @@ export default function ApplicationFormPage() {
                   <AssignmentBar assignment={form.assignment} saving={state.assignmentSaving} errors={state.assignmentErrors} onChange={(field, change) => void changeAssignment(field, change)} applications={form.applications} activeApplicationId={form.application?.id ?? ''} canManageJobs={isAdminLevel(me.role)} pickersLocked={pickersLocked(application?.currentStage, application?.status)} onUnmap={canWork && store.can('map_candidates') && application ? () => { if (!leaveStage()) return; setUnmapError(''); setUnmapOpen(true) } : undefined} onSwitchApplication={(applicationId) => { if (leaveStage()) navigate(applicationFormHref(id, null, applicationId), { replace: true }) }}
                     stageControl={<><StageControl form={form} canOpen={Boolean(application) && !stageBusy} onOpen={selectStage} /><CommencementField ctx={ctx.fill} canWork={canWork} /></>} />
                   <div className="af-stage-workbench">
-                  <RecruitmentStages form={form} canOpen={Boolean(application) && !stageBusy} selectedStage={selectedStage} onOpen={selectStage} />
+                  <RecruitmentStages form={form} canOpen={Boolean(application) && !stageBusy} selectedStage={selectedStage} onOpen={selectStage} prescreenOpen={!application} prescreenState={prescreenState} />
                   {application && selectedStage && <div className="af-stage-feedback" id="af-stage-feedback">
                     <StageModal key={`${application.id}-${selectedStage}`} embedded applicationId={application.id} open focusStage={selectedStage}
                       onDirtyChange={setStageDirty} onBusyChange={setStageBusy}
                       onStageChanged={() => { setStageDirty(false); setOpenStage(null); void state.reload(true) }}
                       onClose={() => { if (leaveStage()) { setOpenStage(null); void state.reload(true) } }} />
                   </div>}
-                  {!application && <div className="af-stage-empty" id="af-stage-feedback">
-                    <Building2 aria-hidden="true" />
-                    <div><h3>Choose a job to begin</h3><p>Select a client and job above. Each stage will keep its own feedback and saved history here.</p></div>
-                  </div>}
+                  {/* No job yet: Prescreening (stage 1) is open without a client or job; a client and a job are mandatory from stage 2. */}
+                  {!application && <PrescreeningPanel candidateId={id} canWork={canWork} clients={form.assignment.options.clients}
+                    onState={setPrescreenState}
+                    onChanged={() => { void state.reload(true); void refreshSilently(() => store.refresh({ keepCurrent: true })) }} />}
                   </div>
                 </div>
               </div>

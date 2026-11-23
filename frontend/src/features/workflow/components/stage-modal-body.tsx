@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   BookUser,
@@ -49,6 +49,8 @@ import {
 import { advanceSummary, withAdvanceStatus } from '@/shared/workflow/advance'
 import type { Application, FileVersion, StageRecord } from '@/shared/model/types'
 import { Dialog } from '@/shared/ui/overlay'
+import { ReopenApplication } from './reopen-application'
+import { canReopenApplication, emptyStageHint } from '../reopen-application'
 import { Badge } from '@/shared/ui/display'
 import {
   Button,
@@ -61,6 +63,7 @@ import {
 } from '@/shared/ui/primitives'
 import { FileDrop, type StoredFile } from '@/shared/ui/file-drop'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
+import { refreshSilently, refreshUntil } from '@/shared/state/refresh-retry'
 import { PersonAvatar } from './person-avatar'
 import { DocumentList } from '@/features/candidates/components/profile-documents'
 import { useCandidateDocuments } from '@/features/candidates/use-candidate-documents'
@@ -162,8 +165,29 @@ export function StageModal({
   const order = app ? store.order(app.orderId) : undefined
   const client = order ? store.company(order.companyId) : undefined
   const designation = order ? store.designation(order.designationId) : undefined
+  // A placement that was JUST created (the client and job were saved a moment ago) is on the server before it is in this browser's
+  // workspace snapshot. That is never a "Refresh" job for the person: show "Loading the stages…" and re-read by ourselves
+  // (0.3, 0.6, 1.2, 2.4 s, then every 5 s); only after 30 s say plainly that it could not be loaded, with "Try again".
+  const stagesLoaded = Boolean(app && cand && order && client && designation)
+  const stagesLoadedRef = useRef(stagesLoaded)
+  stagesLoadedRef.current = stagesLoaded
+  const waitForStages = open && Boolean(applicationId) && !stagesLoaded && (snapshot.ready || Boolean(snapshot.error))
+  const [stagesGaveUp, setStagesGaveUp] = useState(false)
+  const [stagesRound, setStagesRound] = useState(0)
+  useEffect(() => {
+    if (!waitForStages) { setStagesGaveUp(false); return undefined }
+    let cancelled = false
+    setStagesGaveUp(false)
+    void refreshUntil({ read: () => store.refresh({ keepCurrent: true }), done: () => stagesLoadedRef.current, cancelled: () => cancelled })
+      .then((outcome) => { if (!cancelled && outcome === 'gave_up') setStagesGaveUp(true) })
+    return () => { cancelled = true }
+  }, [waitForStages, applicationId, stagesRound])
   if (!snapshot.ready || !app || !cand || !order || !client || !designation) {
-    const state = <div className="sm sm-state"><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading the stages…' : 'We could not find this order for the candidate any more. Refresh and try again.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" variant="primary" onClick={snapshot.retry}>Refresh</Button>}</div>
+    const failed = stagesGaveUp
+    const message = failed
+      ? (snapshot.error || 'We could not load the stages for this application yet. Check your connection, then try again.')
+      : 'Loading the stages…'
+    const state = <div className="sm sm-state"><p role={failed ? 'alert' : 'status'} className="text-sm text-ink-600">{message}</p>{failed && <Button className="mt-4" variant="primary" onClick={() => { setStagesRound((value) => value + 1); snapshot.retry() }}>Try again</Button>}</div>
     return embedded ? state : <Dialog open={open} onClose={onClose} title={cand?.name ?? 'Stages for this order'} description={cand ? 'Stages for this order' : undefined}>{state}</Dialog>
   }
   const owner = store.user(cand.ownerId)
@@ -185,11 +209,12 @@ export function StageModal({
     return <div className="sm sm-embedded" data-sm-stage={selectedStage.no}>
       {!canWork && <p className="sm-note"><Lock className="h-4 w-4" aria-hidden="true" />{readOnlyReason}</p>}
       {!owner?.active && <p className="sm-note">Assign an active recruiter before moving or reopening a stage. You can still save a draft.</p>}
+      {app.status === 'closed' && <ClosedRow app={app} canReopen={canReopenApplication(app.status, canWork)} disabled={!owner?.active || pending || reopening} onRecorded={onStageRecorded} onDone={onStageChanged} />}
       {fileError && <p className="sm-alert" role="alert">We could not load the documents. Feedback is still available. <button type="button" className="underline" onClick={() => setFileRetry((value) => value + 1)}>Retry documents</button></p>}
       {current ? <CurrentStage key={`${app.id}-${app.currentStage}-${app.stages.length}`} app={app} canWork={canWork && !reopening} onDirtyChange={setDirty} onBusyChange={setPending} files={files} onUploaded={(file) => setFiles((items) => [...items.filter((item) => item.id !== file.id), file])} onStageChanged={onStageChanged} onStageRecorded={onStageRecorded} compact />
         : <section className="sm-card sm-inline-history">
           <header className="sm-inline-title"><div><small>Stage {selectedStage.no} of {STAGES.length}</small><h3>{selectedStage.title}</h3></div><Badge tone={activeRecords.length ? 'green' : 'neutral'} variant="dot">{activeRecords.length ? 'Saved history' : 'Not started'}</Badge></header>
-          {selectedRecords.length === 0 && <p className="sm-hint">No feedback has been saved for this stage yet. {app.status === 'active' ? `Complete stage ${app.currentStage} to continue in order.` : 'Reopen the application to continue working on its stages.'}</p>}
+          {selectedRecords.length === 0 && <p className="sm-hint">No feedback has been saved for this stage yet. {emptyStageHint(app.status, app.currentStage, canReopenApplication(app.status, canWork))}</p>}
           {selectedRecords.map((record) => <div className="sm-inline-attempt" key={`${record.stage}-${record.attempt}`}>{record.reopenedReason && <ReopenedNote record={record} reopenings={reopenings} />}<CompletedStage record={record} files={files} app={app} /></div>)}
           {activeRecords.length > 0 && <ReopenStage app={app} stage={selectedStage.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Discard unsaved feedback and reopen this stage?')} onStageChanged={onStageChanged} />}
         </section>}
@@ -266,7 +291,7 @@ export function StageModal({
             ) : app.status === 'deployed' ? (
               <li className="sm-step is-deployed"><span className="sm-node" aria-hidden="true"><Trophy className="h-4 w-4" /></span><DeployedRow /></li>
             ) : (
-              <li className="sm-step is-closed"><span className="sm-node" aria-hidden="true"><CircleSlash className="h-4 w-4" /></span><ClosedRow app={app} /></li>
+              <li className="sm-step is-closed"><span className="sm-node" aria-hidden="true"><CircleSlash className="h-4 w-4" /></span><ClosedRow app={app} canReopen={canReopenApplication(app.status, canWork)} disabled={!owner?.active || pending || reopening} onRecorded={onStageRecorded} onDone={onStageChanged} /></li>
             )}
             {STAGES.filter((definition) => definition.no > app.currentStage && !effective.some((record) => record.stage === definition.no)).map((definition) => (
               <li key={definition.no} className="sm-step is-upcoming" data-sm-stage={definition.no}>
@@ -706,8 +731,11 @@ function CurrentStage({
   }
 
   const refreshAfterWrite = async () => {
-    try { await store.refresh({ keepCurrent: true }); setRefreshRequired(false); setError(''); onStageChanged?.() }
-    catch { if (store.isCurrentSession()) { setRefreshRequired(true); setError('Your change is saved. Refresh to see the latest.') } }
+    // Never a manual job: the re-read is retried silently (0.3 s ... 5 s apart); only after about 30 s of failures does the person see a message.
+    const ok = await refreshSilently(() => store.refresh({ keepCurrent: true }), { cancelled: () => !store.isCurrentSession() })
+    if (!store.isCurrentSession()) return
+    if (ok) { setRefreshRequired(false); setError(''); onStageChanged?.() }
+    else { setRefreshRequired(true); setError('Your change is saved, but the latest details could not be loaded yet. Check your connection, then try again.') }
   }
 
   const save = async () => {
@@ -773,9 +801,9 @@ function CurrentStage({
           {conflict.current_stage === app.currentStage && conflict.status === 'active' && <Button size="sm" onClick={() => { setData(conflict.draft ?? {}); setLockVersion(conflict.lock_version ?? lockVersion); setDirty(false); setConflict(null); setError('') }}>Use the saved version</Button>}
           <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(reportFailure)}>Refresh</Button>
         </div>}
-        {refreshRequired && !completed && <Button className="mt-3" size="sm" disabled={busy} onClick={() => void refreshAfterWrite()}>Refresh</Button>}
+        {refreshRequired && !completed && <Button className="mt-3" size="sm" disabled={busy} onClick={() => void refreshAfterWrite()}>Try again</Button>}
       </div>}
-      {completed && <div role="status" className="sm-alert is-info">Saved. <button className="underline" onClick={() => void refreshAfterWrite()}>Refresh to see the history</button></div>}
+      {completed && <div role="status" className="sm-alert is-info">Saved.{refreshRequired ? <> <button className="underline" onClick={() => void refreshAfterWrite()}>Try again</button></> : ' Updating the history…'}</div>}
 
       <section className="sm-card sm-current" aria-label={`Current stage ${def.no}: ${def.title}`}>
         <header>
@@ -1169,8 +1197,9 @@ function DeployedRow() {
   )
 }
 
-function ClosedRow({ app }: { app: Application }) {
+function ClosedRow({ app, canReopen = false, disabled = false, onRecorded, onDone }: { app: Application; canReopen?: boolean; disabled?: boolean; onRecorded?: () => void; onDone?: () => void }) {
   const tab = closureTab(app.closureReason)
+  const stageTitle = stageByNo(Math.max(1, app.currentStage))?.title ?? 'Prescreening'
   return <section className="sm-card sm-end is-closed">
     <span className="sm-end-icon" aria-hidden="true"><CircleSlash className="h-5 w-5" /></span>
     <div>
@@ -1179,7 +1208,8 @@ function ClosedRow({ app }: { app: Application }) {
         ? 'The candidate was removed from this order (or moved to another job) and its open tasks were cancelled. They are on the Tasks list again and can be matched to another order.'
         : tab === 'Declined'
           ? 'The candidate is on the Declined tab of the Tasks page and in All, and can be offered other orders.'
-          : 'The candidate is on the Rejected tab of the Tasks page and in All, and can be matched to another order.'} Finished stages and files are above. An admin can reopen a finished stage, and must give a reason.</p>
+          : 'The candidate is on the Rejected tab of the Tasks page and in All, and can be matched to another order.'} Finished stages and files are above.{canReopen ? ` Reopen the application to continue from ${stageTitle}.` : ''} An admin can also reopen a finished stage, and must give a reason.</p>
+      {canReopen && <div className="mt-3"><ReopenApplication app={app} stageTitle={stageTitle} disabled={disabled} onRecorded={onRecorded} onDone={onDone} /></div>}
     </div>
   </section>
 }

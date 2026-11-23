@@ -8,7 +8,7 @@ import type { AttendanceCode, MonthlyAttendance, PolicyDay } from '../attendance
 export type AttendanceKind = 'present' | 'late' | 'early' | 'absent' | 'leave' | 'off' | 'holiday' | 'pending' | 'missed' | 'duty'
 export type PillTone = 'green' | 'amber' | 'red' | 'blue' | 'neutral'
 
-export interface AttendancePair { checkedInAt: string; checkedOutAt: string | null; seconds: number }
+export interface AttendancePair { checkedInAt: string; checkedOutAt: string | null; seconds: number; /** Never checked out and the day is over: no hours. */ unclosed: boolean }
 export interface AttendanceRow {
   id: string
   name: string
@@ -22,6 +22,10 @@ export interface AttendanceRow {
   /** The last check-out of the day; null while the person is still logged in or never logged in. */
   lastOut: string | null
   stillIn: boolean
+  /** A shift on a finished day that was never checked out (a missed check-out): no last logout and no hours are shown for it. */
+  unclosed: boolean
+  /** The first login on the row belongs to an earlier day (a shift that crossed midnight and is still being counted here). */
+  carriedIn: boolean
   workedSeconds: number
   lateMinutes: number
   earlyMinutes: number
@@ -41,6 +45,19 @@ export interface AttendanceCounts { present: number; late: number; absent: numbe
  * (attendance_hr._shift_value). A person's own shift start, when the policy record has it, always wins.
  */
 export const DEFAULT_SHIFT_START = '10:00'
+
+/**
+ * The calendar day ("2026-11-20") a stamp falls on in a time zone; '' when it cannot be told (no zone, or not a time).
+ * Used to tell a login of this day from a shift that started on an earlier one and crossed midnight.
+ */
+export function dayInZone(stampText: string | null | undefined, zone: string | undefined): string {
+  const at = stampText ? new Date(stampText) : null
+  if (!at || !zone || !Number.isFinite(at.getTime())) return ''
+  try { return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: zone }).format(at) } catch { return '' }
+}
+
+/** How long after its last heartbeat a page still counts as online (the server's rule, docs/attendance.md): 90 seconds. */
+export const PRESENCE_OFFLINE_AFTER_SECONDS = 90
 
 /** "09:55" in a time zone, as minutes after midnight. null when the stamp is not a time. */
 export function localMinutes(stampText: string | null | undefined, zone: string): number | null {
@@ -123,12 +140,20 @@ function policyDayOf(month: MonthlyAttendance | null | undefined, userId: string
  * One row for one person. `today` is the agency's current day: on it (or later) a person with no check-in is "Not clocked in yet", on a
  * past day "Absent". The policy status wins when there is one, except that an open session always means the person is here.
  */
-export function buildRow(person: StaffAttendance, policy: PolicyDay | null, day: string, today: string, zone?: string): AttendanceRow {
+export function buildRow(person: StaffAttendance, policy: PolicyDay | null, day: string, today: string, zone?: string, nowMs?: number): AttendanceRow {
   const sessions: AttendancePair[] = [...person.attendance.sessions]
     .sort((a, b) => stamp(a.checkedInAt) - stamp(b.checkedInAt))
-    .map((session) => ({ checkedInAt: session.checkedInAt, checkedOutAt: session.checkedOutAt, seconds: session.durationSeconds }))
-  const open = person.attendance.status === 'checked_in' || sessions.some((session) => !session.checkedOutAt)
-  const firstIn = sessions[0]?.checkedInAt ?? policy?.checkIn ?? null
+    .map((session) => ({ checkedInAt: session.checkedInAt, checkedOutAt: session.checkedOutAt, seconds: session.durationSeconds, unclosed: !!session.unclosed || (!session.checkedOutAt && day < today) }))
+  // Open means a shift of THIS day's list that has no check-out. The person's current clock state (attendance.status) is about right now, not about the
+  // day being looked at: a login made today must not turn yesterday's row into "still logged in".
+  const open = sessions.some((session) => !session.checkedOutAt)
+  // On a finished day a shift that was never checked out is a missed check-out, not "still logged in", and it carries no hours (the server counts none).
+  const unclosed = day < today && open
+  // Logins that belong to this day. A shift that started on an earlier day and crossed midnight is on the list (its overlap is counted) but its
+  // login time is not this day's arrival, so it can neither be this day's "first login" nor make the person late.
+  const own = zone ? sessions.filter((session) => dayInZone(session.checkedInAt, zone) === day) : sessions
+  const carriedIn = !!zone && sessions.length > 0 && own.length === 0
+  const firstIn = own[0]?.checkedInAt ?? sessions[0]?.checkedInAt ?? policy?.checkIn ?? null
   const closed = sessions.map((session) => session.checkedOutAt).filter((value): value is string => !!value)
   const lastOut = open ? null : closed.sort((a, b) => stamp(a) - stamp(b)).pop() ?? person.attendance.lastCheckedOutAt ?? (sessions.length ? null : policy?.checkOut ?? null)
   const attended = sessions.length > 0
@@ -144,12 +169,15 @@ export function buildRow(person: StaffAttendance, policy: PolicyDay | null, day:
     else if (open && day >= today) kind = 'present'
   }
   if (!kind) kind = attended ? 'present' : day >= today ? 'pending' : 'absent'
+  // Without the policy record a finished day whose only shift was never checked out is a missed check-out (the policy says so when it is there)
+  if (!policy && unclosed && kind === 'present') kind = 'missed'
   // A day off with no check-ins stays a day off; a check-in on it is just attendance
   if ((kind === 'off' || kind === 'holiday' || kind === 'leave') && attended && !policy) kind = 'present'
 
   // Late is the first login after the shift start, whatever the day's pay status: a full day inside the flexible window is "Present" for the policy
   // but still a late arrival for management. Needs the agency's time zone; without it only the policy's own late minutes are known.
-  const lateBy = kind === 'duty' ? 0 : arrivalLateness(firstIn, policy?.shift?.start, attended ? zone : undefined, policy?.lateMinutes)
+  const lateFrom = carriedIn ? null : (own[0]?.checkedInAt ?? firstIn)
+  const lateBy = kind === 'duty' ? 0 : arrivalLateness(lateFrom, policy?.shift?.start, attended ? zone : undefined, carriedIn ? 0 : policy?.lateMinutes)
   if (kind === 'present' && lateBy > 0) kind = 'late'
 
   const pill = PILLS[kind]
@@ -157,7 +185,11 @@ export function buildRow(person: StaffAttendance, policy: PolicyDay | null, day:
   const idleDay = kind === 'off' || kind === 'holiday'
   // Signed in and using the CRM right now (a live heartbeat), but no check-in: attendance only starts with Check in, so the status stays "pending",
   // but the board says what is true instead of a flat "Not clocked in yet".
-  const here = person.presence?.tracked && day >= today ? person.presence.status : 'offline'
+  // An "online" reading is only as fresh as its last heartbeat: past the server's 90-second rule it is no longer online, even if the page has not
+  // asked again yet (the board is asked again every few seconds and ticks this clock in between).
+  const seenAt = person.presence?.lastSeenAt ? new Date(person.presence.lastSeenAt).getTime() : NaN
+  const stale = nowMs != null && Number.isFinite(seenAt) && nowMs - seenAt > PRESENCE_OFFLINE_AFTER_SECONDS * 1000
+  const here = person.presence?.tracked && day >= today && !stale ? person.presence.status : 'offline'
   const online = here === 'online' || here === 'idle' ? here : null
   const waiting = kind === 'pending' && !!online
   return {
@@ -170,8 +202,10 @@ export function buildRow(person: StaffAttendance, policy: PolicyDay | null, day:
     shift: policy && !idleDay ? shiftLabel(policy.shift) : '',
     firstIn,
     lastOut,
-    stillIn: open,
-    workedSeconds,
+    stillIn: open && !unclosed,
+    unclosed,
+    carriedIn,
+    workedSeconds: unclosed ? 0 : workedSeconds,
     lateMinutes: lateBy,
     earlyMinutes: Math.max(0, Math.round(policy?.earlyMinutes ?? 0)),
     tracked: !!person.presence?.tracked,
@@ -190,11 +224,11 @@ export const NO_OWN_ATTENDANCE = new Set(['admin'])
  * The rows of the table: everyone the check-in response lists (or only `staff`), the policy record folded in where it is there, ordered by
  * name. Administrators are left out of an all-recruiters view (they do not clock in); a narrowed or own view is never emptied by that rule.
  */
-export function buildAttendanceRows({ day, today, staff = '', attendance, month, zone }: { day: string; today: string; staff?: string; attendance: AttendanceResponse | null | undefined; month?: MonthlyAttendance | null; /** The agency's time zone: with it a late arrival is measured against the shift start. */ zone?: string }): AttendanceRow[] {
+export function buildAttendanceRows({ day, today, staff = '', attendance, month, zone, nowMs }: { day: string; today: string; staff?: string; attendance: AttendanceResponse | null | undefined; month?: MonthlyAttendance | null; /** The agency's time zone: with it a late arrival is measured against the shift start. */ zone?: string; /** The clock to judge a live reading against (an online page whose last heartbeat is older than 90 s is not online). */ nowMs?: number }): AttendanceRow[] {
   const people = (attendance?.staff ?? []).filter((person) => !staff || person.userId === staff)
   const shown = people.filter((person) => !!staff || people.length === 1 || !NO_OWN_ATTENDANCE.has(person.role))
     .filter((person) => person.active || person.attendance.sessions.length > 0)
-  return shown.map((person) => buildRow(person, policyDayOf(month, person.userId, day), day, today, zone))
+  return shown.map((person) => buildRow(person, policyDayOf(month, person.userId, day), day, today, zone, nowMs))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -224,8 +258,9 @@ export function minutesText(minutes: number) {
 }
 
 /** The live line under the status: where the person is right now ("Logged in now", "Logged out", "Not clocked in"). */
-export function presenceLabel(row: Pick<AttendanceRow, 'stillIn' | 'sessions' | 'kind'> & { online?: AttendanceRow['online'] }): { label: string; live: boolean } {
+export function presenceLabel(row: Pick<AttendanceRow, 'stillIn' | 'sessions' | 'kind'> & { online?: AttendanceRow['online']; unclosed?: boolean }): { label: string; live: boolean } {
   if (row.stillIn) return { label: 'Logged in now', live: true }
+  if (row.unclosed) return { label: 'No check-out', live: false }
   if (row.sessions.length) return { label: 'Logged out', live: false }
   if (row.kind === 'leave' || row.kind === 'off' || row.kind === 'holiday') return { label: '', live: false }
   if (row.online) return { label: row.online === 'online' ? 'Online in CRM now' : 'Idle in CRM', live: true }

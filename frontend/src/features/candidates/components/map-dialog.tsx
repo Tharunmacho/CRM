@@ -7,6 +7,7 @@ import { Button, SearchInput } from '@/shared/ui/primitives'
 import { Badge, EmptyState } from '@/shared/ui/display'
 import { cn } from '@/shared/lib/cn'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
+import { refreshSilently } from '@/shared/state/refresh-retry'
 import { orderProfileEvidence } from '@/features/jobs/order-profile-evidence'
 import { openInitialCallTask } from '../initial-call'
 import { CallDialog } from './call-dialog'
@@ -67,10 +68,9 @@ export function MapToOrderDialog({
         const result = await store.mapCandidate(candidateId, picked!)
         if (!store.isCurrentSession() || !result) return
         setMapped(true)
-        if (!result.refreshed) {
-          setError('The candidate is matched. Refresh to see it. You do not need to match again.')
-          return
-        }
+        // The match is saved. If this browser's re-read did not finish, it is retried quietly in the background (0.3 s ... 5 s apart):
+        // the person has nothing to refresh, and the dialog closes as it does when the re-read worked.
+        if (!result.refreshed) void refreshSilently(() => store.refresh({ keepCurrent: true }))
       }
       if (store.isCurrentSession()) onClose()
     } catch (cause) {

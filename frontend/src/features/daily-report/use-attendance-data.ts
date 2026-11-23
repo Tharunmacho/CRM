@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '@/shared/api/client'
 import { liveInterval } from '@/shared/state/live'
 import { createCoalescer } from '@/shared/lib/coalesce'
+import { answerFor } from './answer-for'
 import type { AttendanceResponse } from '../attendance/model'
 import type { MonthlyAttendance } from '../attendance/policy-model'
 
@@ -50,19 +51,20 @@ export interface MonthState { data: MonthlyAttendance | null; loading: boolean; 
 
 /** The month's policy record (statuses, shifts, login and logout times, minutes) for everyone, or for one person (`staff`). */
 export function useMonthAttendance(month: string, staff: string, reload: number): MonthState {
-  const [state, setState] = useState<MonthState>({ data: null, loading: true, error: '', loadedAt: null })
+  const key = `${month}|${staff}`
+  const [held, setState] = useState<MonthState & { key: string }>({ data: null, loading: true, error: '', loadedAt: null, key: '' })
   useLive(MONTH_RE.test(month), [month, staff, reload], async (initial, signal) => {
-    if (initial) setState({ data: null, loading: true, error: '', loadedAt: null })
+    if (initial) setState({ data: null, loading: true, error: '', loadedAt: null, key })
     const [year, monthNumber] = month.split('-')
     const params = new URLSearchParams({ year, month: String(Number(monthNumber)), ...(staff ? { staffId: staff } : {}) })
     try {
       const data = await api.get<MonthlyAttendance>('/attendance/month?' + params, { signal })
-      if (!signal.aborted) setState({ data, loading: false, error: '', loadedAt: new Date().toISOString() })
+      if (!signal.aborted) setState({ data, loading: false, error: '', loadedAt: new Date().toISOString(), key })
     } catch (cause) {
-      if (!signal.aborted) setState((previous) => ({ ...previous, loading: false, error: cause instanceof Error ? cause.message : 'We could not load attendance.' }))
+      if (!signal.aborted) setState((previous) => ({ ...previous, loading: false, error: cause instanceof Error ? cause.message : 'We could not load attendance.', key }))
     }
   }, MONTH_RATES)
-  return state
+  return answerFor(held, key, { data: null, loading: true, error: '', loadedAt: null })
 }
 
 export interface DayState { attendance: AttendanceResponse | null; month: MonthlyAttendance | null; loading: boolean; error: string }
@@ -73,11 +75,12 @@ export interface DayState { attendance: AttendanceResponse | null; month: Monthl
  * instead of being read a second time.
  */
 export function useDayAttendance(date: string, staff: string, reload: number, sharedKey: string, shared: MonthlyAttendance | null): DayState {
-  const [state, setState] = useState<DayState>({ attendance: null, month: null, loading: true, error: '' })
+  const dayKey = `${date}|${staff}`
+  const [held, setState] = useState<DayState & { key: string }>({ attendance: null, month: null, loading: true, error: '', key: '' })
   const blocked = useRef('')
   const sharesMonth = sharedKey === date.slice(0, 7)
   useLive(DAY_RE.test(date), [date, staff, reload, sharesMonth], async (initial, signal) => {
-    if (initial) setState({ attendance: null, month: null, loading: true, error: '' })
+    if (initial) setState({ attendance: null, month: null, loading: true, error: '', key: dayKey })
     const [year, monthNumber] = date.split('-')
     const key = `${year}-${monthNumber}|${staff}`
     const sessionsQuery = new URLSearchParams({ date, ...(staff ? { staffId: staff } : {}) })
@@ -91,11 +94,12 @@ export function useDayAttendance(date: string, staff: string, reload: number, sh
           return null
         }),
       ])
-      if (!signal.aborted) setState({ attendance, month, loading: false, error: '' })
+      if (!signal.aborted) setState({ attendance, month, loading: false, error: '', key: dayKey })
     } catch (cause) {
-      if (!signal.aborted) setState((previous) => ({ ...previous, loading: false, error: cause instanceof Error ? cause.message : 'We could not load attendance.' }))
+      if (!signal.aborted) setState((previous) => ({ ...previous, loading: false, error: cause instanceof Error ? cause.message : 'We could not load attendance.', key: dayKey }))
     }
   })
   // The policy record the rows use: the page's month when it is this day's month, else the one read for the day.
+  const state = answerFor(held, dayKey, { attendance: null, month: null, loading: true, error: '' })
   return { ...state, month: sharesMonth ? shared : state.month }
 }
