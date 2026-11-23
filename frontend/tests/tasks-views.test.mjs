@@ -367,3 +367,32 @@ test('whatever is written stays inside its cell on every tab: names and agencies
   assert.match(table, /<ScrollEdges /, 'the table fills the panel in percentages: no sideways scroll, cards below the breakpoint')
 })
 
+
+/* ------------------------------------------------------------------ a candidate who said no before any placement */
+
+test('a candidate who said no at the initial call (no placement, no stage) is a closed Declined row that opens as View and reads cleanly', () => {
+  const row = closed('call-no', 'declined', {
+    applicationId: null, stage: null,
+    outcome: { kind: 'declined', label: 'Declined', reason: 'Candidate not interested at the initial call', stage: null, at: '2026-11-19T07:00:00Z', by: null },
+  })
+  assert.equal(m.isClosed(row), true)
+  assert.equal(m.rowAction(row), 'View')
+  const detail = m.outcomeDetail(row.outcome, undefined, ZONE)
+  assert.equal(detail.where, '')
+  assert.equal(detail.why, 'Candidate not interested at the initial call')
+  assert.match(detail.line, /Candidate not interested at the initial call · 19 Nov 2026/)
+  // it sorts with the other ended rows and never becomes today's work
+  assert.deepEqual(order(m.taskRows([row, closed('placed', 'declined')], [], '2026-11-20', ZONE)).sort(), ['call-no', 'placed'])
+})
+
+test('rejecting or declining in the stage window re-reads the Tasks lists at once: the window says so right after the server confirms, the screen listens', async () => {
+  const body = await code('../src/features/workflow/components/stage-modal-body.tsx')
+  const completeAt = body.indexOf('const complete = async () =>')
+  const afterPost = body.indexOf('/complete`, { data:', completeAt)
+  assert.ok(completeAt > 0 && afterPost > completeAt)
+  const tail = body.slice(afterPost, body.indexOf('await refreshAfterWrite()', afterPost))
+  assert.match(tail, /onStageRecorded\?\.\(\)/, 'told right after the post, before the workspace refresh that follows')
+  assert.doesNotMatch(tail, /onStageChanged\?\.\(\)/, 'never the prop the candidate form uses to close its stage panel and reload')
+  const screen = await code('../src/screens/tasks/daily-work.tsx')
+  assert.match(screen, /<StageModal [^\n]*onStageRecorded=\{\(\) => void refreshAll\(\)/)
+})

@@ -20,7 +20,7 @@ const sum = (widths) => Object.values(widths).reduce((total, width) => total + w
 test('on a panel at or below the plan every column keeps its measured width', () => {
   const columns = m.taskColumnsFor(true, false)
   const plan = m.taskPlanWidth(true, false)
-  for (const panel of [0, 1080, plan]) {
+  for (const panel of [0, plan]) {   // (the plan is 1057px since the DOT column went, so 1080px already has spare room)
     assert.deepEqual(m.widthsWithSpare(columns, panel), Object.fromEntries(columns.map((c) => [c.key, c.width])), `${panel}px`)
   }
 })

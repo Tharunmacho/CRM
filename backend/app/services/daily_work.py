@@ -652,6 +652,11 @@ def outcome_of(app, by: str | None = None) -> dict:
     return {"kind": kind, "label": OUTCOME_LABELS[kind], "reason": reason, "stage": app.current_stage, "at": app.updated_at, "by": by}
 
 
+def outcome_of_call(cand) -> dict:
+    """The `outcome` of a candidate who said no at the initial call and has no placement of their own: Declined, no stage, closed when the call was recorded."""
+    return {"kind": "declined", "label": "Declined", "reason": "Candidate not interested at the initial call", "stage": None, "at": cand.call_recorded_at, "by": None}
+
+
 def _subject_placement():
     """Id of the placement an outcome is read from: the candidate's latest deployed one, else their last one."""
     deployed = aliased(Application)
@@ -666,9 +671,15 @@ def _outcome_conditions() -> dict:
     nothing_active = ~exists().where(active.candidate_id == Candidate.id, active.status == ApplicationStatus.active).correlate(Candidate)
     called_yes_since = and_(Candidate.call_recorded_at.is_not(None), Candidate.call_interested == "yes",
                             Candidate.call_recorded_at > Application.updated_at)
+    # The candidate said NO at the initial call and has no placement that ended in an outcome of its own (no placement at all, or only one
+    # that was unmapped / swapped): `Application` is then NULL (the subject join is an outer join) or a NOT_OUTCOMES closure. The call
+    # answer is what declares it (`record_call` puts them on "Not interested"; a later "yes" puts them back on today's list), so they are
+    # Declined, never also on today's list (not interested is not WORKABLE).
+    said_no_off_order = and_(Candidate.status == CandidateStatus.not_interested, Candidate.call_interested == "no", Candidate.call_recorded_at.is_not(None),
+                             or_(Application.id.is_(None), Application.closure_reason.in_(NOT_OUTCOMES)), nothing_active)
     return {
-        "declined": and_(Application.status == ApplicationStatus.closed, Application.closure_reason.in_(DECLINE_CLOSURES),
-                         ~func.coalesce(called_yes_since, false()), nothing_active),
+        "declined": or_(and_(Application.status == ApplicationStatus.closed, Application.closure_reason.in_(DECLINE_CLOSURES),
+                             ~func.coalesce(called_yes_since, false()), nothing_active), said_no_off_order),
         "rejected": and_(Application.status == ApplicationStatus.closed, Application.closure_reason.is_not(None),
                          Application.closure_reason.notin_(DECLINE_CLOSURES + NOT_OUTCOMES), ~func.coalesce(called_yes_since, false()), nothing_active),
         "travelled": Application.status == ApplicationStatus.deployed,
@@ -685,24 +696,25 @@ def view_counts(db, owner_ids) -> dict[str, int]:
     found = _outcome_conditions()
     declined, rejected, travelled = db.execute(
         select(*(func.count().filter(found[kind]) for kind in ("declined", "rejected", "travelled")))
-        .select_from(Candidate).join(Application, Application.id == _subject_placement()).where(Candidate.owner_id.in_(owner_ids))).one()
+        .select_from(Candidate).outerjoin(Application, Application.id == _subject_placement()).where(Candidate.owner_id.in_(owner_ids))).one()
     return {"declined": int(declined), "rejected": int(rejected), "travelled": int(travelled)}
 
 
 def fetch_outcome_rows(db, owner_ids, kinds, *, limit: int | None = None) -> list:
     """(candidate, placement, order, company, client, designation, agency) of the candidates with one of these outcomes, newest closure first.
-    One statement."""
+    One statement. A candidate who said no at the initial call and was never placed (Declined) has `None` for the placement, order, company,
+    client and designation: the row then falls back on the candidate's own form, like a row of today's list."""
     found = _outcome_conditions()
     return db.execute(
         select(Candidate, Application, Order, Company, Client, Designation, agency_display_expression().label("agency"))
-        .select_from(Candidate).join(Application, Application.id == _subject_placement())
-        .join(Order, Order.id == Application.order_id).join(Company, Company.id == Order.company_id)
-        .join(Client, Client.id == Company.client_id).join(Designation, Designation.id == Order.designation_id)
+        .select_from(Candidate).outerjoin(Application, Application.id == _subject_placement())
+        .outerjoin(Order, Order.id == Application.order_id).outerjoin(Company, Company.id == Order.company_id)
+        .outerjoin(Client, Client.id == Company.client_id).outerjoin(Designation, Designation.id == Order.designation_id)
         .where(Candidate.owner_id.in_(owner_ids), or_(*(found[kind] for kind in kinds)))
-        .order_by(Application.updated_at.desc(), Application.id).limit(limit or MAX_OUTCOME_ROWS)).all()
+        .order_by(case((Application.closure_reason.in_(NOT_OUTCOMES), Candidate.call_recorded_at), else_=func.coalesce(Application.updated_at, Candidate.call_recorded_at)).desc().nulls_last(), Application.id, Candidate.id).limit(limit or MAX_OUTCOME_ROWS)).all()
 
 
-def outcome_reads(app_ids, candidate_ids) -> tuple:
+def outcome_reads(app_ids, candidate_ids) -> tuple:   # `app_ids` holds only real placements (a candidate who was never placed has none)
     """The lookups behind outcome rows, for these placements and their candidates: the remarks written on the placements' tasks or on the
     candidate's initial-call tasks (no placement) plus every note of the candidates (`_remark_query` rows, like the current rows), the
     advance / review facts and who made the last change to each placement (the closure), all in the same round."""
@@ -740,20 +752,24 @@ def assemble_outcome_rows(rows, remark_rows, fact_rows, closed_by: dict | None =
     facts = stage_facts(fact_rows)
     out = []
     for cand, app, order, company, client, designation, agency in rows:
-        stage_no = app.current_stage
+        # A placement that was only unmapped or swapped is not an outcome: the row is listed because the candidate said no at the call,
+        # so it reads as that (Declined, no stage, no order) and not as a "Rejected / Unmapped" placement.
+        if app is not None and app.closure_reason in NOT_OUTCOMES:
+            app = order = company = client = designation = None
+        stage_no = app.current_stage if app is not None else None
         out.append({
-            "id": cand.id, "kind": "stage", "taskId": None, "applicationId": app.id, "candidateId": cand.id, "ownerId": cand.owner_id,
-            "commencementDate": app.commencement_date.isoformat() if app.commencement_date else None,
+            "id": cand.id, "kind": "stage", "taskId": None, "applicationId": app.id if app is not None else None, "candidateId": cand.id, "ownerId": cand.owner_id,
+            "commencementDate": app.commencement_date.isoformat() if app is not None and app.commencement_date else None,
             "stage": stage_no, "stageTitle": stage_by_no(stage_no).title if stage_no and 1 <= stage_no <= TOTAL_STAGES else None,
             "waiting": False, "status": "closed", "completedAt": None,
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "agency": agency or None,
-            "orderRef": order.ref, **payment_fields(app, facts),
+            "orderRef": order.ref if order is not None else None, **payment_fields(app, facts),
             "referral": {"source": cand.source.value, "label": SOURCE_LABELS.get(cand.source.value, "Other"),
                          "detail": cand.source_detail if cand.source == Source.referral else None},
-            "remark": by_application.get(app.id) or by_candidate.get(cand.id),
-            **_note_fields(_row_notes(found_notes, cand.id, app.id), now=now, tz=tz),
-            "outcome": outcome_of(app, (closed_by or {}).get(app.id)),
+            "remark": (by_application.get(app.id) if app is not None else None) or by_candidate.get(cand.id),
+            **_note_fields(_row_notes(found_notes, cand.id, app.id if app is not None else None), now=now, tz=tz),
+            "outcome": outcome_of(app, (closed_by or {}).get(app.id)) if app is not None else outcome_of_call(cand),
         })
     return out
 

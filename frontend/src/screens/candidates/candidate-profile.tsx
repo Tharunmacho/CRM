@@ -5,6 +5,8 @@ import { cn } from '@/shared/lib/cn'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { DOCUMENT_HELP, newestFileVersions } from '@/shared/lib/document-files'
 import { useStore } from '@/shared/state/crm-store'
+import { homeDigits } from '@/shared/lib/agency'
+import { waDigits } from '@/shared/lib/phone'
 import { live } from '@/shared/state/live'
 import { api } from '@/shared/api/client'
 import type { Candidate } from '@/shared/model/types'
@@ -131,13 +133,15 @@ function useProfileTabs(root: RefObject<HTMLElement>, scroller: RefObject<HTMLEl
 const phoneDigits = (value: string) => value.replace(/[^\d+]/g, '')
 
 function ContactChips({ contacts }: { contacts: ContactChip[] }) {
+  const store = useStore()
   if (contacts.length === 0) return null
+  const home = homeDigits(store.settings?.homeCallingCode)
   return (
     <ul className="cp-contacts">
       {contacts.map((contact) => {
         const icon = contact.kind === 'email' ? <Mail className="h-4 w-4 shrink-0" aria-hidden="true" /> : contact.kind === 'location' ? <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" /> : contact.kind === 'whatsapp' ? <MessageCircle className="h-4 w-4 shrink-0" aria-hidden="true" /> : <Phone className="h-4 w-4 shrink-0" aria-hidden="true" />
         const body = <>{icon}<span>{contact.value}</span></>
-        const href = contact.kind === 'email' ? `mailto:${contact.value}` : contact.kind === 'phone' ? `tel:${phoneDigits(contact.value)}` : contact.kind === 'whatsapp' ? `https://wa.me/${contact.value.replace(/\D/g, '')}` : ''
+        const href = contact.kind === 'email' ? `mailto:${contact.value}` : contact.kind === 'phone' ? `tel:${phoneDigits(contact.value)}` : contact.kind === 'whatsapp' ? (waDigits(contact.value, home) ? `https://wa.me/${waDigits(contact.value, home)}` : '') : ''
         return (
           <li key={`${contact.kind}-${contact.value}`} className="min-w-0 max-w-full">
             {href ? (

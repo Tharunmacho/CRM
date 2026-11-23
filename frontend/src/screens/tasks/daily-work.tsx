@@ -183,7 +183,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
             canDeleteNote={(row, note) => canDeleteNote(note, row, store.me)} onDeleteNote={(_row, note) => deleteNote(note.id)} />
         )}
       </section>
-      <StageModal applicationId={openApp?.id ?? null} open={!!openApp} focusStage={openApp?.stage} onClose={() => { setOpenApp(null); void refreshAll() }} />
+      <StageModal applicationId={openApp?.id ?? null} open={!!openApp} focusStage={openApp?.stage} onStageRecorded={() => void refreshAll().catch(() => undefined)} onClose={() => { setOpenApp(null); void refreshAll() }} />
     </div>
   )
 }

@@ -114,7 +114,7 @@ def _daily_work(db: Session, user: User, staff: str | None, view: str = "current
         if rows and not wide:
             later.update(zip(("placed", "tasks", "facts", "remarks"), daily_work.placement_reads([row[0].id for row in rows], now=now)))
         if outcome_rows:
-            later.update(zip(("outcome_remarks", "outcome_facts", "outcome_by"), daily_work.outcome_reads([row[1].id for row in outcome_rows], [row[0].id for row in outcome_rows])))
+            later.update(zip(("outcome_remarks", "outcome_facts", "outcome_by"), daily_work.outcome_reads([row[1].id for row in outcome_rows if row[1] is not None], [row[0].id for row in outcome_rows])))
         got.update(_run(db, later))
         if rows:
             items = daily_work.assemble_rows(rows, got["placed"], got["tasks"], got["facts"], got["remarks"], now=now)

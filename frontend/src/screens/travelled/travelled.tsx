@@ -11,6 +11,8 @@ import { Pager } from '@/features/candidates/components/db-parts'
 import { readPageSize, savePageSize } from '@/features/candidates/pager-model'
 import { useMediaQuery } from '@/features/application-form/use-media-query'
 import { downloadTravelled, useTravelled } from '@/features/travelled/travelled-api'
+import { saveApplicationForm } from '@/features/application-form/form-api'
+import { DocInput } from '@/screens/tasks/doc-input'
 import {
   EMPTY_FILTERS, MONTH_NAMES, PAGE_SIZE_CHOICES, activeChips, agencyToday, barPercent, choosePeriod, chooseTravelDate, clearChip, dateBarLabel, dateLevel,
   dateSummary, documentsLabel, documentsTitle, drillTo, filterCount, filtersFromParams, formatTravelDay, monthName, moreFilterCount, pageRows, periodValue, queryFor, quickRanges,
@@ -221,6 +223,8 @@ export default function TravelledPage() {
             description={chips.length ? 'Remove a filter to see more.' : 'Confirmed travelled candidates appear here with their placement marked Deployed.'}
             action={chips.length ? <Button size="sm" onClick={clearAll}>Clear all filters</Button> : undefined} /></section>
           : <TravelTable rows={data.rows} total={data.total} page={page} pageSize={pageSize} filtered={chips.length > 0}
+            canEditDoc={store.can('work_any_candidate')}
+            onSaveDoc={async (row, iso) => { await saveApplicationForm(row.candidateId, { applicationId: row.applicationId }, { application: { commencementDate: iso } }); refresh() }}
             onPage={setPage} onPageSize={size => { setPageSize(size); savePageSize('travelled', size); setPage(0) }} />}
       </div>}
   </div>
@@ -289,7 +293,7 @@ function Breakdown({ title, items, selected, onPick, empty }: { title: string; i
   </section>
 }
 
-function TravelTable({ rows, total, page, pageSize, filtered, onPage, onPageSize }: { rows: TravelledRow[]; total: number; page: number; pageSize: number; filtered: boolean; onPage: (page: number) => void; onPageSize: (size: number) => void }) {
+function TravelTable({ rows, total, page, pageSize, filtered, canEditDoc, onSaveDoc, onPage, onPageSize }: { rows: TravelledRow[]; total: number; page: number; pageSize: number; filtered: boolean; canEditDoc: boolean; onSaveDoc: (row: TravelledRow, iso: string | null) => Promise<void>; onPage: (page: number) => void; onPageSize: (size: number) => void }) {
   const wrap = useRef<HTMLDivElement>(null)
   const shown = pageRows(rows, page, pageSize)
   const go = (next: number) => { onPage(next); wrap.current?.scrollIntoView({ block: 'start' }) }   // the page scrolls (no inner box): back to the top of the table
@@ -301,7 +305,9 @@ function TravelTable({ rows, total, page, pageSize, filtered, onPage, onPageSize
         <tbody>
           {shown.map((row, index) => <tr key={row.applicationId}>
             <td data-label="S NO" className="tnum">{serialNumber(page, pageSize, index)}</td>
-            <td data-label="DOC" className="tnum">{formatTravelDay(row.commencementDate) || <span className="tv-muted">—</span>}</td>
+            <td data-label="DOC" className="tnum">{canEditDoc && row.applicationId
+              ? <DocInput value={row.commencementDate ?? null} candidate={row.name} onSave={iso => onSaveDoc(row, iso)} />
+              : formatTravelDay(row.commencementDate) || <span className="tv-muted">—</span>}</td>
             <td data-label="Date of travel" className="tnum tv-c-when">{row.travelDate ? formatTravelDay(row.travelDate) : <span className="tv-muted">Not recorded</span>}</td>
             <td data-label="Candidate" className="tv-who">
               <Link to={`/candidates/${row.candidateId}`}>{row.name}</Link>

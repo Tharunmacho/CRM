@@ -26,8 +26,8 @@ const sum = (list) => list.reduce((total, c) => total + c.width, 0)
 
 test('the plan: supervisor 12 columns fit the 1111px panel (within 1%) and recruiter 11 columns 1040px, with NOTES and without TODAY', () => {
   const supervisor = m.taskColumnsFor(true, false)
-  assert.deepEqual(supervisor.map((c) => c.key), ['no', 'doc', 'dot', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'remarks', 'notes', 'actions'])
-  assert.ok(sum(supervisor) <= 1111 * 1.01, `${sum(supervisor)}px is the 1111px panel of a 1440px window, shared (DOT is the added column)`)
+  assert.deepEqual(supervisor.map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'remarks', 'notes', 'actions'])
+  assert.ok(sum(supervisor) <= 1111 * 1.01, `${sum(supervisor)}px is the 1111px panel of a 1440px window, shared (the DOT column was removed again)`)
   assert.ok(sum(m.taskColumnsFor(false, false)) <= 1040, 'a recruiter has no Recruiter column')
   assert.equal(m.taskPlanWidth(true, false), sum(supervisor))
   const notes = supervisor.find((c) => c.key === 'notes')
@@ -36,22 +36,23 @@ test('the plan: supervisor 12 columns fit the 1111px panel (within 1%) and recru
   assert.equal(supervisor.find((c) => c.key === 'actions').width, 124, 'the actions keep their 124px')
 })
 
-test('the full 13-column plan (with TODAY) needs 1221px for a supervisor and 1134px for a recruiter', () => {
+test('the full 12-column plan (with TODAY) needs 1161px for a supervisor and 1074px for a recruiter', () => {
   const full = m.taskColumnsFor(true, true)
-  assert.equal(full.length, 13)
-  assert.deepEqual(full.map((c) => c.key), ['no', 'doc', 'dot', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'today', 'remarks', 'notes', 'actions'])
-  assert.equal(m.taskPlanWidth(true, true), 1221)
-  assert.equal(m.taskPlanWidth(false, true), 1134)
-  assert.equal(m.taskColumnsFor(true).length, 13, 'the default plan is the full one')
+  assert.equal(full.length, 12)
+  assert.deepEqual(full.map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'today', 'remarks', 'notes', 'actions'])
+  assert.equal(m.taskPlanWidth(true, true), 1161)
+  assert.equal(m.taskPlanWidth(false, true), 1074)
+  assert.equal(m.taskColumnsFor(true).length, 12, 'the default plan is the full one')
 })
 
 test('where TODAY is shown at each panel width', () => {
   const at = (supervisor, width) => m.todayPlace(supervisor, width)
-  // the owner's 125% zoom (a 1225px table) holds the supervisor's whole plan only from 1221px
-  assert.deepEqual([1080, 1111, 1150, 1220].map((w) => at(true, w)), ['stage', 'stage', 'stage', 'stage'])
-  assert.deepEqual([1221, 1225, 1366, 1500, 1590].map((w) => at(true, w)), ['column', 'column', 'column', 'column', 'column'])
-  assert.deepEqual([1080, 1111, 1133].map((w) => at(false, w)), ['stage', 'stage', 'stage'])
-  assert.equal(at(false, 1134), 'column')
+  // the owner's 125% zoom (a 1225px table) holds the supervisor's whole plan only from 1161px
+  assert.deepEqual([1080, 1111, 1150, 1160].map((w) => at(true, w)), ['stage', 'stage', 'stage', 'stage'])
+  assert.deepEqual([1161, 1225, 1366, 1500, 1590].map((w) => at(true, w)), ['column', 'column', 'column', 'column', 'column'])
+  // a recruiter's whole plan (1074px) is narrower than the card breakpoint: every table width has the TODAY column
+  assert.deepEqual([1080, 1111, 1133].map((w) => at(false, w)), ['column', 'column', 'column'])
+  assert.equal(at(false, 1074), 'row', 'under 1080px a card has a TODAY row')
   assert.equal(at(true, 1079), 'row', 'under 1080px a card has a TODAY row')
   assert.equal(at(true, 390), 'row')
   assert.equal(at(true, 0), 'stage', 'not measured yet')

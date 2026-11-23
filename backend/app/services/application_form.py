@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session, undefer
 
 from app.core.config import get_settings
 from app.db.models import (
-    Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry, Candidate, Client, Company,
+    Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry, Candidate, CandidateStatus, Client, Company,
     Designation, DocumentExtractionJob, EmailIngestionJob, MailAttachment, Order, Priority, Role, Source, Task, TodoItem, User,
 )
 from app.domain.stages import MEDICAL_STAGE, STOP_OUTCOMES, TOTAL_STAGES, stage_by_no
@@ -1024,6 +1024,15 @@ def save_form(db: Session, user: User, candidate_id: str, body: dict, *, applica
         candidate.field_sources = sources
     if "screening.nextFollowUpDate" in changed:
         sync_follow_up_todo(db, candidate)
+    if "screening.interestLevel" in changed:
+        # The interest cards are the same answer as the initial call's yes / no, so choosing "Not interested" declines the candidate right now
+        # (they leave the Tasks page's Current process and show on its Declined tab) and an interested level takes a not-interested candidate
+        # back to the list, exactly as the "Record the call result" dialog does. Both go through one rule (`candidate_call.apply_call`).
+        from app.services.candidate_call import apply_call
+        if candidate.interest_level == "not_interested":
+            apply_call(db, user, candidate, called=True, interested="no", remarks=candidate.call_remarks, source="application_form")
+        elif candidate.interest_level and candidate.status == CandidateStatus.not_interested and candidate.call_interested == "no":
+            apply_call(db, user, candidate, called=True, interested="yes", remarks=candidate.call_remarks, source="application_form")
     meta = {"changed_fields": changed}
     if placement is not None and placement.commencement_date != body["application"]["commencementDate"]:
         placement.commencement_date = body["application"]["commencementDate"]

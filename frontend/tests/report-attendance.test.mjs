@@ -159,3 +159,33 @@ test('who is listed on the live board: the MD and recruiters, never the Administ
   assert.deepEqual(names, ['Mahesh', 'Ravi'])
   assert.equal(m.attendanceCounts(build(att, null)).total, 2)
 })
+
+test('signed in and using the CRM but not checked in: the board says so live, and the status stays "not checked in" (attendance only starts with Check in)', () => {
+  const asha = person('u1', 'Asha', [], { presence: presence({ status: 'online', lastSeenAt: `${TODAY}T05:00:00Z` }) })
+  const [row] = m.buildAttendanceRows({ day: TODAY, today: TODAY, attendance: attendance(asha), month: null })
+  assert.equal(row.kind, 'pending')
+  assert.equal(row.label, 'Not checked in')
+  assert.equal(row.tone, 'amber')
+  assert.equal(row.online, 'online')
+  assert.equal(row.stillIn, false)
+  assert.deepEqual(m.presenceLabel(row), { label: 'Online in CRM now', live: true })
+  const idle = person('u2', 'Ben', [], { presence: presence({ status: 'idle' }) })
+  const [quiet] = m.buildAttendanceRows({ day: TODAY, today: TODAY, attendance: attendance(idle), month: null })
+  assert.deepEqual(m.presenceLabel(quiet), { label: 'Idle in CRM', live: true })
+})
+
+test('no live signal, an untracked role, or a past day keeps the plain "Not clocked in yet"', () => {
+  const offline = person('u1', 'Asha', [], { presence: presence({ status: 'offline' }) })
+  const manager = person('u2', 'MD', [], { role: 'manager', presence: presence({ status: 'online', tracked: false }) })
+  const [a, b] = m.buildAttendanceRows({ day: TODAY, today: TODAY, attendance: attendance(offline, manager), month: null })
+  for (const row of [a, b]) { assert.equal(row.label, 'Not clocked in yet'); assert.equal(row.online, null); assert.deepEqual(m.presenceLabel(row), { label: 'Not clocked in', live: false }) }
+  const online = person('u3', 'Cy', [], { presence: presence({ status: 'online' }) })
+  const [past] = m.buildAttendanceRows({ day: DAY, today: TODAY, attendance: attendance(online), month: null })
+  assert.equal(past.online, null)
+})
+
+test('a checked-in recruiter still reads "Logged in now"; being online adds nothing on top', () => {
+  const live = person('u1', 'Asha', [session('s1', '04:00', null)], { presence: presence({ status: 'online' }) })
+  const [row] = build(attendance(live), null, { day: DAY })
+  assert.deepEqual(m.presenceLabel(row), { label: 'Logged in now', live: true })
+})

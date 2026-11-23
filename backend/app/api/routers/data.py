@@ -1220,61 +1220,10 @@ def record_call(candidate_id: str, body: CallIn, db: Session = Depends(get_db), 
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
     from app.core.deps import ensure_can_work_candidate
     ensure_can_work_candidate(c, user, db)
-    # The call may be recorded after the candidate was already matched to an order (matching closes the initial-call task,
-    # the call result is still worth keeping). A "not interested" answer for someone still at prescreening (stage 1) takes
-    # them off that order: the application closes as "not interested", its tasks are cancelled, and they go back to the Data
-    # Bank (not in Tasks or Follow-up) to be used for another job. Past prescreening, the placement is only ever closed in
-    # its own stage, so there the outcome is stored and audited but the application is left alone.
-    placements = list(db.scalars(select(Application).where(Application.candidate_id == c.id, Application.status.in_([ApplicationStatus.active, ApplicationStatus.deployed])).with_for_update()))
-    on_order = bool(placements)
-    prescreening = [a for a in placements if a.status == ApplicationStatus.active and a.current_stage <= 1]
-    leaves_order = body.called and body.interested == "no" and bool(prescreening) and len(prescreening) == len(placements)
-    if leaves_order:
-        from app.api.routers.applications import _audit, _open_tasks
-        from app.db.models import ClosureReason
-        closed_at = datetime.now(timezone.utc)
-        for placement in prescreening:
-            placement.status, placement.closure_reason = ApplicationStatus.closed, ClosureReason.not_interested
-            placement.lock_version += 1
-            for open_task in _open_tasks(db, placement):
-                open_task.cancelled_at = closed_at
-            _audit(db, user, "Candidate not interested at the initial call: taken off the order", placement, c, closed_at)
-        on_order = False
-
-    now = datetime.now(timezone.utc)
-    c.call_called = body.called
-    c.call_interested = body.interested
-    c.call_remarks = body.remarks
-    c.call_recorded_at = now
-    if not on_order:
-        if body.interested == "no":
-            c.status = CandidateStatus.not_interested
-        elif body.interested == "yes" and c.status == CandidateStatus.not_interested:
-            c.status = CandidateStatus.new
-
-    # Recording the outcome is what closes the initial-call task.
-    for t in db.scalars(
-        select(Task).where(
-            Task.candidate_id == c.id,
-            Task.kind == "initial_call",
-            Task.completed_at.is_(None),
-            Task.cancelled_at.is_(None),
-        ).with_for_update()
-    ):
-        if body.called and body.interested in {"yes", "no"}:
-            t.completed_at = now
-
-    db.add(AuditEntry(actor_id=user.id, action="Recorded initial call after matching" if on_order else "Recorded initial call",
-                      entity_type="candidate", entity_id=c.id, target=c.name,
-                      meta={"called": body.called, "interested": body.interested, "on_order": on_order}))
+    from app.services.candidate_call import apply_call
+    result = apply_call(db, user, c, called=body.called, interested=body.interested, remarks=body.remarks, now=datetime.now(timezone.utc))
     db.commit()
-    notice = None
-    if on_order and body.called and body.interested == "no":
-        notice = "Saved. This candidate is still on an order, so nothing on the order was changed. Unmap them or record the result in their stage if they should leave it."
-    if leaves_order:
-        notice = "Saved. The candidate is not interested, so they were taken off the order and moved back to the Data Bank. They can be used for another job."
-    return {"ok": True, "onOrder": on_order, "statusChanged": not on_order and body.interested in {"yes", "no"}, "notice": notice,
-            "leftOrder": leaves_order}
+    return result
 
 
 # -------------------------------------------------------------------- todos

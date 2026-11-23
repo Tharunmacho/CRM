@@ -98,13 +98,39 @@
    one such text per row escaped the box and stretched the whole page (a 25-row page became 2000px tall, with an empty band under the app frame).
    overflow: clip (not hidden/auto) clips to the frame's rounded corners WITHOUT becoming a scroll container, so the sticky header follows the page scroll. */
 .tv-table-wrap { position: relative; overflow: clip; scroll-margin-top: calc(var(--topbar-h, 64px) + 8px); }
+/* When the box around the table is narrower than the columns need (a tablet or a small laptop with the menu open, 900px up) the table scrolls sideways inside its frame
+   instead of cutting the last column off; everywhere wider it fits and clips as before, so the header keeps sticking under the top bar. */
+.tv-table-card { container: tvt / inline-size; }
+@media (min-width: 900px) { @container tvt (max-width: 1039px) { .tv-table-wrap { overflow-x: auto; } } }
 .tv-table { width: 100%; min-width: 0; table-layout: auto; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
 /* the columns size to their content (table-layout: auto): each at least its longest word and its heading plus the padding, the rest shared by what each holds; no fixed percentages */
 :root:root:root:root .tv-table tbody td { overflow-wrap: anywhere; }   /* an unbroken run of letters wraps inside its column; the columns size themselves from the other text */
 /* the three short columns ask for just their content (px, not shares); S NO fits 4 digits, DOC and Date of travel dd Mon yyyy, Date of travel dd Mon yyyy */
-.tv-table col.tv-c-sno { width: 56px; }
-.tv-table col.tv-c-doc { width: 100px; }
-.tv-table col.tv-c-date { width: 112px; }
+.tv-table col.tv-c-sno { width: 52px; }
+.tv-table col.tv-c-doc { width: 108px; }
+.tv-table col.tv-c-date { width: 104px; }
+/* the text columns get a sensible floor so a name or a job wraps at its spaces into two tidy lines, not four short ones; the Recruiter name never breaks mid-word */
+.tv-table col.tv-c-who { width: 168px; }
+.tv-table col.tv-c-client { width: 168px; }
+.tv-table col.tv-c-country { width: 100px; }
+.tv-table col.tv-c-job { width: 160px; }
+.tv-table col.tv-c-agency { width: 92px; }
+.tv-table col.tv-c-docs { width: 112px; }
+.tv-table col.tv-c-recruiter { width: 124px; }
+:root:root:root:root .tv-table tbody td:last-child { overflow-wrap: normal; word-break: normal; }   /* breaks only at spaces, never inside a word; it still wraps in the phone cards */
+/* candidate, client, country, job and agency shrink only down to their longest word: a name or a company wraps at its spaces and is never cut mid-word ("Bhaw/an") */
+:root:root:root:root .tv-table tbody td:is(:nth-child(4), :nth-child(5), :nth-child(6), :nth-child(7), :nth-child(8)) { overflow-wrap: break-word; }
+/* DOC holds the dd/mm/yyyy box, so the column never gets narrower than the box; "Passport not added" stays on one line under the name */
+.tv-table :is(th, td):nth-child(2) { min-width: 104px; }
+/* the two long headings really wrap onto two lines (another sheet forces nowrap on every header), which frees about 100px on a narrower screen */
+:root:root:root:root .tv-table th.tv-th-wrap { white-space: normal; line-height: 15px; }
+.tv-table td.tv-who small { white-space: nowrap; }
+/* DOC is typed right in the cell as dd/mm/yyyy (the same box as the Tasks page): 32px tall, fills its cell, blue on focus, red when the date is not real */
+.tv-table .dw-doc-input { box-sizing: border-box; width: 100%; min-width: 0; height: 32px; padding: 0 2px; border: 1px solid var(--border-control); border-radius: 6px; background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 12px; text-align: center; font-weight: 500; font-variant-numeric: tabular-nums; }
+.tv-table .dw-doc-input::placeholder { color: var(--text-muted); font-weight: 400; }
+.tv-table .dw-doc-input:focus { outline: 2px solid var(--primary); outline-offset: 0; border-color: var(--primary); }
+.tv-table .dw-doc-input.is-error { border-color: var(--error-ink); background: var(--error-fill, var(--bg-card)); }
+.tv-table .dw-doc-input:disabled { opacity: .6; cursor: progress; }
 .tv-table th { position: sticky; top: var(--topbar-h, 64px); z-index: 2; box-sizing: border-box; height: 44px; padding: 0 8px; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); text-align: center; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 16px; text-transform: uppercase; color: var(--on-primary); white-space: nowrap; overflow: hidden; text-overflow: clip; }
 .tv-table th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
 .tv-table td { box-sizing: border-box; height: 56px; padding: 8px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: middle; text-align: center; color: var(--text-main); }
@@ -146,7 +172,7 @@
 .tv-table-card .db-pager :is(.db-pager-num, .db-pager-btn):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .tv-foot { margin: 6px 2px 0; font-size: 13px; color: var(--text-muted); }
 
-@media (max-width: 1279px) {
+@media (max-width: 1399px) {
   .tv-table th { padding: 0 6px; letter-spacing: .02em; }
   .tv-table td { padding: 8px 6px; }
 }
@@ -234,6 +260,8 @@ body.tv-sheet-open { overflow: hidden; }
   .tv-table td:nth-child(9) { grid-column: 1 / -1; order: 9; }
   .tv-table a { display: inline-flex; align-items: center; min-height: 32px; }
   .tv-table .tv-hint { margin-left: 0; }
+  /* the DOC box in a card: a 44px touch target, 16px text (no zoom on focus), left-aligned like every other value in the card */
+  .tv-table .dw-doc-input { width: 100%; max-width: 200px; height: 44px; padding: 0 12px; font-size: 16px; text-align: left; }
   .tv-table td small { margin-top: 0; }
   .tv-table td.tv-who .tv-traveller { margin-left: 0; }
   :root:root .tv-table td { padding: 4px 0; }

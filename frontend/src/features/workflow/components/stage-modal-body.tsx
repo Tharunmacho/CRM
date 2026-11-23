@@ -84,6 +84,7 @@ export function StageModal({
   onDirtyChange: reportDirty,
   onBusyChange: reportBusy,
   onStageChanged,
+  onStageRecorded,
 }: {
   applicationId: string | null
   open: boolean
@@ -95,6 +96,8 @@ export function StageModal({
   onDirtyChange?: (dirty: boolean) => void
   onBusyChange?: (busy: boolean) => void
   onStageChanged?: () => void
+  /** Told the moment the server has recorded a stage (before the workspace is re-read): a list behind the window (Tasks) re-reads at once. Unlike `onStageChanged` it never closes or reloads the caller. */
+  onStageRecorded?: () => void
 }) {
   const store = useStore()
   const snapshot = useWorkspaceReady(open && applicationId ? `stage:${applicationId}` : null)
@@ -181,7 +184,7 @@ export function StageModal({
       {!canWork && <p className="sm-note"><Lock className="h-4 w-4" aria-hidden="true" />{readOnlyReason}</p>}
       {!owner?.active && <p className="sm-note">Assign an active recruiter before moving or reopening a stage. You can still save a draft.</p>}
       {fileError && <p className="sm-alert" role="alert">We could not load the documents. Feedback is still available. <button type="button" className="underline" onClick={() => setFileRetry((value) => value + 1)}>Retry documents</button></p>}
-      {current ? <CurrentStage key={`${app.id}-${app.currentStage}-${app.stages.length}`} app={app} canWork={canWork && !reopening} onDirtyChange={setDirty} onBusyChange={setPending} files={files} onUploaded={(file) => setFiles((items) => [...items.filter((item) => item.id !== file.id), file])} onStageChanged={onStageChanged} compact />
+      {current ? <CurrentStage key={`${app.id}-${app.currentStage}-${app.stages.length}`} app={app} canWork={canWork && !reopening} onDirtyChange={setDirty} onBusyChange={setPending} files={files} onUploaded={(file) => setFiles((items) => [...items.filter((item) => item.id !== file.id), file])} onStageChanged={onStageChanged} onStageRecorded={onStageRecorded} compact />
         : <section className="sm-card sm-inline-history">
           <header className="sm-inline-title"><div><small>Stage {selectedStage.no} of {STAGES.length}</small><h3>{selectedStage.title}</h3></div><Badge tone={activeRecords.length ? 'green' : 'neutral'} variant="dot">{activeRecords.length ? 'Saved history' : 'Not started'}</Badge></header>
           {selectedRecords.length === 0 && <p className="sm-hint">No feedback has been saved for this stage yet. {app.status === 'active' ? `Complete stage ${app.currentStage} to continue in order.` : 'Reopen the application to continue working on its stages.'}</p>}
@@ -255,6 +258,7 @@ export function StageModal({
                   files={files}
                   onUploaded={(file) => setFiles((current) => [...current.filter((item) => item.id !== file.id), file])}
                   onStageChanged={onStageChanged}
+                  onStageRecorded={onStageRecorded}
                 />
               </li>
             ) : app.status === 'deployed' ? (
@@ -610,6 +614,7 @@ function CurrentStage({
   onUploaded,
   compact = false,
   onStageChanged,
+  onStageRecorded,
 }: {
   app: Application
   canWork: boolean
@@ -619,6 +624,7 @@ function CurrentStage({
   onUploaded: (file: ApplicationFile) => void
   compact?: boolean
   onStageChanged?: () => void
+  onStageRecorded?: () => void
 }) {
   const store = useStore()
   const { addRemark } = store
@@ -733,6 +739,9 @@ function CurrentStage({
       // The server validates and records exactly these values in one transaction.
       await api.post(`/applications/${app.id}/complete`, { data: { ...data, feedback: String(data.feedback).trim() }, lock_version: lockVersion })
       if (!store.isCurrentSession()) return
+      // The stage is recorded: a list behind this window (Tasks) re-reads NOW, not after the whole workspace has been downloaded again below,
+      // so a candidate who was rejected or declined leaves the Current process list while the person is still reading "Saved".
+      onStageRecorded?.()
       setDirty(false)
       setCompleted(true)
       store.notify(result.repeats ? 'Medical result saved. A follow-up task was created.' : result.closes ? 'This order is closed for the candidate. Everything stays on record.' : 'Stage done')

@@ -26,12 +26,12 @@ const list = SEEDS.map((text, index) => ({ id: `t${index + 1}`, text, active: tr
 
 /* ------------------------------------------------------------------ columns */
 
-test('the Tasks columns: S NO, DOC, DOT, CLIENT, JOB, CANDIDATE, Recruiter (supervisors), AGENCY, STAGE, TODAY, REMARKS, NOTES, actions', () => {
+test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (supervisors), AGENCY, STAGE, TODAY, REMARKS, NOTES, actions', () => {
   assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.title),
-    ['S NO', 'DOC', 'DOT', 'CLIENT', 'JOB', 'CANDIDATE', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
+    ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
   assert.deepEqual(daily.taskColumnsFor(false).map((c) => c.title),
-    ['S NO', 'DOC', 'DOT', 'CLIENT', 'JOB', 'CANDIDATE', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
-  assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.key), ['no', 'doc', 'dot', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'today', 'remarks', 'notes', 'actions'])
+    ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
+  assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'today', 'remarks', 'notes', 'actions'])
   assert.equal(daily.taskColumnsFor(true).at(-1).quiet, true, 'the actions header has no visible title')
   for (const c of daily.taskColumnsFor(true)) assert.doesNotMatch(c.title, /\//, 'one short word per header, never "CLIENT / COUNTRY"')
 })
@@ -63,17 +63,18 @@ test('NOTES is a column of every table; TODAY is a column only when the panel ho
   const notes = daily.TASK_LIST_COLUMNS.find((c) => c.key === 'notes')
   assert.equal(notes.roomy, undefined, 'NOTES is never dropped')
   assert.ok(notes.width >= 100, 'a note wraps in its own cell')
-  assert.deepEqual(daily.taskColumnsFor(true, false).map((c) => c.key), ['no', 'doc', 'dot', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'remarks', 'notes', 'actions'])
-  assert.deepEqual(daily.taskColumnsFor(false, false).map((c) => c.key), ['no', 'doc', 'dot', 'client', 'position', 'candidate', 'agency', 'stage', 'remarks', 'notes', 'actions'])
+  assert.deepEqual(daily.taskColumnsFor(true, false).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'remarks', 'notes', 'actions'])
+  assert.deepEqual(daily.taskColumnsFor(false, false).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'agency', 'stage', 'remarks', 'notes', 'actions'])
   for (const supervisor of [true, false]) {
     const plan = daily.taskPlanWidth(supervisor, true)
-    assert.equal(daily.todayPlace(supervisor, plan), 'column')
-    assert.equal(daily.todayPlace(supervisor, plan - 1), 'stage')
-    assert.equal(daily.todayPlace(supervisor, 1111), 'stage', 'a 1440px window has no room for TODAY: its chip is in the stage cell')
+    assert.equal(daily.todayPlace(supervisor, Math.max(plan, 1080)), 'column')   // (below 1080px it is a card with a TODAY row, whatever the plan)
+    // without the DOT column a recruiter's whole plan (1074px) is narrower than the card breakpoint, so it has no 'stage' range at all
+    if (plan - 1 >= 1080) assert.equal(daily.todayPlace(supervisor, plan - 1), 'stage')
+    assert.equal(daily.todayPlace(supervisor, 1111), supervisor ? 'stage' : 'column', 'a 1440px window: the supervisor has no room for TODAY (its chip is in the stage cell), a recruiter has')
     assert.equal(daily.todayPlace(supervisor, 1590), 'column', 'a 1920px window has')
     assert.equal(daily.todayPlace(supervisor, 0), 'stage', 'before the first measurement')
     assert.equal(daily.todayPlace(supervisor, 1079), 'row', 'a phone card has a TODAY row of its own')
-    assert.equal(daily.todayPlace(supervisor, 1080), 'stage', 'the narrowest table')
+    assert.equal(daily.todayPlace(supervisor, 1080), supervisor ? 'stage' : 'column', 'the narrowest table')
     assert.equal(plan, daily.taskPlanWidth(supervisor, false) + daily.TASK_LIST_COLUMNS.find((c) => c.key === 'today').width)
   }
 })
@@ -85,7 +86,7 @@ test('the Tasks table renders the model columns and no longer has a "Remark adde
   assert.match(table, /Nothing yet/)
   assert.match(table, /todayChips\(/)
   const order = [...table.matchAll(/data-label="([^"]+)"/g)].map((m) => m[1])
-  assert.deepEqual(order, ['S NO', 'DOC', 'DOT', 'CLIENT', 'JOB', 'CANDIDATE NAME', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
+  assert.deepEqual(order, ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE NAME', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
   assert.doesNotMatch(await read('../src/styles/daily-work-board.css'), /\.tw-chip\.is-remark/)
 })
 
@@ -530,17 +531,10 @@ test('the TaskTable renders the Agency cell and moves the Recruiter cell after t
   assert.ok(table.indexOf('<ClientCell') < table.indexOf('<PositionCellView') && table.indexOf('<DocCell') < table.indexOf('<ClientCell'), 'DOC, CLIENT, JOB')
 })
 
-test('DOT: the date of travel sits right after DOC, read-only, with the tooltip "Date of travel", and a dash until there is one', async () => {
-  const dot = daily.TASK_LIST_COLUMNS.find((c) => c.key === 'dot')
-  assert.equal(daily.TASK_LIST_COLUMNS[daily.TASK_LIST_COLUMNS.findIndex((c) => c.key === 'doc') + 1], dot)
-  assert.deepEqual([dot.title, dot.tip], ['DOT', 'Date of travel'])
+test('there is no DOT column on the Tasks list: not in the model, not in the table, not in the cards', async () => {
+  assert.equal(daily.TASK_LIST_COLUMNS.find((c) => c.key === 'dot'), undefined)
+  assert.ok(!daily.taskColumnsFor(true).some((c) => c.title === 'DOT'))
   const table = await code('../src/screens/tasks/task-table.tsx')
-  assert.match(table, /title=\{c\.tip\}/, 'the header carries the tooltip')
-  assert.match(table, /<DocCell [^\n]*<\/td>\s*<td data-label="DOT"[^\n]*<DotCell item=\{row\} \/><\/td>/, 'DOT is the cell after DOC and has no input')
-  const cells = await code('../src/screens/tasks/daily-table.tsx')
-  const cell = cells.slice(cells.indexOf('export function DotCell'), cells.indexOf('export interface MenuEntry'))
-  assert.match(cell, /docLabel\(item\.travelDate\)/, 'dd Mon yyyy like the DOC label')
-  assert.doesNotMatch(cell, /<input|onSave|DocInput/, 'read-only')
-  assert.match(cell, /—/, 'a dash when there is no travel date')
+  assert.doesNotMatch(table, /data-label="DOT"|<DotCell/)
   assert.equal(daily.docLabel('2026-07-09'), '9 Jul 2026')
 })

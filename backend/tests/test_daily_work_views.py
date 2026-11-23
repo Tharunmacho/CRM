@@ -485,3 +485,101 @@ def test_a_travelled_or_declined_placement_without_any_task_gets_a_cancelled_hol
         assert holder.cancelled_at is not None and holder.completed_at is None and holder.application_id == apps["c2"]
     row = view(desk, "asha", "travelled")["items"][0]
     assert row["candidateId"] == "c2" and row["remark"]["body"] == "Flew on 12 Nov"
+
+
+# ------------------------------------------------------------------------------------------------ a candidate who says no before any placement
+
+
+def test_a_candidate_who_says_no_at_the_initial_call_with_no_placement_goes_to_the_declined_tab_at_once(desk):
+    from test_daily_work import record_call
+    owned_candidates(desk, 2)   # u100, u101: never matched to an order
+    as_user(desk, "asha")
+    assert desk.client.get("/api/daily-work").json()["viewCounts"] == {"current": 2, "declined": 0, "rejected": 0, "travelled": 0}
+    assert record_call(desk, "u100", interested="no").status_code == 200
+    body = view(desk, "asha", "current")
+    assert ids(body) == ["u101"] and body["viewCounts"] == {"current": 1, "declined": 1, "rejected": 0, "travelled": 0}
+    declined = view(desk, "asha", "declined")
+    assert ids(declined) == ["u100"] and view(desk, "asha", "rejected")["items"] == []
+    row = declined["items"][0]
+    assert row["applicationId"] is None and row["taskId"] is None and row["stage"] is None and row["status"] == "closed"
+    assert row["client"] is None and row["orderRef"] is None and row["position"] == "Mason" and row["positionIsPreferred"] is True
+    assert row["outcome"]["kind"] == "declined" and row["outcome"]["label"] == "Declined" and row["outcome"]["stage"] is None
+    assert row["outcome"]["reason"] == "Candidate not interested at the initial call" and row["outcome"]["at"] is not None
+    everything = view(desk, "asha", "all")
+    assert sorted(ids(everything)) == ["u100", "u101"] and len(ids(everything)) == len(set(ids(everything)))   # once each, never also on today's list
+    # the per-recruiter figure the supervisor sees and the sidebar number agree
+    assert view(desk, "manager", "current")["viewCounts"]["declined"] == 1
+    with desk.sessions() as db:
+        from app.services import daily_work
+        assert daily_work.owner_counts(db, ["asha"])["asha"] == (1, 0)
+
+
+def test_a_yes_call_after_a_no_without_a_placement_takes_the_candidate_off_the_declined_tab_and_back_to_the_list(desk):
+    from test_daily_work import record_call
+    owned_candidates(desk, 1)
+    as_user(desk, "asha")
+    record_call(desk, "u100", interested="no")
+    assert ids(view(desk, "asha", "declined")) == ["u100"] and ids(view(desk, "asha", "current")) == []
+    record_call(desk, "u100", interested="yes")
+    assert ids(view(desk, "asha", "declined")) == [] and ids(view(desk, "asha", "current")) == ["u100"]
+    assert view(desk, "asha", "current")["viewCounts"] == {"current": 1, "declined": 0, "rejected": 0, "travelled": 0}
+
+
+def test_a_no_after_a_placement_that_was_only_unmapped_is_declined_but_a_placement_outcome_is_never_counted_twice(desk):
+    from test_daily_work import record_call
+    apps = mapped_candidates(desk, 2)
+    as_user(desk, "asha")
+    set_application(desk, apps["c0"], status="closed", reason="unmapped")
+    record_call(desk, "c0", interested="no")
+    # c1 was rejected at the interview earlier AND says no on a later call: still one row, on the Rejected tab only
+    to_stage(desk, apps["c1"], 4)
+    advance(desk, apps["c1"], REJECTED_AT_INTERVIEW)
+    record_call(desk, "c1", interested="no")
+    counts = view(desk, "asha", "current")["viewCounts"]
+    assert ids(view(desk, "asha", "declined")) == ["c0"] and ids(view(desk, "asha", "rejected")) == ["c1"]
+    assert counts["declined"] == 1 and counts["rejected"] == 1
+    assert sorted(ids(view(desk, "asha", "all"))) == ["c0", "c1"]
+    # the unmapped placement is not an outcome: c0 reads as a plain 'said no at the call' row (Declined, no stage, no order), not as 'Rejected / Unmapped'
+    declined = view(desk, "asha", "declined")["items"][0]["outcome"]
+    assert declined["kind"] == "declined" and declined["label"] == "Declined" and declined["stage"] is None
+    assert declined["reason"] == "Candidate not interested at the initial call"
+
+
+def test_a_later_unreachable_call_does_not_take_a_declined_candidate_off_every_tab(desk):
+    from test_daily_work import record_call
+    owned_candidates(desk, 2)
+    as_user(desk, "asha")
+    assert record_call(desk, "u100", interested="no").status_code == 200
+    assert ids(view(desk, "asha", "declined")) == ["u100"]
+    assert record_call(desk, "u100", interested="unreachable", called=False).status_code == 200
+    # still Declined (and counted once), never on Current again and never on no tab at all
+    assert ids(view(desk, "asha", "declined")) == ["u100"] and "u100" not in ids(view(desk, "asha", "current"))
+    assert view(desk, "asha", "current")["viewCounts"]["declined"] == 1
+    # an interested answer still brings them back
+    assert record_call(desk, "u100", interested="yes").status_code == 200
+    assert ids(view(desk, "asha", "declined")) == [] and "u100" in ids(view(desk, "asha", "current"))
+
+
+def test_choosing_not_interested_on_the_application_form_declines_the_candidate_like_the_call_dialog(desk):
+    from app.api.routers import application_form
+    desk.app.include_router(application_form.router)   # the Tasks desk does not mount the form's router
+    owned_candidates(desk, 2)
+    as_user(desk, "asha")
+    url = "/api/candidates/u100/application-form"
+    saved = desk.client.put(url, json={"screening": {"interestLevel": "not_interested"}})
+    assert saved.status_code == 200, saved.text
+    assert ids(view(desk, "asha", "current")) == ["u101"] and ids(view(desk, "asha", "declined")) == ["u100"]
+    with desk.sessions() as db:
+        row = db.execute(text("SELECT status, call_called, call_interested, call_recorded_at IS NOT NULL FROM crm_candidates WHERE id = 'u100'")).one()
+        assert tuple(row) == ("not_interested", True, "no", True)
+        assert db.scalar(text("SELECT count(*) FROM system_audit_log WHERE entity_id = 'u100' AND action = 'Recorded initial call' AND meta->>'source' = 'application_form'")) == 1
+    # saving the same level again changes nothing and records no second call
+    desk.client.put(url, json={"screening": {"interestLevel": "not_interested"}})
+    with desk.sessions() as db:
+        assert db.scalar(text("SELECT count(*) FROM system_audit_log WHERE entity_id = 'u100' AND action = 'Recorded initial call'")) == 1
+    # an interested level brings them back to today's list and off the Declined tab
+    assert desk.client.put(url, json={"screening": {"interestLevel": "interested"}}).status_code == 200
+    assert sorted(ids(view(desk, "asha", "current"))) == ["u100", "u101"] and ids(view(desk, "asha", "declined")) == []
+    # a level other than Not interested never touches a candidate who was not declined
+    assert desk.client.put("/api/candidates/u101/application-form", json={"screening": {"interestLevel": "more_interested"}}).status_code == 200
+    assert "u101" in ids(view(desk, "asha", "current"))

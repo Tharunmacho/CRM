@@ -188,3 +188,10 @@ test('an unconfirmed zero is never rendered as no experience', () => {
   assert.equal(experienceLabel(0, 'manual', 'overseas'), '0 years overseas')
   assert.equal(experienceLabel(4, undefined, 'overseas'), '4 years overseas')
 })
+
+test('the profile page builds its wa.me link with the agency calling code, like the Data Bank (a stored "9000000000" must not open wa.me/9000000000)', async () => {
+  const screen = await readFile(new URL('../src/screens/candidates/candidate-profile.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /import \{ waDigits \} from '@\/shared\/lib\/phone'/)
+  assert.match(screen, /waDigits\(contact\.value, home\)/)
+  assert.doesNotMatch(screen, /wa\.me\/\$\{contact\.value\.replace/)
+})

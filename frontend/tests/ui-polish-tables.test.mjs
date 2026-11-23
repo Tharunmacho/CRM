@@ -45,7 +45,7 @@ test('dashboard cards sit on the 4 / 8 / 12 / 16 / 20 / 24 spacing scale and in 
   const dash = await css('dashboard-simple.css')
   assert.match(dash, /\.ds-grid \{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); gap: 16px;/)
   assert.match(dash, /\.dashsimple \{[^}]*gap: 24px;/)
-  assert.match(dash, /\.ds-card \{[^}]*padding: 20px;[^}]*border-radius: 16px;/)
+  assert.match(dash, /\.ds-card \{[^}]*padding: 14px 16px;[^}]*border-radius: 16px;/)
   assert.match(dash, /\.sg-card \{[^}]*padding: 20px;[^}]*border-radius: 16px;/)
   const tracker = await css('dashboard-tracker.css')
   assert.match(tracker, /\.dt-card \{[^}]*padding: 20px;[^}]*border-radius: 16px;/)

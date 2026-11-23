@@ -518,7 +518,7 @@ export interface TaskColumn { key: string; title: string; width: number; /** The
 export const TASK_CARD_BREAKPOINT = 1080
 
 /**
- * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), DOT (date of travel, read-only), CLIENT (the name, and under it the country in
+ * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), CLIENT (the name, and under it the country in
  * a smaller muted line), JOB, CANDIDATE, Recruiter (supervisors only), AGENCY, STAGE, TODAY, REMARKS, NOTES and the untitled actions cell. Every
  * header is one short word so it never wraps. The table never scrolls sideways: its columns are these widths as percentages of the panel
  * (columnLayout), so it fills the panel at any width from 1080px (below that the Tasks list is a stack of cards). Every column is centred (header and
@@ -528,7 +528,7 @@ export const TASK_CARD_BREAKPOINT = 1080
  * sizes: CLIENT "International" (86px at 13px / 600), CANDIDATE "EMAYAVARAMBAN" (121px), JOB "SUPERVISOR" (78px), AGENCY "LAVOROTECH" (86px), Recruiter
  * "Srivathsala" (74px), STAGE "Prescreening" (77px in its 16px chip), TODAY the whole "Moved 10:45" chip (75px + 16px chip padding), and the headers S NO (29px),
  * CANDIDATE (70px) and RECRUITER (65px). DOC and REMARKS are the two with give: the empty "dd/mm/yyyy" hint may lose its last pixels and the remark
- * dropdown clips a long remark to two lines (its full text is the tooltip). DOT (date of travel, read-only) is 60px: "09 Jul 2026" breaks at its space into "09 Jul" over "2026", so a whole new column costs 60px, not 90; REMARKS and NOTES gave it the room (82px and 100px: they are the two columns that take the spare width of a wider panel, up to REMARKS_MAX / NOTES_MAX, and their text wraps and scrolls inside the cell).
+ * dropdown clips a long remark to two lines (its full text is the tooltip). There is no DOT (date of travel) column on this list (it was removed: the date lives on the Travelled screen); REMARKS and NOTES are the two columns that take the spare width of a wider panel, up to REMARKS_MAX / NOTES_MAX, and their text wraps and scrolls inside the cell.
  *
  * NOTES is a column of every table. TODAY is a column only when the panel has room for the whole plan (`taskPlanWidth(supervisor, true)`: 1221px for a
  * supervisor, 1134px for a recruiter); a narrower table needs only `taskPlanWidth(supervisor, false)` (1117px / 1030px: a 1440px window gives the
@@ -537,7 +537,6 @@ export const TASK_CARD_BREAKPOINT = 1080
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
   { key: 'no', title: 'S NO', width: 44 },
   { key: 'doc', title: 'DOC', width: 90 },
-  { key: 'dot', title: 'DOT', width: 60, tip: 'Date of travel' },
   { key: 'client', title: 'CLIENT', width: 99 },
   { key: 'position', title: 'JOB', width: 92 },
   { key: 'candidate', title: 'CANDIDATE', width: 134 },
@@ -598,8 +597,8 @@ export const taskPlanWidth = (supervisor: boolean, roomForToday: boolean): numbe
  * 1080px, otherwise inside the `stage` cell.
  */
 export function todayPlace(supervisor: boolean, panelWidth: number): 'column' | 'stage' | 'row' {
-  if (panelWidth >= taskPlanWidth(supervisor, true)) return 'column'
-  return panelWidth > 0 && panelWidth < TASK_CARD_BREAKPOINT ? 'row' : 'stage'
+  if (panelWidth > 0 && panelWidth < TASK_CARD_BREAKPOINT) return 'row'   // a card, whatever the plan needs
+  return panelWidth >= taskPlanWidth(supervisor, true) ? 'column' : 'stage'
 }
 
 /** The notes of a candidate, newest first whatever order they arrived in (equal times keep the arrival order). */

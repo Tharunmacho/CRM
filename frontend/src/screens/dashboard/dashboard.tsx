@@ -68,10 +68,9 @@ export default function DashboardPage() {
     {leads.error && <div role="alert" className="ds-error">{leads.error}<button type="button" onClick={leads.refresh}>Try again</button></div>}
     <div className="ds-grid">{cards.map(card => <button key={card.key} type="button" className={`ds-card ds-${card.tone}`} onClick={() => navigate(card.to)}>
       <span className="ds-top"><span className="ds-icon"><card.icon size={20} strokeWidth={1.9} /></span><ArrowUpRight size={16} className="ds-go" aria-hidden="true" /></span>
-      <span className="ds-label">{card.label}</span>
+      <span className="ds-label" title={card.detail ? `${card.label} · ${card.detail}` : card.label}>{card.label}{card.detail && <small className="ds-detail"> · {card.detail}</small>}</span>
       <span className="ds-value">{count(card.value)}</span>
-      <span className={`ds-note${card.danger ? ' is-danger' : ''}`}>{card.note}</span>
-      {card.detail && <span className="ds-note ds-note2">{card.detail}</span>}
+      <span className={`ds-note${card.danger ? ' is-danger' : ''}`} title={card.note}>{card.note}</span>
     </button>)}</div>
     <DashboardGraphs candidates={candidates} anchor={leads.data ? String(leads.data.total) : ''} onOpen={() => navigate('/data-bank')} />
   </div>

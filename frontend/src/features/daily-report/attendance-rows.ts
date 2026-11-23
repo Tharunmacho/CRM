@@ -26,6 +26,8 @@ export interface AttendanceRow {
   lateMinutes: number
   earlyMinutes: number
   tracked: boolean
+  /** Right now: the person has the CRM open and in use ('online') or open but untouched ('idle'); null when no signal (or an untracked role). Not a check-in. */
+  online: 'online' | 'idle' | null
   activeSeconds: number
   idleSeconds: number
   sessions: AttendancePair[]
@@ -153,13 +155,18 @@ export function buildRow(person: StaffAttendance, policy: PolicyDay | null, day:
   const pill = PILLS[kind]
   const specific = policy && kind !== 'late' && kind !== 'early' ? CODE_LABEL[policy.status] : undefined
   const idleDay = kind === 'off' || kind === 'holiday'
+  // Signed in and using the CRM right now (a live heartbeat), but no check-in: attendance only starts with Check in, so the status stays "pending",
+  // but the board says what is true instead of a flat "Not clocked in yet".
+  const here = person.presence?.tracked && day >= today ? person.presence.status : 'offline'
+  const online = here === 'online' || here === 'idle' ? here : null
+  const waiting = kind === 'pending' && !!online
   return {
     id: person.userId,
     name: person.name,
     role: person.role,
     kind,
-    label: specific && (kind === 'duty' || kind === 'leave') ? specific : pill.label,
-    tone: pill.tone,
+    label: waiting ? 'Not checked in' : specific && (kind === 'duty' || kind === 'leave') ? specific : pill.label,
+    tone: waiting ? 'amber' : pill.tone,
     shift: policy && !idleDay ? shiftLabel(policy.shift) : '',
     firstIn,
     lastOut,
@@ -168,6 +175,7 @@ export function buildRow(person: StaffAttendance, policy: PolicyDay | null, day:
     lateMinutes: lateBy,
     earlyMinutes: Math.max(0, Math.round(policy?.earlyMinutes ?? 0)),
     tracked: !!person.presence?.tracked,
+    online,
     activeSeconds: person.presence?.activeSeconds ?? 0,
     idleSeconds: person.presence?.idleSeconds ?? 0,
     sessions,
@@ -216,10 +224,11 @@ export function minutesText(minutes: number) {
 }
 
 /** The live line under the status: where the person is right now ("Logged in now", "Logged out", "Not clocked in"). */
-export function presenceLabel(row: Pick<AttendanceRow, 'stillIn' | 'sessions' | 'kind'>): { label: string; live: boolean } {
+export function presenceLabel(row: Pick<AttendanceRow, 'stillIn' | 'sessions' | 'kind'> & { online?: AttendanceRow['online'] }): { label: string; live: boolean } {
   if (row.stillIn) return { label: 'Logged in now', live: true }
   if (row.sessions.length) return { label: 'Logged out', live: false }
   if (row.kind === 'leave' || row.kind === 'off' || row.kind === 'holiday') return { label: '', live: false }
+  if (row.online) return { label: row.online === 'online' ? 'Online in CRM now' : 'Idle in CRM', live: true }
   return { label: 'Not clocked in', live: false }
 }
 

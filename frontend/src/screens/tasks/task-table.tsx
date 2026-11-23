@@ -11,12 +11,12 @@ import { getNoteDraft, noteDraftKey, setNoteDraft } from '@/features/daily-work/
 import { DELETE_NOTE_HINT, DELETE_NOTE_LABEL, DELETE_NOTE_TITLE } from '@/features/daily-work/note-delete-model'
 import { OwnerTag } from './task-identity'
 import {
-  AgencyCell, ClientCell, DocCell, DotCell, PositionCellView, RemarkCell, RowMenu, ScrollEdges, StageCell, columnLayout,
+  AgencyCell, ClientCell, DocCell, PositionCellView, RemarkCell, RowMenu, ScrollEdges, StageCell, columnLayout,
 } from './daily-table'
 
 /**
  * One list for every recruiter's candidates, with what happened to each of them today. The columns and their widths are
- * TASK_LIST_COLUMNS in the daily-work model (S NO, DOC, DOT, CLIENT, JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY, REMARKS, NOTES, actions): the widths add
+ * TASK_LIST_COLUMNS in the daily-work model (S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY, REMARKS, NOTES, actions): the widths add
  * up to 1108px for a supervisor (1021px for a recruiter) without TODAY and are used as percentages, so the table always fills its panel (1111px at a 1440px
  * window with the sidebar open) and never scrolls sideways; under 1080px of panel width the list is a stack of cards instead. Headers and cells are
  * centred; text wraps (the full text is the tooltip) instead of being cut with an ellipsis. The rows arrive sorted by DOC (taskRows). A candidate
@@ -196,7 +196,6 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
               <tr key={row.candidateId} className={cn('dw-row', closed && 'is-closed')}>
                 <td className="is-num tnum" data-label="S NO">{index + 1}</td>
                 <td data-label="DOC" className={cn(!row.commencementDate && !(work && row.applicationId) && 'is-empty')}><DocCell item={row} canAdd={work} onSave={(iso) => onSaveDoc(row, iso)} /></td>
-                <td data-label="DOT" className={cn(!row.travelDate && 'is-empty')}><DotCell item={row} /></td>
                 <td data-label="CLIENT" className={cn(!row.client && 'is-empty')}><ClientCell item={row} country /></td>
                 <td data-label="JOB" className={cn(!row.position && 'is-empty')}><PositionCellView item={row} /></td>
                 <td data-label="CANDIDATE NAME"><RecordIdentity name={row.candidate} /></td>
