@@ -1243,31 +1243,46 @@ def _task_rows(session, metric, p, staff_id, now, offset, limit):
         (int(rows[0][8]) if rows else 0)
 
 
-def _stage_now_rows(session, number, staff_id, offset, limit):
+def _day_text(value, zone: str | None = None) -> str:
+    """'20 Nov' for the detail line of a waiting list (the date the placement reached the stage), in the agency's zone: a stage reached at 02:00 IST
+    is stored as the evening of the day before in UTC and must still read as the local day."""
+    if not value:
+        return "an unknown date"
+    if zone and value.tzinfo is not None:
+        value = value.astimezone(ZoneInfo(zone))
+    return f"{value.day} {value.strftime('%b')}"
+
+
+def _stage_now_rows(session, number, staff_id, offset, limit, zone: str | None = None):
+    """The candidates behind a 'waiting at this stage now' figure. `at` is WHEN THEY REACHED THE STAGE (never the row's last edit: a bulk edit or an
+    import touches `updated_at` of every row and made a whole list read '20 Nov'), newest arrival first. With no recruiter named, the same people the
+    matrix counts: its stage figures (`stages.totals`) add up every OWNER, the Administrator included, but not the candidates nobody owns (they have
+    no row to belong to), so this list has the same people, and the number of rows always equals the number on screen."""
     A, C, O = m.Application, m.Candidate, m.Order
     if number == 0:
-        query = (select(C.updated_at, m.User.name, C.id, C.name, C.care_id, cast(None, String).label("client"),
+        closed = (select(func.max(A.updated_at)).where(A.candidate_id == C.id, A.status == m.ApplicationStatus.closed).correlate(C).scalar_subquery())
+        since = func.coalesce(closed, C.created_at)   # not on an order since: the last placement ended, else since they were added
+        query = (select(since, m.User.name, C.id, C.name, C.care_id, cast(None, String).label("client"),
                         cast(None, String).label("job"), func.count().over())
                  .select_from(C).join(m.User, m.User.id == C.owner_id)
                  .where(C.status.in_(WORKABLE), ~exists().where(A.candidate_id == C.id, A.status == m.ApplicationStatus.active).correlate(C),
                         ~_parked()))
         if staff_id:
             query = query.where(C.owner_id == staff_id)
-        rows = session.execute(query.order_by(C.updated_at.desc(), C.id).offset(offset).limit(limit)).all()
+        rows = session.execute(query.order_by(since.desc(), C.id).offset(offset).limit(limit)).all()
         return [{"at": r[0].isoformat(), "staffName": r[1], "kind": "candidate", "candidateId": r[2], "leadId": None, "careId": r[4],
-                 "name": r[3], "client": None, "job": None, "detail": "Not on an order yet"} for r in rows], (int(rows[0][7]) if rows else 0)
+                 "name": r[3], "client": None, "job": None, "detail": f"Not on an order yet · since {_day_text(r[0], zone)}"} for r in rows], (int(rows[0][7]) if rows else 0)
     owner = func.coalesce(C.owner_id, A.owner_id)
-    query = (select(A.updated_at, m.User.name, C.id, C.name, C.care_id, m.Company.name, m.Designation.title, func.count().over())
-             .select_from(A).join(C, C.id == A.candidate_id).join(O, O.id == A.order_id).join(m.Company, m.Company.id == O.company_id)
-             .join(m.Designation, m.Designation.id == O.designation_id).outerjoin(m.User, m.User.id == owner)
+    since = _entered_stage()
+    query = (select(since, m.User.name, C.id, C.name, C.care_id, m.Company.name, m.Designation.title, func.count().over())
+             .select_from(A).join(C, C.id == A.candidate_id).outerjoin(O, O.id == A.order_id).outerjoin(m.Company, m.Company.id == O.company_id)
+             .outerjoin(m.Designation, m.Designation.id == O.designation_id).outerjoin(m.User, m.User.id == owner)
              .where(A.status == m.ApplicationStatus.active, A.current_stage == number))
-    if staff_id:
-        query = query.where(owner == staff_id)
-    rows = session.execute(query.order_by(A.updated_at.desc(), A.id).offset(offset).limit(limit)).all()
+    query = query.where(owner == staff_id) if staff_id else query.where(owner.is_not(None))
+    rows = session.execute(query.order_by(since.desc(), A.id).offset(offset).limit(limit)).all()
     title = STAGE_NOW_KEYS[number][1]
     return [{"at": r[0].isoformat(), "staffName": r[1] or "Unknown user", "kind": "candidate", "candidateId": r[2], "leadId": None,
-             "careId": r[4], "name": r[3], "client": r[5], "job": r[6], "detail": f"At stage {number}: {title}"} for r in rows], \
-        (int(rows[0][7]) if rows else 0)
+             "careId": r[4], "name": r[3], "client": r[5], "job": r[6], "detail": f"At stage {number}: {title} · since {_day_text(r[0], zone)}"} for r in rows], (int(rows[0][7]) if rows else 0)
 
 
 def _stuck_rows(session, number, staff_id, now, offset, limit):
@@ -1316,7 +1331,7 @@ def drilldown(db, viewer, metric: str, from_date, to_date, staff, client, page: 
         if metric in ("tasksDone", "tasksPending", "tasksOverdue"):
             return _task_rows(db, metric, p, staff, now, offset, limit)
         if metric.startswith("stage:"):
-            return _stage_now_rows(db, int(metric[6:]), staff, offset, limit)
+            return _stage_now_rows(db, int(metric[6:]), staff, offset, limit, zone)
         if metric.startswith("stuck"):
             return _stuck_rows(db, int(metric[6:] or 0) if metric != "stuck" else 0, staff, now, offset, limit)
         return _stage_rows(db, metric, p, staff, client, offset, limit)

@@ -221,8 +221,9 @@ def test_staff_ids_must_be_active_staff_or_managers(env, staff_ids, fragment):
 
 def test_staff_contacts_are_validated(env):
     path = "/api/clients"
+    numbers = iter(range(1, 1000))   # one client per name: every attempt is a different client
     def attempt(contacts):
-        return env.client.post(path, json={"name": "N", "staffContacts": contacts}).status_code
+        return env.client.post(path, json={"name": f"N{next(numbers)}", "staffContacts": contacts}).status_code
     assert attempt([{"name": "ok"}] * 50) == 201
     assert attempt([{"name": "ok"}] * 51) == 422
     assert attempt([{"name": "   "}]) == 422 and attempt([{"phone": "1"}]) == 422

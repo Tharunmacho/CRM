@@ -73,6 +73,8 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "crm_employer_companies": ("companies",),
     "crm_job_orders": ("orders",),
     "crm_job_designations": ("designations",),
+    "crm_job_requirements": ("job_requirements",),  # the Job requirements sheet and its dashboard card
+    "crm_job_requirement_fields": ("job_requirements",),
     "system_notifications": ("notifications",),
     "personal_todos": ("todos",),
     "auth_users": ("users",),
@@ -102,6 +104,7 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "whatsapp_send_attempts": ("whatsapp",),
     "whatsapp_delivery_events": ("whatsapp",),
     "whatsapp_templates": ("whatsapp",),
+    "whatsapp_ignored_numbers": ("whatsapp",),  # the admin's list of numbers the CRM never reads or answers
     "document_extraction_jobs": ("documents",),
     "document_person_intakes": ("documents",),
     "document_person_groups": ("documents",),
@@ -149,7 +152,7 @@ OWNER_TOPICS = frozenset({"todos", "notifications"})
 CLIENT_TOPICS = frozenset({
     "candidates", "applications", "tasks", "clients", "companies", "orders", "designations", "notifications",
     "todos", "users", "attendance", "mail", "whatsapp", "documents", "reports", "settings", "form_options", "leads",
-    "reference_agencies", "feedback", "daily_report",
+    "reference_agencies", "feedback", "daily_report", "job_requirements",
 })
 # Only supervisors get entity ids; a recruiter's stream carries topic names alone.
 ID_ROLES = ADMIN_LEVEL_VALUES  # admin and MD (stored as "manager")

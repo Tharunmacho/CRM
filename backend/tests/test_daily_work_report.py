@@ -823,6 +823,74 @@ def test_a_running_day_is_compared_with_the_same_elapsed_time_of_the_previous_on
     assert report(env, **{"from": "2026-11-02", "to": "2026-11-05"})["period"]["partial"] is False
 
 
+def test_a_waiting_list_shows_when_each_candidate_reached_the_stage_not_when_the_row_was_last_edited(env):
+    """A bulk edit (an import, a re-numbering migration) touches `updated_at` of every placement; the list behind a 'waiting at stage' figure used to read
+    that edit date for all of them ('20 Nov' for everyone) and sorted by it. It now shows the day each candidate reached the stage."""
+    with env.world.sessions() as db:
+        db.execute(text("UPDATE crm_applications SET updated_at = :t"), {"t": ist(date(2026, 11, 20), 10)})
+        db.commit()
+    third = get(env, "admin", "/drilldown", metric="stage:3", page_size=100).json()
+    by_candidate = {r["candidateId"]: r for r in third["rows"]}
+    assert by_candidate["c3"]["at"].startswith("2026-11-05"), by_candidate["c3"]   # the day its last stage was completed, not the 20 Nov edit
+    assert by_candidate["c3"]["detail"] == "At stage 3: Interview scheduling · since 5 Nov"
+    assert not any(r["at"].startswith("2026-11-20") for r in third["rows"])
+    # newest arrival first, and nobody is dated by the bulk edit unless that really is the day they arrived
+    stamps = [r["at"] for r in third["rows"]]
+    assert stamps == sorted(stamps, reverse=True)
+    assert third["total"] == len(third["rows"]) == report(env)["stages"]["totals"][3]["count"]
+
+
+def _scratch_holders(env, rows):
+    """Candidates added for one test and removed again (the world is shared by the whole module): (candidate id, owner, stage or None)."""
+    with env.world.sessions() as db:
+        for key, owner, stage, completed_at in rows:
+            db.add(Candidate(id=key, ref=f"CND-{key}", name=f"Candidate {key}", phone=f"9{abs(hash(key)) % 10**9:09}", source=Source.walk_in, owner_id=owner))
+            db.flush()
+            if stage is not None:
+                db.add(Application(id=f"app-{key}", candidate_id=key, order_id="order", owner_id=owner, current_stage=stage, status=ApplicationStatus.active))
+                db.flush()
+                if completed_at is not None:
+                    db.add(ApplicationStage(application_id=f"app-{key}", stage=stage - 1, attempt=1, outcome="Forwarded", completed_by="ravi",
+                                            owner_id=owner, completed_at=completed_at, data={}))
+        db.commit()
+
+
+def _drop_scratch_holders(env, keys):
+    with env.world.sessions() as db:
+        db.execute(text("DELETE FROM crm_application_stages WHERE application_id = ANY(:a)"), {"a": [f"app-{k}" for k in keys]})
+        db.execute(text("DELETE FROM crm_applications WHERE id = ANY(:a)"), {"a": [f"app-{k}" for k in keys]})
+        db.execute(text("DELETE FROM crm_candidates WHERE id = ANY(:c)"), {"c": list(keys)})
+        db.commit()
+
+
+def test_a_waiting_list_has_as_many_rows_as_its_figure_even_when_the_administrator_or_nobody_owns_candidates(env):
+    """The stage figures add up every owner, the Administrator included, but not candidates nobody owns (no row to belong to), so the list behind a figure
+    has exactly those people: the number clicked, the total of the list and the rows shown are always the same."""
+    keys = ("adm-stage", "adm-none", "adm-free", "own-free")
+    _scratch_holders(env, [("adm-stage", "admin", 3, None), ("adm-none", None, 3, None), ("adm-free", "admin", None, None), ("own-free", None, None, None)])
+    try:
+        overview = report(env)
+        for no in (0, 3):
+            body = get(env, "admin", "/drilldown", metric=f"stage:{no}", page_size=100).json()
+            assert body["total"] == len(body["rows"]) == overview["stages"]["totals"][no]["count"], (no, body["total"], overview["stages"]["totals"][no])
+        third = {r["candidateId"] for r in get(env, "admin", "/drilldown", metric="stage:3", page_size=100).json()["rows"]}
+        assert "adm-stage" in third and "adm-none" not in third   # the Administrator's candidate counts; the unowned one has no row in the matrix
+        assert "adm-free" in {r["candidateId"] for r in get(env, "admin", "/drilldown", metric="stage:0", page_size=100).json()["rows"]}
+    finally:
+        _drop_scratch_holders(env, keys)
+
+
+def test_the_since_day_is_the_agency_day_not_the_utc_day(env):
+    """A stage reached at 01:00 IST is stored as 19:30 UTC of the day before: the list must still say the local day."""
+    _scratch_holders(env, [("zone-1", "ravi", 3, ist(date(2026, 11, 12), 1, 0))])
+    try:
+        rows = get(env, "admin", "/drilldown", metric="stage:3", page_size=100).json()["rows"]
+        row = next(r for r in rows if r["candidateId"] == "zone-1")
+        assert row["detail"].endswith("since 12 Nov"), row["detail"]
+    finally:
+        _drop_scratch_holders(env, ("zone-1",))
+
+
 def test_drilldown_of_the_new_numbers_matches_each_total(env):
     day = {"from": "2026-11-05", "to": "2026-11-05"}
     overview = report(env, **day)
@@ -848,13 +916,13 @@ def test_drilldown_of_the_new_numbers_matches_each_total(env):
         assert body["total"] == len(body["rows"]) == overview["stages"]["totals"][no]["count"], no
     third = drill(metric="stage:3")
     assert third["label"] == "Interview scheduling" and {r["candidateId"] for r in third["rows"]} == {"c3", "c13", "c14", "c17", "c18", "c22"}
-    assert all(r["detail"] == "At stage 3: Interview scheduling" and r["kind"] == "candidate" for r in third["rows"])
+    assert all(r["detail"].startswith("At stage 3: Interview scheduling · since ") and r["kind"] == "candidate" for r in third["rows"])
     assert {r["staffName"] for r in third["rows"]} == {"Ravi", "Meena"}
     assert drill(metric="stage:3", staff="ravi")["total"] == 5
     unmapped = drill(metric="stage:0")
     assert unmapped["label"] == "Not on an order yet" and unmapped["total"] == 8
     assert {r["candidateId"] for r in unmapped["rows"]} == {"c2", "c4", "c7", "c10", "c12", "u1", "u2", "u4"}   # u3 declined: not workable
-    assert all(r["detail"] == "Not on an order yet" and r["client"] is None for r in unmapped["rows"])
+    assert all(r["detail"].startswith("Not on an order yet · since ") and r["client"] is None for r in unmapped["rows"])
     assert {r["candidateId"] for r in drill(metric="stage:0", staff="asha")["rows"]} == {"c2", "u1", "u2"}
     assert drill(user="ravi", metric="stage:3")["total"] == 5 and drill(user="ravi", metric="tasksPending")["total"] == 2
     assert drill(user="ravi", metric="leadsAssigned")["total"] == 4

@@ -1031,7 +1031,7 @@ def test_not_interested_at_the_initial_call_takes_a_prescreening_candidate_off_t
     answer = record_call(desk, "c0", interested="no")
     assert answer.status_code == 200, answer.text
     body = answer.json()
-    assert body["leftOrder"] is True and body["onOrder"] is False and body["notice"] and "Data Bank" in body["notice"]
+    assert body["leftOrder"] is True and body["onOrder"] is False and body["notice"] and "Declined" in body["notice"] and "Data Bank" not in body["notice"]
     with desk.sessions() as db:
         application = db.get(Application, apps["c0"])
         assert (application.status.value, application.closure_reason.value, application.lock_version) == ("closed", "not_interested", before + 1)

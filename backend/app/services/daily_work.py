@@ -134,7 +134,7 @@ def goals_from_rows(rows, user_ids: list[str]) -> dict[str, dict]:
 
 def _call_done():
     """The initial call has a real outcome: made, with interest answered yes or no (an unanswered call stays to be worked)."""
-    return and_(Candidate.call_recorded_at.is_not(None), Candidate.call_called.is_(True), Candidate.call_interested.in_(["yes", "no"]))
+    return and_(Candidate.call_recorded_at.is_not(None), Candidate.call_called.is_(True), Candidate.call_interested.in_(["yes", "no", "rejected"]))
 
 
 def _waiting_since():
@@ -179,6 +179,31 @@ def _last_application():
             .limit(1).correlate(Candidate).scalar_subquery())
 
 
+def _negative_end():
+    """The (subject) placement ended negatively: it is closed with a reason that is an outcome (anything but unmapped / changed job)."""
+    return and_(Application.status == ApplicationStatus.closed, Application.closure_reason.is_not(None),
+                Application.closure_reason.notin_(NOT_OUTCOMES))
+
+
+def _no_outcome():
+    """The (subject) placement is no outcome of its own, so the candidate's call / status decides: there is none, or it was only unmapped / swapped,
+    or it is a legacy row closed with no reason at all (never a deployed one)."""
+    return or_(Application.id.is_(None),
+               and_(Application.status == ApplicationStatus.closed,
+                    or_(Application.closure_reason.is_(None), Application.closure_reason.in_(NOT_OUTCOMES))))
+
+
+def _is_no_outcome(app) -> bool:
+    return app.status == ApplicationStatus.closed and (app.closure_reason is None or app.closure_reason in NOT_OUTCOMES)
+
+
+def _called_yes_since():
+    """A "yes" call was recorded after the (subject) placement closed: the candidate is interested again. Not when the candidate's status was
+    edited back to "not interested" afterwards (then the status wins and they are on Declined / Rejected)."""
+    return and_(Candidate.call_recorded_at.is_not(None), Candidate.call_interested == "yes",
+                Candidate.call_recorded_at > Application.updated_at, Candidate.status != CandidateStatus.not_interested)
+
+
 def _parked():
     """The candidate's LAST placement ended negatively (they declined, or were rejected: any closure reason except unmapped / changed job)
     and no placement is active: they wait in the Data Bank for their next job and show on the Declined / Rejected tab of the Tasks page.
@@ -192,21 +217,25 @@ def _parked():
     `updated_at` (a closed placement is not edited again, so this is the time of the closure). The status plays no part here:
     a candidate who is "Needs review" and declined stays parked (their status is kept so the flag still shows)."""
     latest = _last_application()
-    called_yes_since = and_(Candidate.call_recorded_at.is_not(None), Candidate.call_interested == "yes",
-                            Candidate.call_recorded_at > Application.updated_at)
-    ended = exists().where(Application.id == latest, Application.candidate_id == Candidate.id,
-                           Application.status == ApplicationStatus.closed, Application.closure_reason.is_not(None),
-                           Application.closure_reason.notin_(NOT_OUTCOMES),
+    called_yes_since = _called_yes_since()
+    ended = exists().where(Application.id == latest, Application.candidate_id == Candidate.id, _negative_end(),
                            ~func.coalesce(called_yes_since, false())).correlate(Candidate)   # explicit: this is also used inside other sub-selects
     active = exists().where(Application.candidate_id == Candidate.id, Application.status == ApplicationStatus.active).correlate(Candidate)
     return and_(ended, ~active)
+
+
+def _workable():
+    """Today's-list status: new / in process / needs review, or any status with a live placement (a stale "not interested" next to an active
+    placement must not take the candidate off every list)."""
+    return or_(Candidate.status.in_(WORKABLE),
+               exists().where(Application.candidate_id == Candidate.id, Application.status == ApplicationStatus.active).correlate(Candidate))
 
 
 def _on_list(start: datetime, end: datetime):
     """The candidate is on today's list: workable, not parked after a negative end of their last placement (declined or rejected; not even on
     the day it happened: the Data Bank and the Declined / Rejected tabs have them at once), and either not past prescreening or finished today (shown ticked until the day ends: the candidate is gone tomorrow)."""
     done = _done_at(start, end)
-    return and_(Candidate.status.in_(WORKABLE), ~_parked(), or_(~_in_follow_up(), done.is_not(None)))
+    return and_(_workable(), ~_parked(), or_(~_in_follow_up(), done.is_not(None)))
 
 
 def owner_counts(db, owner_ids, *, now: datetime | None = None, tz=None) -> dict[str, tuple[int, int]]:
@@ -559,7 +588,7 @@ def assemble_rows(rows, placed, task_rows, fact_rows, remark_rows, *, now: datet
             "stage": stage_no, "stageTitle": stage_by_no(stage_no).title if stage_no and 1 <= stage_no <= TOTAL_STAGES else None,
             "waiting": waiting is not None,
             "status": "done" if finished is not None else "open", "completedAt": finished,
-            "stageMovedAt": moved, "calledAt": cand.call_recorded_at if cand.call_called and cand.call_interested in ("yes", "no") else None,
+            "stageMovedAt": moved, "calledAt": cand.call_recorded_at if cand.call_called and cand.call_interested in ("yes", "no", "rejected") else None,
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "agency": agency or None,
             "orderRef": order.ref if order else None, **payment_fields(app, facts),
@@ -598,7 +627,7 @@ def wide_reads(owner_ids: list[str], *, now: datetime, tz=None) -> tuple:
     """Everything today's list needs for these recruiters (a short list of ids) as ONE set of independent reads: the rows, then the four
     lookups of `placement_reads` taken for all of the recruiters' workable candidates instead of only the listed ones. Nothing waits for
     the rows, so the whole list is one round trip. Results: (rows, placed, task rows, fact rows, remark rows)."""
-    candidates = select(Candidate.id).where(Candidate.owner_id.in_(owner_ids), Candidate.status.in_(WORKABLE))
+    candidates = select(Candidate.id).where(Candidate.owner_id.in_(owner_ids), _workable())
     return (lambda s: fetch_rows(s, owner_ids, now=now, tz=tz), *placement_reads(candidates, now=now, tz=tz))
 
 
@@ -647,14 +676,20 @@ def outcome_of(app, by: str | None = None) -> dict:
         kind, reason = "travelled", None
     else:
         kind = "declined" if app.closure_reason in DECLINE_CLOSURES else "rejected"
-        reason = reason_text(app.closure_reason, app.current_stage)
+        reason = reason_text(app.closure_reason, app.current_stage) or "Application closed"   # a legacy row closed with no reason
     # A closed placement is not edited again, so `updated_at` is the time it closed (the same reading as `_parked`).
     return {"kind": kind, "label": OUTCOME_LABELS[kind], "reason": reason, "stage": app.current_stage, "at": app.updated_at, "by": by}
 
 
 def outcome_of_call(cand) -> dict:
-    """The `outcome` of a candidate who said no at the initial call and has no placement of their own: Declined, no stage, closed when the call was recorded."""
-    return {"kind": "declined", "label": "Declined", "reason": "Candidate not interested at the initial call", "stage": None, "at": cand.call_recorded_at, "by": None}
+    """The `outcome` of a candidate who is "not interested" with no placement of their own (never placed, or only moved off a job).
+    Rejected at the initial call -> Rejected; their own no at the call -> Declined; "not interested" by an edit or an import with no call -> Declined.
+    No stage; closed when the call was recorded (else when the candidate was last changed)."""
+    at = cand.call_recorded_at or cand.updated_at
+    if cand.call_interested == "rejected":
+        return {"kind": "rejected", "label": "Rejected", "reason": "Rejected at the initial call", "stage": None, "at": at, "by": None}
+    reason = "Candidate not interested at the initial call" if cand.call_interested == "no" else "Marked as not interested"
+    return {"kind": "declined", "label": "Declined", "reason": reason, "stage": None, "at": at, "by": None}
 
 
 def _subject_placement():
@@ -669,19 +704,20 @@ def _outcome_conditions() -> dict:
     """SQL conditions per outcome kind, over `Candidate` joined to `Application` = the subject placement."""
     active = aliased(Application)
     nothing_active = ~exists().where(active.candidate_id == Candidate.id, active.status == ApplicationStatus.active).correlate(Candidate)
-    called_yes_since = and_(Candidate.call_recorded_at.is_not(None), Candidate.call_interested == "yes",
-                            Candidate.call_recorded_at > Application.updated_at)
-    # The candidate said NO at the initial call and has no placement that ended in an outcome of its own (no placement at all, or only one
-    # that was unmapped / swapped): `Application` is then NULL (the subject join is an outer join) or a NOT_OUTCOMES closure. The call
-    # answer is what declares it (`record_call` puts them on "Not interested"; a later "yes" puts them back on today's list), so they are
-    # Declined, never also on today's list (not interested is not WORKABLE).
-    said_no_off_order = and_(Candidate.status == CandidateStatus.not_interested, Candidate.call_interested == "no", Candidate.call_recorded_at.is_not(None),
-                             or_(Application.id.is_(None), Application.closure_reason.in_(NOT_OUTCOMES)), nothing_active)
+    called_yes_since = _called_yes_since()
+    # The candidate is "not interested" (their own no at the call, the recruiter's rejection at the call, or marked so by an edit / an import) and
+    # has no placement that ended in an outcome of its own (no placement at all, or only one that was unmapped / swapped): `Application` is then
+    # NULL (the subject join is an outer join) or a NOT_OUTCOMES closure. The status is what parks them (not interested is not WORKABLE; a later
+    # "yes" call puts them back on today's list), so they are on exactly one of Declined / Rejected, never also on today's list.
+    off_order = and_(Candidate.status == CandidateStatus.not_interested, _no_outcome(), nothing_active)
+    rejected_at_call = and_(off_order, Candidate.call_interested == "rejected")
+    said_no_off_order = and_(off_order, Candidate.call_interested.is_distinct_from("rejected"))
     return {
         "declined": or_(and_(Application.status == ApplicationStatus.closed, Application.closure_reason.in_(DECLINE_CLOSURES),
                              ~func.coalesce(called_yes_since, false()), nothing_active), said_no_off_order),
-        "rejected": and_(Application.status == ApplicationStatus.closed, Application.closure_reason.is_not(None),
-                         Application.closure_reason.notin_(DECLINE_CLOSURES + NOT_OUTCOMES), ~func.coalesce(called_yes_since, false()), nothing_active),
+        "rejected": or_(and_(_negative_end(), Application.closure_reason.notin_(DECLINE_CLOSURES),
+                             ~func.coalesce(called_yes_since, false()), nothing_active),
+                        rejected_at_call),
         "travelled": Application.status == ApplicationStatus.deployed,
     }
 
@@ -711,7 +747,8 @@ def fetch_outcome_rows(db, owner_ids, kinds, *, limit: int | None = None) -> lis
         .outerjoin(Order, Order.id == Application.order_id).outerjoin(Company, Company.id == Order.company_id)
         .outerjoin(Client, Client.id == Company.client_id).outerjoin(Designation, Designation.id == Order.designation_id)
         .where(Candidate.owner_id.in_(owner_ids), or_(*(found[kind] for kind in kinds)))
-        .order_by(case((Application.closure_reason.in_(NOT_OUTCOMES), Candidate.call_recorded_at), else_=func.coalesce(Application.updated_at, Candidate.call_recorded_at)).desc().nulls_last(), Application.id, Candidate.id).limit(limit or MAX_OUTCOME_ROWS)).all()
+        .order_by(case((_no_outcome(), func.coalesce(Candidate.call_recorded_at, Candidate.updated_at)),
+                       else_=func.coalesce(Application.updated_at, Candidate.call_recorded_at, Candidate.updated_at)).desc().nulls_last(), Application.id, Candidate.id).limit(limit or MAX_OUTCOME_ROWS)).all()
 
 
 def outcome_reads(app_ids, candidate_ids) -> tuple:   # `app_ids` holds only real placements (a candidate who was never placed has none)
@@ -754,7 +791,7 @@ def assemble_outcome_rows(rows, remark_rows, fact_rows, closed_by: dict | None =
     for cand, app, order, company, client, designation, agency in rows:
         # A placement that was only unmapped or swapped is not an outcome: the row is listed because the candidate said no at the call,
         # so it reads as that (Declined, no stage, no order) and not as a "Rejected / Unmapped" placement.
-        if app is not None and app.closure_reason in NOT_OUTCOMES:
+        if app is not None and _is_no_outcome(app):
             app = order = company = client = designation = None
         stage_no = app.current_stage if app is not None else None
         out.append({
@@ -777,10 +814,11 @@ def assemble_outcome_rows(rows, remark_rows, fact_rows, closed_by: dict | None =
 # ------------------------------------------------------------------------------------------------ follow-up
 
 def _follow_up_filter(owner_ids):
-    """Active placements at stage 2-13 of candidates these recruiters own (and that are still open: not deployed / not interested)."""
+    """Active placements at stage 2-13 of candidates these recruiters own (still open: not deployed). A stale "not interested" status next to an
+    active placement does not hide them: whoever has a live placement is being worked, so nobody falls off every list."""
     return [Candidate.owner_id.in_(owner_ids), Application.status == ApplicationStatus.active,
             Application.current_stage.between(*FOLLOW_UP_STAGES),
-            Candidate.status.notin_([CandidateStatus.deployed, CandidateStatus.not_interested])]
+            Candidate.status != CandidateStatus.deployed]
 
 
 def follow_up_counts(db, owner_ids) -> dict[str, int]:
@@ -838,7 +876,7 @@ def assemble_follow_up(rows, remark_rows, task_rows, fact_rows, *, now: datetime
             "id": app.id, "applicationId": app.id, "taskId": open_task.get(app.id), "candidateId": cand.id, "ownerId": cand.owner_id,
             "commencementDate": app.commencement_date.isoformat() if app.commencement_date else None,
             "stage": app.current_stage, "lastUpdateAt": last_update, "stageMovedAt": moved_at,
-            "calledAt": cand.call_recorded_at if cand.call_called and cand.call_interested in ("yes", "no") else None,
+            "calledAt": cand.call_recorded_at if cand.call_called and cand.call_interested in ("yes", "no", "rejected") else None,
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "agency": agency or None, "orderRef": order.ref,
             **payment_fields(app, facts), "remark": latest.get(app.id), **_note_fields(_row_notes(found_notes, cand.id, app.id), now=now, tz=tz),

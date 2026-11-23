@@ -679,8 +679,44 @@ def _commit_or_conflict(db: Session) -> None:
         raise HTTPException(503, "The record could not be saved. Please try again.")
 
 
+def _squash(value) -> str:
+    """Lower-cased text with extra spaces removed (the same reading as the SQL below)."""
+    return " ".join((value or "").split()).casefold()
+
+
+def _duplicate_client(db, body):
+    """The existing client this one would repeat, or None: the same name AND the same country (both read ignoring case and extra spaces; no
+    country equals no country), or the same phone number, or the same e-mail address. Two real clients that share a name tell themselves apart
+    by country, phone or e-mail."""
+    name, country = _squash(body.name), _squash(body.country)
+    digits = re.sub(r"\D", "", body.phone or "")
+    email = (body.email or "").strip().casefold()
+    squash = lambda column: func.lower(func.regexp_replace(func.btrim(func.coalesce(column, "")), r"\s+", " ", "g"))  # noqa: E731
+    tests = []
+    if name:
+        tests.append(and_(squash(Client.name) == name, squash(Client.country) == country))
+    if len(digits) >= 6:
+        tests.append(func.regexp_replace(func.coalesce(Client.phone, ""), r"\D", "", "g") == digits)
+    if email:
+        tests.append(func.lower(func.btrim(func.coalesce(Client.email, ""))) == email)
+    if not tests:
+        return None
+    # Two creates at the same moment (a double click, two people) take turns on the same keys, so the second one sees the first one's row.
+    keys = sorted({f"client:{name}|{country}"} | ({f"client-phone:{digits}"} if len(digits) >= 6 else set()) | ({f"client-mail:{email}"} if email else set()))
+    for key in keys:
+        db.execute(select(func.pg_advisory_xact_lock(func.hashtext(key))))
+    return db.scalars(select(Client).where(or_(*tests)).order_by(Client.created_at, Client.id).limit(1)).first()
+
+
 @router.post("/clients", status_code=status.HTTP_201_CREATED)
 def create_client(body: ClientIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    # One client per name and country (or phone, or e-mail): a double click, or two people adding the same client at the same moment, must not
+    # leave two rows that split its jobs and candidates between them.
+    existing = _duplicate_client(db, body)
+    if existing is not None:
+        where = f" in {existing.country}" if existing.country else ""
+        raise HTTPException(409, f'A client "{existing.name}"{where} already exists. Open it from the Clients list, or give this one a different country, '
+                                 "phone number or e-mail address.")
     staff_ids = _checked_staff_ids(db, body.staffIds)
     # Client contact, first employer and staff allocation commit together, so a failure never leaves a
     # contact without the company the form described.
@@ -1203,7 +1239,7 @@ def clear_ended_remark(application_id: str, db: Session = Depends(get_db), user:
 
 class CallIn(BaseModel):
     called: bool = True
-    interested: Literal["yes", "no", "unreachable"]
+    interested: Literal["yes", "no", "unreachable", "rejected"]
     remarks: str | None = Field(default=None, max_length=10000)
 
     @model_validator(mode="after")
