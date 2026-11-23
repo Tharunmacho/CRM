@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     whatsapp_enabled: bool = False
     whatsapp_phone_number_id: str | None = None
     whatsapp_business_account_id: str | None = None
-    whatsapp_graph_version: str | None = None
+    # A supported Graph API version, format vN.N. Override it when your Meta app needs another; an invalid value keeps WhatsApp off (missing_settings).
+    whatsapp_graph_version: str | None = "v24.0"
     whatsapp_access_token: str | None = Field(default=None, repr=False)
     whatsapp_app_secret: str | None = Field(default=None, repr=False)
     whatsapp_verify_token: str | None = Field(default=None, repr=False)
@@ -205,6 +206,12 @@ class Settings(BaseSettings):
     smtp_server: str | None = None
     smtp_port: int = Field(default=587, ge=1, le=65535)
     smtp_use_ssl: bool = False
+
+    @field_validator("whatsapp_graph_version", mode="before")
+    @classmethod
+    def _blank_graph_version_is_the_default(cls, v):
+        """`WHATSAPP_GRAPH_VERSION=` (a compose pass-through or a template line left empty) means "not chosen": use the default, not an empty string."""
+        return "v24.0" if v is None or (isinstance(v, str) and not v.strip()) else v
 
     @field_validator("database_url")
     @classmethod

@@ -25,6 +25,7 @@ from app.services.parallel_reads import parallel_reads
 from app.services.response_cache import cached, scope_of
 from app.core.roles import is_admin_level
 
+MAX_WEBHOOK_BYTES = 4 * 1024 * 1024
 router = APIRouter(prefix="/api/whatsapp", tags=["WhatsApp"])
 admin = require_admin_level()
 
@@ -52,17 +53,24 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     # disabled. A signature secret and configured phone are sufficient here.
     if not settings.whatsapp_phone_number_id or not settings.whatsapp_app_secret:
         raise HTTPException(503, "WhatsApp is not set up on the server yet")
+    # Meta sends up to about 3 MB per call (delivery statuses are batched), so the cap is 4 MiB. An oversize call is refused from its
+    # declared length before anything is read.
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_WEBHOOK_BYTES:
+        raise HTTPException(413, "Webhook payload is too large")
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > 1024 * 1024:
+        if len(body) > MAX_WEBHOOK_BYTES:
             raise HTTPException(413, "Webhook payload is too large")
     if not verify_signature(body, request.headers.get("X-Hub-Signature-256"), settings.whatsapp_app_secret):
         raise HTTPException(401, "Webhook signature is invalid")
     try:
         payload = json.loads(body)
-        if not isinstance(payload, dict) or payload.get("object") != "whatsapp_business_account":
+        if not isinstance(payload, dict):
             raise ValueError()
+        if payload.get("object") != "whatsapp_business_account":
+            return {"received": 0}   # a signed event for another product is acknowledged, never retried
         count = await run_in_threadpool(receive_chat_payload, db, payload, settings)
     except (ValueError, TypeError, AttributeError, OverflowError, OSError):
         db.rollback()
@@ -227,6 +235,13 @@ def resolve(message_id: str, body: ResolveIn, db: Session = Depends(get_db), use
         raise HTTPException(422, "Download the original file before you link this message to a candidate.")
     attach_original(db, row, candidate)
     row.candidate_id, row.status, row.last_error = candidate.id, "completed", None
+    # The chat is linked to the candidate only when the sender's number really is theirs (the same rule as automatic intake).
+    from app.services.whatsapp_chat import is_data_error, link_message_sender
+    try:
+        with db.begin_nested():
+            link_message_sender(db, row, candidate.id)
+    except Exception as exc:
+        if not is_data_error(exc): raise
     queue_intake_acknowledgement(db, "whatsapp", row.id)
     db.add(AuditEntry(actor_id=user.id, action="Marked a WhatsApp message as handled", entity_type="candidate", entity_id=candidate.id,
                       target=candidate.name, meta={"messageId": row.id, "reason": body.reason}))

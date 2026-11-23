@@ -19,10 +19,56 @@ class WhatsAppReviewError(WhatsAppError):
 
 
 
+class TemplatesNotConfigured(WhatsAppError):
+    """The WhatsApp Business Account ID is not set, so approved templates can be neither loaded nor sent."""
+
+
+BUSINESS_ACCOUNT_MISSING = ("WHATSAPP_BUSINESS_ACCOUNT_ID is not set on this server, so approved templates cannot be loaded or sent. "
+                            "Ask your administrator to add it.")
+
+GENERIC_REJECTION = "WhatsApp did not accept the message. Fix the problem, then send it again."
+TOO_FAST = "WhatsApp is receiving messages too fast. Wait a few minutes, then send it again."
+
+# What an administrator reads for the Meta error codes that matter in practice. Only these fixed words are ever shown: the provider's
+# own title, message and details are never stored (they can quote the recipient or the request).
+ERROR_MESSAGES = {
+    "131047": "The 24-hour reply window has closed. Send an approved template instead.",
+    "131030": "This number is not on the allowed list of the test WhatsApp number. Add it in Meta, or use the live number.",
+    "132018": "A template value has line breaks, tabs or four spaces in a row. Remove them and send again.",
+    "190": "The WhatsApp access token has expired or is not valid. Tell your administrator to create a new one.",
+    "133010": "The business WhatsApp number is not registered. Tell your administrator to register it in Meta.",
+    "131026": "WhatsApp could not deliver to this number. Check that it is correct and uses WhatsApp.",
+    "130429": TOO_FAST, "80007": TOO_FAST, "131056": TOO_FAST, "429": TOO_FAST,
+}
+TEMPLATE_PROBLEM = "The template is not approved, is paused or is missing. Refresh the templates, then choose an approved one."
+# Nothing is sent when Meta answers with these (or when the connection is never made), so one more try later is safe.
+RETRYABLE_CODES = {"130429", "80007", "131056", "429", "connect_failed"}
+
+
+def error_message(code):
+    """Plain words for a Meta error code (the generic sentence when the code is unknown)."""
+    text = str(code or "").strip()
+    if text in ERROR_MESSAGES:
+        return ERROR_MESSAGES[text]
+    if text.isdigit() and 132000 <= int(text) <= 132016:
+        return TEMPLATE_PROBLEM
+    return GENERIC_REJECTION
+
+
+def describe_error(code):
+    """`error_message` plus the code, for the history a person reads and for support."""
+    text = str(code or "").strip()
+    message = error_message(text)
+    return f"{message} (WhatsApp code {text})" if text.isdigit() and message != GENERIC_REJECTION else message
+
+
 class SendRejected(WhatsAppError):
-    def __init__(self, code, message="WhatsApp did not accept the message. Fix the problem, then send it again."):
-        super().__init__(message)
+    """WhatsApp refused the message, or it never left this server. Nothing was sent; `retryable` says whether trying again later can work."""
+
+    def __init__(self, code, message=None, retryable=None):
+        super().__init__(message or describe_error(code))
         self.code = str(code)
+        self.retryable = (self.code in RETRYABLE_CODES) if retryable is None else bool(retryable)
 
 
 class SendUnknown(WhatsAppError):
@@ -45,18 +91,35 @@ CHAT_TYPES = {
 }
 
 
+GRAPH_VERSION = re.compile(r"v[0-9]+\.[0-9]+")
+NOT_SET_UP = "WhatsApp is not set up correctly on this server. Ask your system administrator to check the WhatsApp settings."
+
+
+def valid_graph_version(settings):
+    return bool(GRAPH_VERSION.fullmatch(getattr(settings, "whatsapp_graph_version", None) or ""))
+
+
 def graph_url(settings, identifier, edge):
-    if not re.fullmatch(r"[0-9]+", str(identifier or "")) or not re.fullmatch(r"v[0-9]+\.[0-9]+", settings.whatsapp_graph_version or ""):
-        raise WhatsAppError("WhatsApp is not set up correctly on this server. Ask your system administrator to check the WhatsApp settings.")
+    if not re.fullmatch(r"[0-9]+", str(identifier or "")) or not valid_graph_version(settings):
+        raise WhatsAppError(NOT_SET_UP)
     return f"https://graph.facebook.com/{settings.whatsapp_graph_version}/{identifier}/{edge}"
 
 
 def send_message(settings, payload, *, client=None):
+    # A missing or malformed setting is checked before anything can leave: it is "not sent" (fix the settings, send again), never "unknown".
+    try:
+        url = graph_url(settings, settings.whatsapp_phone_number_id, "messages")
+    except WhatsAppError:
+        raise SendRejected("not_configured", NOT_SET_UP) from None
     own = client is None
     client = client or httpx.Client(timeout=30, follow_redirects=False)
     try:
-        response = client.post(graph_url(settings, settings.whatsapp_phone_number_id, "messages"),
-            headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"}, json=payload)
+        try:
+            response = client.post(url,
+                headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"}, json=payload)
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # The connection was never made, so no byte of the message left this server: it is "not sent", and safe to try again.
+            raise SendRejected("connect_failed", "We could not reach WhatsApp. Nothing was sent.", retryable=True) from None
         if 400 <= response.status_code < 500:
             try: code = response.json().get("error", {}).get("code", response.status_code)
             except ValueError: code = response.status_code
@@ -99,6 +162,8 @@ def upload_media(settings, content, filename, content_type, *, client=None):
 def fetch_templates(settings, *, client=None, name=None):
     """Bounded trusted-origin paging. Never follow provider-supplied next URLs."""
     account = getattr(settings, "whatsapp_business_account_id", None)
+    if not account:
+        raise TemplatesNotConfigured(BUSINESS_ACCOUNT_MISSING)
     url = graph_url(settings, account, "message_templates")
     own = client is None
     client = client or httpx.Client(timeout=30, follow_redirects=False)
@@ -130,7 +195,8 @@ def fetch_templates(settings, *, client=None, name=None):
 def missing_settings(settings):
     names = ("whatsapp_phone_number_id", "whatsapp_graph_version", "whatsapp_access_token", "whatsapp_app_secret", "whatsapp_verify_token")
     missing = [name.upper() for name in names if not getattr(settings, name, None)]
-    if settings.whatsapp_graph_version and not re.fullmatch(r"v[0-9]+\.[0-9]+", settings.whatsapp_graph_version):
+    version = getattr(settings, "whatsapp_graph_version", None)
+    if version and not GRAPH_VERSION.fullmatch(version):
         missing.append("WHATSAPP_GRAPH_VERSION (format vN.N)")
     return missing
 
@@ -145,6 +211,8 @@ def verify_signature(body, header, secret):
 def download_media(settings, media_id, *, client=None, chat=False):
     if not re.fullmatch(r"[0-9]+", media_id or ""):
         raise WhatsAppError("WhatsApp sent a file we could not identify.")
+    if not valid_graph_version(settings):
+        raise WhatsAppError(NOT_SET_UP)
     own_client = client is None
     client = client or httpx.Client(timeout=30, follow_redirects=False)
     headers = {"Authorization": f"Bearer {settings.whatsapp_access_token}"}

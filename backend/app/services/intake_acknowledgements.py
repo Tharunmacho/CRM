@@ -9,16 +9,17 @@ from email.utils import getaddresses
 import re
 
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 
 from app.db.models import (Candidate, DocumentPersonGroup, EmailIngestionJob, IntakeAcknowledgement,
-    IntakeAcknowledgementSettings, MailAccount, MailMessage, MultiPersonIntake,
+    IntakeAcknowledgementSettings, MailAccount, MailMessage, MultiPersonIntake, User,
     WhatsAppChannel, WhatsAppMessage, WhatsAppSendAttempt, WhatsAppTemplate)
 from app.integrations.mail.smtp import MailSendError, address, compose, deliver
 from app.integrations.mail.base import MailAdapterError
 from app.services.agency_settings import FALLBACK_ACKNOWLEDGEMENT
+from app.services.candidate_identity import normalize_phone
 from app.services.mail_providers import account_config
 
 
@@ -108,6 +109,32 @@ def email_suppression(db, message, account):
     return None
 
 
+# One automatic WhatsApp reply per sender number in this many hours: a person (or an agent) who sends six files gets one thank-you, not six.
+WHATSAPP_ACK_INTERVAL = timedelta(hours=24)
+
+
+def whatsapp_suppression(db, channel_id, recipient, *, now=None):
+    """Why an automatic WhatsApp reply must not go to this sender, or None. Staff are never thanked for their own test files, and nobody gets
+    the same reply twice in a day. Numbers are compared the way the rest of the CRM compares them (the home calling code is optional)."""
+    sender = normalize_phone(recipient)
+    if sender:
+        for phone in db.scalars(select(User.phone).where(User.phone.is_not(None))):
+            if normalize_phone(phone) == sender:
+                return "Internal staff number; automatic acknowledgement skipped."
+    since = (now or utcnow()) - WHATSAPP_ACK_INTERVAL
+    # Only a reply that reached the person or is on its way counts: one that is on hold (paused), failed, suppressed, or whose send attempt was
+    # cancelled or failed (a stale reply cancelled after a disconnect) never thanked them, so the next file may still be acknowledged.
+    recent = db.scalar(select(IntakeAcknowledgement.id)
+        .outerjoin(WhatsAppSendAttempt, WhatsAppSendAttempt.id == IntakeAcknowledgement.outbound_id).where(
+        IntakeAcknowledgement.source_kind == "whatsapp", IntakeAcknowledgement.channel_id == channel_id,
+        IntakeAcknowledgement.recipient == (recipient or "")[:255], IntakeAcknowledgement.created_at >= since,
+        IntakeAcknowledgement.status.in_(("pending", "sending", "sent", "unknown")),
+        or_(WhatsAppSendAttempt.id.is_(None), WhatsAppSendAttempt.state.notin_(("cancelled", "failed")))).limit(1))
+    if recent:
+        return "This number was already acknowledged in the last 24 hours; automatic acknowledgement skipped."
+    return None
+
+
 def queue_intake_acknowledgement(db, source_kind, source_id):
     """No commit/provider I/O. One durable intent for an eligible saved receipt."""
     if source_kind not in {"email", "whatsapp"}:
@@ -126,7 +153,7 @@ def queue_intake_acknowledgement(db, source_kind, source_id):
         return existing
     account = channel(db, source_kind, channel_id)
     recipient = (source.from_address or "") if source_kind == "email" else source.sender_number
-    reason = email_suppression(db, source, account) if source_kind == "email" else None
+    reason = email_suppression(db, source, account) if source_kind == "email" else whatsapp_suppression(db, channel_id, recipient)
     status = "suppressed" if reason else "pending" if connected(source_kind, account) else "paused"
     key = "ack-" + sha256(f"{source_kind}:{source_id}".encode()).hexdigest()[:60]
     subject = re.sub(r"[\r\n\x00]", " ", source.subject or "Candidate documents")[:900] if source_kind == "email" else None

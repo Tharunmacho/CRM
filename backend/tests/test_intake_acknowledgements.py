@@ -292,6 +292,67 @@ def test_whatsapp_expired_window_is_visible_failure_and_candidate_stays_saved(wo
         assert db.scalar(select(func.count()).select_from(WhatsAppSendAttempt)) == 0
 
 
+def wa_more(db, identifier, sender, *, received_at=None):
+    message = WhatsAppMessage(id=identifier, provider_message_id='wamid.' + identifier, phone_number_id='123456', sender_number=sender,
+        message_type='document', status='completed', candidate_id='candidate', received_at=received_at or ack.utcnow())
+    db.add(message); db.flush()
+    return message
+
+
+def test_whatsapp_ack_is_not_sent_to_a_staff_member_forwarding_files(workspace):
+    with workspace() as db:
+        db.get(User, 'staff').phone = '+91 90000 00001'   # the sender of wa_source, written the way a person writes it
+        message = wa_source(db)
+        row = ack.queue_intake_acknowledgement(db, 'whatsapp', message.id)
+        assert row.status == 'suppressed' and 'staff' in row.last_error.lower() and row.outbound_id is None
+        assert db.scalar(select(func.count()).select_from(WhatsAppSendAttempt)) == 0
+
+
+def test_a_deactivated_staff_number_is_still_not_acknowledged(workspace):
+    with workspace() as db:
+        staff = db.get(User, 'staff')
+        staff.phone, staff.active = '9000000001', False
+        row = ack.queue_intake_acknowledgement(db, 'whatsapp', wa_source(db).id)
+        assert row.status == 'suppressed' and row.outbound_id is None
+
+
+def test_one_whatsapp_ack_per_sender_per_day(workspace):
+    with workspace() as db:
+        first = ack.queue_intake_acknowledgement(db, 'whatsapp', wa_source(db).id)
+        assert first.status == 'pending'
+        again = ack.queue_intake_acknowledgement(db, 'whatsapp', wa_more(db, 'wa-again', '919000000001').id)
+        assert again.status == 'suppressed' and '24 hours' in again.last_error and again.outbound_id is None
+        other = ack.queue_intake_acknowledgement(db, 'whatsapp', wa_more(db, 'wa-other', '919000000002').id)
+        assert other.status == 'pending' and other.outbound_id
+        # a day later the same sender is thanked again
+        first.created_at = ack.utcnow() - timedelta(hours=25)
+        db.flush()
+        later = ack.queue_intake_acknowledgement(db, 'whatsapp', wa_more(db, 'wa-later', '919000000001').id)
+        assert later.status == 'pending'
+
+
+def test_an_ack_that_never_reached_the_sender_does_not_use_up_the_day(workspace):
+    with workspace() as db:
+        first = ack.queue_intake_acknowledgement(db, 'whatsapp', wa_source(db).id)
+        assert first.status == 'pending' and first.outbound_id
+        db.get(WhatsAppSendAttempt, first.outbound_id).state = 'cancelled'   # a stale reply cancelled after a disconnect: nobody was thanked
+        db.flush()
+        second = ack.queue_intake_acknowledgement(db, 'whatsapp', wa_more(db, 'wa-after-cancel', '919000000001').id)
+        assert second.status == 'pending' and second.outbound_id
+        # one that is still on its way does count
+        third = ack.queue_intake_acknowledgement(db, 'whatsapp', wa_more(db, 'wa-third', '919000000001').id)
+        assert third.status == 'suppressed' and '24 hours' in third.last_error
+        # a failed or a paused one does not
+        second.status = 'failed'
+        db.flush()
+        fourth = ack.queue_intake_acknowledgement(db, 'whatsapp', wa_more(db, 'wa-fourth', '919000000001').id)
+        assert fourth.status == 'pending'
+        fourth.status = 'paused'
+        db.flush()
+        fifth = ack.queue_intake_acknowledgement(db, 'whatsapp', wa_more(db, 'wa-fifth', '919000000001').id)
+        assert fifth.status == 'pending'
+
+
 def test_disabling_whatsapp_ack_cancels_linked_queued_attempt(workspace, client):
     with workspace() as db:
         message = wa_source(db)

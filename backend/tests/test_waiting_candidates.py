@@ -239,9 +239,18 @@ def test_status_filter_accepts_labels_and_raw_values_and_sorting_still_works(set
 
 # ------------------------------------------------------------ C6: WhatsApp conversation link
 
+def test_whatsapp_intake_does_not_link_a_sender_whose_number_is_not_the_candidates(setup):
+    """An agent or a relative forwards other people's documents: the document carries its own phone, so the chat stays unlinked for a supervisor."""
+    sessions, settings = setup
+    ingest(sessions, settings)   # the document's phone (9000000042) is not the sender's
+    with sessions() as db:
+        conversation = db.scalar(select(WhatsAppConversation).where(WhatsAppConversation.peer_number == SENDER))
+        assert conversation is not None and conversation.candidate_id is None
+
+
 def test_whatsapp_intake_links_the_senders_conversation_to_the_candidate(setup):
     sessions, settings = setup
-    candidate = ingest(sessions, settings)
+    candidate = ingest(sessions, settings, phone="+91 99999 99999")   # the sender's own number is the candidate's
     with sessions() as db:
         conversation = db.scalar(select(WhatsAppConversation).where(WhatsAppConversation.peer_number == SENDER))
         assert conversation is not None and conversation.candidate_id == candidate.id

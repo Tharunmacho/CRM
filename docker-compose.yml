@@ -72,6 +72,17 @@ services:
       IMAP_USE_SSL: ${IMAP_USE_SSL:-true}
       IMAP_FOLDER: ${IMAP_FOLDER:-INBOX}
       EMAIL_ACCOUNTS_JSON: ${EMAIL_ACCOUNTS_JSON:-}
+      # WhatsApp Business Cloud API. Off unless WHATSAPP_ENABLED=true; if it is on but the phone number ID, access token, app secret, verify
+      # token or Graph version is missing, the supervisor does not start the WhatsApp worker (it logs the missing names) and the API keeps
+      # running. WHATSAPP_BUSINESS_ACCOUNT_ID is NOT needed to start the worker: only template sync and template sends need it. The flag must
+      # always have a real default: an empty string is not a valid boolean.
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_BUSINESS_ACCOUNT_ID: ${WHATSAPP_BUSINESS_ACCOUNT_ID:-}
+      WHATSAPP_GRAPH_VERSION: ${WHATSAPP_GRAPH_VERSION:-v24.0}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
     ports:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
     volumes:

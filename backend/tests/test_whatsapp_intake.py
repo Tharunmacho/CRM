@@ -124,7 +124,7 @@ def test_original_and_selected_documents_candidate_owner_and_replay(setup):
         assert candidate.name == "Document Identity"
         assert candidate.care_id.startswith("CI-")
         assert candidate.phone == "+919000000002"  # stored canonically (+91XXXXXXXXXX). Sender is separate provenance.
-        assert candidate.whatsapp == "919999999999"
+        assert not candidate.whatsapp   # the document has its own phone (not the sender's): the forwarder's number is never copied onto the candidate
         assert candidate.father_name == "Document Parent" and candidate.marital_status == "Married"
         assert candidate.current_address == "42 Document Road, Chennai"
         assert candidate.languages == ["Tamil", "English"]

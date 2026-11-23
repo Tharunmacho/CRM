@@ -92,3 +92,12 @@ def test_explicit_process_environment_still_takes_precedence(default_env, tmp_pa
     monkeypatch.setenv("DATABASE_URL", "postgresql://preview:example@127.0.0.1/process_preview")
 
     assert get_settings().database_url == "postgresql+psycopg://preview:example@127.0.0.1/process_preview"
+
+
+def test_whatsapp_graph_version_has_a_valid_builtin_default_and_can_be_overridden(tmp_path):
+    import re
+    from app.core.config import Settings
+    assert re.fullmatch(r"v[0-9]+[.][0-9]+", Settings(_env_file=None).whatsapp_graph_version)
+    env = tmp_path / "scratch.env"
+    env.write_text("WHATSAPP_GRAPH_VERSION=v99.1" + chr(10), encoding="utf-8")
+    assert Settings(_env_file=env).whatsapp_graph_version == "v99.1"

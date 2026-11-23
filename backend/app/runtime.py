@@ -212,12 +212,20 @@ def main(*, host="0.0.0.0", port=None, reload_api=False):
         [sys.executable, "-m", "app.presence_worker"],
         *[[sys.executable, "-m", "app.document_extraction_worker"] for _ in range(readers)],
     ]
-    restartable = {"app.document_extraction_worker", "app.email_extraction_worker"}
+    restartable = {"app.document_extraction_worker", "app.email_extraction_worker", "app.whatsapp_worker"}
     if settings.email_ingestion_enabled:
         commands.append([sys.executable, "-m", "app.email_worker"])
         commands.extend([sys.executable, "-m", "app.email_extraction_worker"] for _ in range(readers))
     if settings.whatsapp_enabled:
-        commands.append([sys.executable, "-m", "app.whatsapp_worker"])
+        # Enabled but incomplete must not take the whole CRM down: the worker exits at start when a setting is missing, and any other
+        # child exit stops the group. So it is started only when complete; otherwise the names (never the values) are logged and the API runs.
+        from app.integrations.whatsapp import missing_settings
+        gaps = missing_settings(settings)
+        if gaps:
+            print(f"[crm] WhatsApp is enabled but incomplete ({', '.join(gaps)}); its worker is not started. The API keeps running.",
+                  file=sys.stderr, flush=True)
+        else:
+            commands.append([sys.executable, "-m", "app.whatsapp_worker"])
     # Every process has its own connection pool against the shared hosted database. Workers need a handful of
     # connections (a reading thread holds one while it works), not the API's 12 + 6, so size them to their job: the
     # whole stack then stays well under the server's connection limit even with every worker busy.

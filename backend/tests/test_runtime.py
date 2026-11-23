@@ -16,6 +16,11 @@ import pytest
 from app import runtime
 
 
+# A complete WhatsApp configuration (synthetic values only): the supervisor starts the worker only when nothing is missing.
+WHATSAPP_COMPLETE = dict(whatsapp_phone_number_id="123456789", whatsapp_graph_version="v24.0", whatsapp_access_token="synthetic-token",
+                         whatsapp_app_secret="synthetic-secret", whatsapp_verify_token="synthetic-verify")
+
+
 @pytest.fixture(autouse=True)
 def isolated_schema_check(monkeypatch):
     monkeypatch.setattr(runtime, "require_current_schema", lambda: None)
@@ -50,7 +55,7 @@ def test_supervisor_starts_worker_only_when_enabled_and_stops_children(monkeypat
         children.append(child)
         return child
 
-    monkeypatch.setattr(runtime, "get_settings", lambda: SimpleNamespace(email_ingestion_enabled=enabled, whatsapp_enabled=whatsapp))
+    monkeypatch.setattr(runtime, "get_settings", lambda: SimpleNamespace(email_ingestion_enabled=enabled, whatsapp_enabled=whatsapp, **WHATSAPP_COMPLETE))
     monkeypatch.setattr(runtime.subprocess, "Popen", spawn)
     monkeypatch.setattr(runtime.signal, "signal", lambda *_: None)
     monkeypatch.setattr(runtime.threading, "Event", lambda: SimpleNamespace(wait=lambda _: True))
@@ -68,6 +73,55 @@ def test_supervisor_starts_worker_only_when_enabled_and_stops_children(monkeypat
     assert all(child.returncode == -15 for child in children)
     output = capsys.readouterr().out
     assert output.index("Checking database schema") < output.index("Database schema is ready") < output.index("Starting API")
+
+
+class _Child:
+    returncode = None
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.returncode = -15
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+def _run_supervisor(monkeypatch, **whatsapp):
+    calls = []
+
+    def spawn(command, **options):
+        calls.append(command)
+        return _Child()
+
+    monkeypatch.setattr(runtime, "get_settings", lambda: SimpleNamespace(email_ingestion_enabled=False, **whatsapp))
+    monkeypatch.setattr(runtime.subprocess, "Popen", spawn)
+    monkeypatch.setattr(runtime.signal, "signal", lambda *_: None)
+    monkeypatch.setattr(runtime.threading, "Event", lambda: SimpleNamespace(wait=lambda _: True))
+    runtime.main()
+    return calls
+
+
+def test_whatsapp_enabled_but_incomplete_keeps_the_api_up_and_logs_only_the_missing_names(monkeypatch, capsys):
+    incomplete = {**WHATSAPP_COMPLETE, "whatsapp_app_secret": None, "whatsapp_graph_version": "latest"}
+    calls = _run_supervisor(monkeypatch, whatsapp_enabled=True, **incomplete)
+    assert calls[0][1:4] == ["-m", "uvicorn", "app.main:app"]
+    assert not any(command[1:] == ["-m", "app.whatsapp_worker"] for command in calls)
+    err = capsys.readouterr().err
+    assert "WHATSAPP_APP_SECRET" in err and "WHATSAPP_GRAPH_VERSION" in err and "not started" in err
+    assert "synthetic-token" not in err and "synthetic-verify" not in err   # names only, never values
+
+
+def test_whatsapp_enabled_with_nothing_configured_still_starts_the_api(monkeypatch):
+    calls = _run_supervisor(monkeypatch, whatsapp_enabled=True)
+    assert calls[0][1:4] == ["-m", "uvicorn", "app.main:app"]
+    assert not any(command[1:] == ["-m", "app.whatsapp_worker"] for command in calls)
+
+
+def test_whatsapp_worker_is_launched_when_enabled_and_complete_and_never_when_disabled(monkeypatch):
+    assert _run_supervisor(monkeypatch, whatsapp_enabled=True, **WHATSAPP_COMPLETE)[-1][1:] == ["-m", "app.whatsapp_worker"]
+    assert not any(command[1:] == ["-m", "app.whatsapp_worker"] for command in _run_supervisor(monkeypatch, whatsapp_enabled=False, **WHATSAPP_COMPLETE))
 
 
 def test_worker_exit_stops_api_and_fails_container(monkeypatch, capsys):

@@ -79,7 +79,7 @@ npm.cmd run dev
 ```
 
 This runs the Python API on port **8000** with automatic reload, plus the workflow,
-presence and document workers. Configured email/WhatsApp workers also start.
+presence and document workers. The email and WhatsApp workers also start when enabled (WhatsApp only when its settings are complete).
 Restart the command after changing worker code; automatic reload applies to the API.
 The supervisor checks the database revision before starting any process and refuses
 an outdated schema without migrating it. Startup reports PostgreSQL and Redis connection status. Requests
@@ -238,7 +238,7 @@ Drafts, attachment metadata, message state and immutable send attempts persist i
 
 The independent email receiver and extraction worker retain originals before advancing their cursor. Candidate intake matches normalized phone, email or passport, preserves existing human-filled fields and ownership, and routes conflicts or uncertain documents to review. Bounded historical import does not reset the live cursor. Auto-ingest controls candidate extraction independently from mailbox viewing.
 
-Run the complete backend from `backend/` with `python -m app.runtime`. It always starts the API, workflow, presence and manual document workers. Email workers start when `EMAIL_INGESTION_ENABLED=true`; WhatsApp starts when configured/enabled. Processes must share the same PostgreSQL database, storage and encryption key. See [operations](docs/operations.md) for storage identity, migration and backup procedures.
+Run the complete backend from `backend/` with `python -m app.runtime`. It always starts the API, workflow, presence and manual document workers. Email workers start when `EMAIL_INGESTION_ENABLED=true`; WhatsApp starts when `WHATSAPP_ENABLED=true` and its settings are complete (otherwise the missing setting names are logged and the API keeps running). Processes must share the same PostgreSQL database, storage and encryption key. See [operations](docs/operations.md) for storage identity, migration and backup procedures.
 
 ## Recruiter attendance and activity
 

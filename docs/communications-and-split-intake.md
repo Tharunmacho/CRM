@@ -16,6 +16,8 @@ Email acknowledgements require original sender/safety headers. Automatic message
 
 WhatsApp acknowledgements use the same durable outbox and current reply window as ordinary chat. If processing finishes after the window closes, the saved candidate remains valid and the acknowledgement shows a failure; an authorized user can follow up with an approved template.
 
+WhatsApp acknowledgement guard rails: a number that belongs to a staff user (active or not) is never acknowledged, and any other number is acknowledged at most once in 24 hours (a reply that was paused, failed, suppressed or cancelled does not count). An acknowledgement or template that waited more than one hour in the queue (for example while the channel was disconnected) is cancelled with a reason and never sent late.
+
 ## Documents containing several people
 
 1. Open **Candidate → Documents → Review people in documents**, **Inbox → Candidate documents → Review people in documents**, or **WhatsApp → Candidate intake → Review people**.
@@ -35,9 +37,9 @@ The detector is conservative: poor scans or unclear identities still need human 
 
 1. Configure the intended Business phone and open **WhatsApp → Conversations**.
 2. Select an incoming contact or start a conversation using the full number with country code.
-3. A supervisor can link the correct candidate with a reason. A sender is not automatically treated as the candidate, since an agent may send several people's documents.
+3. A supervisor can link the correct candidate with a reason. A sender is not automatically treated as the candidate, since an agent may send several people's documents: a chat is linked automatically only to the candidate whose own phone or WhatsApp number it really is, and never when another candidate holds the same number. The sender's number is copied onto a new candidate only when the document gave no number of its own and no other candidate or earlier file of that sender is involved.
 4. Admin/Manager may send; a Staff user may send for the explicitly linked candidate they currently own. Other viewers see a read-only explanation.
-5. Within the reply window, send text or a supported image/document/audio/video attachment. Outside it, choose an approved template and fill its parameters.
+5. Within the reply window, send text or a supported image/document/audio/video attachment. Outside it, choose an approved template and fill its parameters. The screen and the queue stop offering a free-form message five minutes before the 24 hours end, so a message is never accepted that Meta would refuse as outside the window.
 6. Admin uses **Sync templates** to load the provider catalogue. Supported templates have positional text body parameters and optional static content; unsupported dynamic/media template formats are visibly unavailable.
 7. Each click saves a durable send intent before contacting Meta. A lost API response can recover the same request, including after a page reload. It does not create a second send.
 8. The outbox runs separately from document extraction. Permission, channel state, reply window and template approval are checked again before sending.
@@ -49,7 +51,7 @@ The connection requires a Meta business portfolio, WhatsApp Business Account and
 
 Apply migration **0016_intake_communications** together with this application version, then restart the API and workers. The migration adds communication/review records and safe original mail metadata, and backfills existing WhatsApp conversations without guessing candidate links or queueing messages. Existing candidate and receipt records remain.
 
-Use the existing Zoho connection. WhatsApp needs the existing server-side token, phone ID, app secret, verification token and supported Graph version; add **WHATSAPP_BUSINESS_ACCOUNT_ID** for template synchronization. Keep secrets on the server. Automatic acknowledgements remain off until the Admin enables a previewed message.
+Use the existing Zoho connection. WhatsApp needs the existing server-side token, phone ID, app secret, verification token and supported Graph version (default v24.0); add **WHATSAPP_BUSINESS_ACCOUNT_ID** for template synchronization and template sends (the worker starts without it). Keep secrets on the server. Automatic acknowledgements remain off until the Admin enables a previewed message.
 
 Before marking live acceptance complete, use authorized test recipients to verify receive → review/save → acknowledgement, ordinary chat → signed delivery state, an approved template, a disconnected channel, and a multi-person PDF with each resulting profile's own pages. Local automated checks use synthetic data and mocked providers; they do not establish production delivery.
 

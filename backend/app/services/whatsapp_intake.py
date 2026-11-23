@@ -4,18 +4,20 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.api.routers.candidates import lock_assignment_cursor, next_owner
-from app.db.models import Attachment, AuditEntry, Candidate, CandidateStatus, Designation, Notification, Role, Source, Task, TaskKind, User, WhatsAppChannel, WhatsAppMessage
+from app.db.models import Attachment, AuditEntry, Candidate, CandidateStatus, Designation, Notification, Role, Source, Task, TaskKind, User, WhatsAppChannel, WhatsAppConversation, WhatsAppMessage
 from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import resume_text_from
 from app.integrations.whatsapp import download_media, WhatsAppError, WhatsAppReviewError
-from app.services.candidate_identity import enrich_empty, identity_matches
+from app.services.candidate_identity import enrich_empty, identity_matches, normalize_phone
 from app.services.document_extraction import extract_candidate_attachment as extract_attachment, ExtractionPending, request_extraction_retry
 from app.services import intake_documents
 from app.services.document_storage import put_bytes, read_bytes
+from app.services.whatsapp_chat import clean_text, is_data_error, number_holders, payload_dict, payload_list, peer_number, sender_candidate_ids
 
 log = logging.getLogger(__name__)
 
@@ -38,16 +40,74 @@ def connected_channel(db, phone_id, settings, *, lock=False):
     return channel
 
 
+MEDIA_KINDS = {"document", "image", "audio", "video", "sticker"}
+
+
+def _timestamp(value):
+    """The provider's send time. A missing or unreadable one reads as "now" (a document is never dropped for its clock); the 24-hour window is clamped to the server receipt time elsewhere."""
+    try:
+        return datetime.fromtimestamp(int(value), timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return utcnow()
+
+
+def message_body(message, kind, media):
+    """What the message says, for the chat preview: the text, a file's caption, a tapped button or list choice, a reaction emoji or a shared place. None of these types ever creates a candidate."""
+    body = payload_dict(message.get("text")).get("body") or media.get("caption")
+    if not body and kind == "button":
+        button = payload_dict(message.get("button"))
+        body = button.get("text") or button.get("payload")
+    elif not body and kind == "interactive":
+        interactive = payload_dict(message.get("interactive"))
+        reply = payload_dict(interactive.get(interactive.get("type") if isinstance(interactive.get("type"), str) else ""))
+        body = reply.get("title") or reply.get("id")
+    elif not body and kind == "reaction":
+        body = payload_dict(message.get("reaction")).get("emoji")
+    elif not body and kind == "location":
+        place = payload_dict(message.get("location"))
+        body = ", ".join(str(part) for part in (place.get("name"), place.get("address")) if part) or (
+            f"{place.get('latitude')}, {place.get('longitude')}" if place.get("latitude") is not None and place.get("longitude") is not None else None)
+    return clean_text(body, 65000)
+
+
+def _store_message(db, channel, phone_id, message, contacts):
+    """Insert one provider message; returns 1 when it is new, 0 when it was skipped or already received."""
+    provider_id, sender = clean_text(message.get("id", "")), clean_text(message.get("from", ""))
+    if not provider_id or len(provider_id) > 255 or not sender or len(sender) > 40:
+        return 0
+    kind = clean_text(message.get("type", "unknown"), 30)
+    media = payload_dict(message.get(kind)) if kind in MEDIA_KINDS else {}
+    received = _timestamp(message.get("timestamp", utcnow().timestamp()))
+    has_media = bool(media.get("id"))
+    state = "pending" if has_media and kind in {"document", "image"} and channel.auto_ingest and channel.enabled else "received" if has_media else "ignored"
+    default_name = {"image": "image.jpg", "audio": "audio.ogg", "video": "video.mp4", "sticker": "sticker.webp"}.get(kind, "document")
+    row_id = db.scalar(insert(WhatsAppMessage).values(
+        provider_message_id=provider_id, phone_number_id=phone_id, sender_number=sender, sender_name=contacts.get(sender) or None,
+        message_type=kind, body=message_body(message, kind, media),
+        media_id=clean_text(media["id"], 100) if has_media else None,
+        file_name=clean_text(media.get("filename") or default_name, 255) if has_media else None,
+        content_type=clean_text(media.get("mime_type") or "", 120) if has_media else None,
+        received_at=received, status=state,
+    ).on_conflict_do_nothing(index_elements=["provider_message_id"]).returning(WhatsAppMessage.id))
+    return int(bool(row_id))
+
+
 def receive_payload(db, payload, settings):
-    """Authenticate before calling. Commit receipt before returning HTTP acknowledgement."""
+    """Authenticate before calling. Commit receipt before returning HTTP acknowledgement.
+
+    One malformed message never costs the others: each is stored in its own savepoint and a bad one is skipped (logged by type only), because a
+    non-200 answer makes Meta redeliver the same payload for ever. A payload that carries only delivery statuses takes no lock on the channel."""
     count = 0
-    for entry in payload.get("entry", []):
-        for change in entry.get("changes", []):
-            value = change.get("value", {})
-            metadata = value.get("metadata", {})
-            phone_id = str(metadata.get("phone_number_id", ""))
+    for entry in payload_list(payload_dict(payload).get("entry")):
+        for change in payload_list(payload_dict(entry).get("changes")):
+            value = payload_dict(payload_dict(change).get("value"))
+            metadata = payload_dict(value.get("metadata"))
+            phone_id = clean_text(metadata.get("phone_number_id", ""))
             if phone_id != settings.whatsapp_phone_number_id:
                 continue
+            messages = [message for message in payload_list(value.get("messages")) if isinstance(message, dict)]
+            if not messages:
+                continue   # statuses (and other non-message events) are reconciled elsewhere; nothing to receive, so no channel lock and no "last received"
             # Connection is an explicit Admin action. A provider delivery must
             # never silently reconnect a source that the operator disconnected.
             try:
@@ -55,26 +115,18 @@ def receive_payload(db, payload, settings):
             except ChannelPaused:
                 continue
             if metadata.get("display_phone_number"):
-                channel.display_number = str(metadata["display_phone_number"])[:80]
-            contacts = {str(c.get("wa_id")): str(c.get("profile", {}).get("name", ""))[:200] for c in value.get("contacts", [])}
-            for message in value.get("messages", []):
-                provider_id, sender = str(message.get("id", "")), str(message.get("from", ""))
-                if not provider_id or len(provider_id) > 255 or not sender or len(sender) > 40:
-                    continue
-                kind = str(message.get("type", "unknown"))[:30]
-                media = message.get(kind, {}) if kind in {"document", "image", "audio", "video", "sticker"} else {}
-                received = datetime.fromtimestamp(int(message.get("timestamp", utcnow().timestamp())), timezone.utc)
-                has_media = bool(media.get("id"))
-                state = "pending" if has_media and kind in {"document", "image"} and channel.auto_ingest and channel.enabled else "received" if has_media else "ignored"
-                row_id = db.scalar(insert(WhatsAppMessage).values(
-                    provider_message_id=provider_id, phone_number_id=phone_id, sender_number=sender, sender_name=contacts.get(sender),
-                    message_type=kind, body=str(message.get("text", {}).get("body") or media.get("caption") or "")[:65000],
-                    media_id=str(media["id"])[:100] if has_media else None,
-                    file_name=str(media.get("filename") or {"image": "image.jpg", "audio": "audio.ogg", "video": "video.mp4", "sticker": "sticker.webp"}.get(kind, "document"))[:255] if has_media else None,
-                    content_type=str(media.get("mime_type") or "")[:120] if has_media else None,
-                    received_at=received, status=state,
-                ).on_conflict_do_nothing(index_elements=["provider_message_id"]).returning(WhatsAppMessage.id))
-                count += bool(row_id)
+                channel.display_number = clean_text(metadata["display_phone_number"], 80)
+            contacts = {}
+            for contact in payload_list(value.get("contacts")):
+                if isinstance(contact, dict):
+                    contacts[clean_text(contact.get("wa_id"))] = clean_text(payload_dict(contact.get("profile")).get("name", ""), 200)
+            for message in messages:
+                try:
+                    with db.begin_nested():
+                        count += _store_message(db, channel, phone_id, message, contacts)
+                except Exception as exc:
+                    if not is_data_error(exc): raise   # the savepoint is already rolled back; a transient failure is a 5xx so Meta redelivers
+                    log.error("A WhatsApp message could not be stored (%s); it was skipped and the rest of the delivery kept.", type(exc).__name__)
             channel.last_received_at = utcnow()
     db.commit()
     return count
@@ -137,9 +189,24 @@ def commit_candidate(db, message, output):
         refusal = candidate_refusal(values)
         if refusal:
             raise IntakeReviewError(refusal)
-    # The sender is a contact/provenance fallback, never a duplicate identity.
-    # A document-provided contact and any existing human value take precedence.
-    values["whatsapp"] = values.get("whatsapp") or message.sender_number
+    # The sender is a contact/provenance fallback, never a duplicate identity, and not automatically the candidate: an agent or a relative
+    # forwards other people's documents. A document-provided contact and any existing human value take precedence, and the sender's number is
+    # copied only when the document gave no number of its own (or the same one) AND this sender has not already produced (or been linked to)
+    # another candidate.
+    if not values.get("whatsapp"):
+        sender = normalize_phone(message.sender_number)
+        own = normalize_phone(values.get("phone"))
+        matched = {matches[0][0].id} if matches else set()
+        try:
+            conversation = db.scalar(select(WhatsAppConversation).where(WhatsAppConversation.phone_number_id == message.phone_number_id,
+                                                                        WhatsAppConversation.peer_number == peer_number(message.sender_number)))
+        except HTTPException:
+            conversation = None
+        others = sender_candidate_ids(db, message, conversation) - matched
+        # ...and nobody else already holds the number (a family phone, another candidate's own record): copying it would make it ambiguous.
+        holders = {holder.id for holder in number_holders(db, message.sender_number)} - matched
+        if sender and (not own or own == sender) and not others and not holders:
+            values["whatsapp"] = message.sender_number
     review = review or not values.get("name") or not values.get("phone")
     created = not matches
     if created:
