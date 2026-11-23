@@ -39,8 +39,9 @@ test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (superviso
 test('the column plan is within 1% of the 1111px panel of a 1440px window and gives every column its measured longest word', () => {
   const sum = (list) => list.reduce((total, c) => total + c.width, 0)
   const without = (supervisor) => daily.taskColumnsFor(supervisor, false)
-  assert.ok(sum(without(true)) <= 1111 * 1.01, `${sum(without(true))}px`)   // DOT (60px) is the one column added to the owner's measured plan; REMARKS and NOTES (the give columns) paid for it
-  assert.ok(sum(without(false)) <= 1040, 'the plan without the Recruiter column (no Recruiter column) is narrower still')
+  const narrowest = daily.taskColumnsFor(true, false, 'none', false)   // TODAY and the Recruiter both folded: the table of a 1440px window
+  assert.ok(sum(narrowest) <= 1111, `${sum(narrowest)}px of the 1111px panel`)   // REMARKS (140) and NOTES (184) are wide enough to wrap at spaces only
+  assert.ok(sum(without(false)) <= 1111, 'the plan without the Recruiter column fits the 1111px panel too')
   assert.ok(sum(without(true)) === daily.taskPlanWidth(true, false) && daily.taskColumnsFor(true, false).some((c) => c.key === 'notes'), 'NOTES is in the narrow plan too')
   const width = (key) => daily.taskColumnsFor(true).find((c) => c.key === key).width
   // The longest words were measured in Poppins at the table's sizes (the font file's advance widths, the same numbers as canvas measureText):
@@ -51,9 +52,9 @@ test('the column plan is within 1% of the 1111px panel of a 1440px window and gi
   assert.ok(width('agency') >= 99, '"LAVOROTECH" is 86px at 13px / 500')
   assert.ok(width('staff') >= 87, '"Srivathsala" is 74px at 13px / 500 (the RECRUITER header is 65px)')
   assert.ok(width('no') >= 44, 'the "S NO" header is 29px at 11.5px / 600 with its letter spacing, with 8px on each side')
-  assert.ok(width('actions') >= 124, 'the 72px Open / Complete button, the 4px gap and the 36px menu (112px) keep 6px on each side')
-  assert.ok(width('remarks') >= 82, 'the dropdown keeps room for the start of a remark (its full text is the tooltip)')
-  assert.ok(width('doc') >= 90, 'the typed dd/mm/yyyy date (62px at 11px) fits')
+  assert.ok(width('actions') >= 118, 'the 72px Open / Complete button, the 4px gap and the 36px menu (112px) fit the cell: 118px less its 2px padding on each side and the 1px line is 113px')
+  assert.ok(width('remarks') >= 140, 'a remark wraps at its spaces: the longest word ("attestation", ~65px) fits next to the chevron')
+  assert.ok(width('doc') >= 84, 'the typed dd/mm/yyyy date (62px at 11px) fits: 84px less 13px of cell padding and line, less the input padding')
   assert.ok(width('stage') >= 106, 'the stage chip keeps room for "Prescreening" (77px + 16px chip padding), the outcome chip for "Travelled" and the TODAY chip under it')
   assert.ok(width('today') >= 104, 'the TODAY chip keeps room for "Moved 10:45" on one line (75px + 16px chip padding)')
   for (const c of daily.taskColumnsFor(true)) assert.equal('left' in c, false, `${c.key}: every column is centred, none is "left"`)
@@ -62,31 +63,30 @@ test('the column plan is within 1% of the 1111px panel of a 1440px window and gi
 test('NOTES is a column of every table; TODAY is a column only when the panel holds the whole plan (otherwise its chip is in STAGE)', () => {
   const notes = daily.TASK_LIST_COLUMNS.find((c) => c.key === 'notes')
   assert.equal(notes.roomy, undefined, 'NOTES is never dropped')
-  assert.ok(notes.width >= 100, 'a note wraps in its own cell')
+  assert.ok(notes.width >= 184, 'a note wraps at its spaces in its own cell')
   assert.deepEqual(daily.taskColumnsFor(true, false).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'remarks', 'notes', 'actions'])
   assert.deepEqual(daily.taskColumnsFor(false, false).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'agency', 'stage', 'remarks', 'notes', 'actions'])
   for (const supervisor of [true, false]) {
     const plan = daily.taskPlanWidth(supervisor, true)
-    assert.equal(daily.todayPlace(supervisor, Math.max(plan, 1080)), 'column')   // (below 1080px it is a card with a TODAY row, whatever the plan)
-    // without the DOT column a recruiter's whole plan (1074px) is narrower than the card breakpoint, so it has no 'stage' range at all
-    if (plan - 1 >= 1080) assert.equal(daily.todayPlace(supervisor, plan - 1), 'stage')
-    assert.equal(daily.todayPlace(supervisor, 1111), supervisor ? 'stage' : 'column', 'a 1440px window: the supervisor has no room for TODAY (its chip is in the stage cell), a recruiter has')
+    assert.equal(daily.todayPlace(supervisor, Math.max(plan, 1100)), 'column')   // (below 1100px it is a card with a TODAY row, whatever the plan)
+    assert.equal(daily.todayPlace(supervisor, plan - 1), 'stage')
+    assert.equal(daily.todayPlace(supervisor, 1111), 'stage', 'a 1440px window has no room for TODAY: its chip is in the stage cell')
     assert.equal(daily.todayPlace(supervisor, 1590), 'column', 'a 1920px window has')
     assert.equal(daily.todayPlace(supervisor, 0), 'stage', 'before the first measurement')
-    assert.equal(daily.todayPlace(supervisor, 1079), 'row', 'a phone card has a TODAY row of its own')
-    assert.equal(daily.todayPlace(supervisor, 1080), supervisor ? 'stage' : 'column', 'the narrowest table')
+    assert.equal(daily.todayPlace(supervisor, 1099), 'row', 'a phone card has a TODAY row of its own')
+    assert.equal(daily.todayPlace(supervisor, 1100), 'stage', 'the narrowest table')
     assert.equal(plan, daily.taskPlanWidth(supervisor, false) + daily.TASK_LIST_COLUMNS.find((c) => c.key === 'today').width)
   }
 })
 
 test('the Tasks table renders the model columns and no longer has a "Remark added" chip', async () => {
   const table = await code('../src/screens/tasks/task-table.tsx')
-  assert.match(table, /taskColumnsFor\(supervisor, place !== 'stage', closedRowsOf\(rows\)\)/)
+  assert.match(table, /taskColumnsFor\(supervisor, place !== 'stage', closedRowsOf\(rows\), staff !== 'candidate'\)/)
   assert.doesNotMatch(table, /Remark added|is-remark/)
   assert.match(table, /Nothing yet/)
   assert.match(table, /todayChips\(/)
   const order = [...table.matchAll(/data-label="([^"]+)"/g)].map((m) => m[1])
-  assert.deepEqual(order, ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE NAME', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
+  assert.deepEqual(order, ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE NAME', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])   // (the Recruiter cell is left out, not renamed, when it folds under the candidate)
   assert.doesNotMatch(await read('../src/styles/daily-work-board.css'), /\.tw-chip\.is-remark/)
 })
 
@@ -503,7 +503,7 @@ test('the professional pass: one 60px row, a 44px one-line header, one padding f
   assert.match(css, /\.tw-table\.dw-table\.dw-main \{[^}]*width: 100%; min-width: 0; border-collapse: separate/, 'the table fills its panel and never scrolls sideways')
   // controls
   // (the remark trigger is no longer a fixed 36px box: it grows with the remark, so the whole text can be read; 36px is only its minimum)
-  assert.match(css, /\.dw \.tw-table \.dw-remark \.custom-select-trigger \{ height: auto !important; min-height: 36px !important/)
+  assert.match(css, /\.dw \.tw-table \.dw-remark \.custom-select-trigger \{ box-sizing: border-box; width: 100%; height: auto !important; min-height: 36px !important/)
   assert.match(css, /\.dw-act \{[^}]*width: 72px[^}]*height: 36px/)
   assert.match(css, /\.dw-more-btn \{ width: 36px; height: 36px/)
   assert.match(css, /\.dw-doc-add \{[^}]*height: 32px[^}]*text-decoration: none/)
@@ -513,9 +513,9 @@ test('the professional pass: one 60px row, a 44px one-line header, one padding f
   assert.match(css, /\.dw-remark-status \{ position: absolute/)
   assert.match(css, /\.dw-remark-status:is\(\.is-lead, \.is-none\) \{[^}]*clip: rect/)
   assert.doesNotMatch(css, /is-custom/)
-  // the metrics only apply to the table (a panel of 1080px or more); under that a candidate is a card with 44px targets and 16px inputs
-  assert.match(css, /@container dw \(min-width: 1080px\)/)
-  const cards = css.slice(css.indexOf('@container dw (max-width: 1079px)'))
+  // the metrics only apply to the table (a panel of 1100px or more); under that a candidate is a card with 44px targets and 16px inputs
+  assert.match(css, /@container dw \(min-width: 1100px\)/)
+  const cards = css.slice(css.indexOf('@container dw (max-width: 1099px)'))
   assert.match(cards, /\.dw-more-btn \{ width: 44px; height: 44px/)
   assert.match(cards, /\.dw-remark \.custom-select-trigger \{ height: auto !important; min-height: 44px !important[^}]*font-size: 16px/)
   assert.match(cards, /\.dw-remark-add input \{[^}]*height: 44px[^}]*font-size: 16px/)

@@ -294,7 +294,7 @@ test('the outcome chip: red Declined, amber Rejected, green Travelled, wrapping,
   assert.doesNotMatch(rule('.dw .dw-outcome-why'), /nowrap/)
   assert.match(rule('.dw .dw-outcome-chip'), /flex-direction: row[^}]*white-space: nowrap/, 'the pill is one line: "Declined · Stage 5"')
   // the phone card shows the same chip, left-aligned
-  assert.match(css, /@container dw \(max-width: 1079px\) \{\s*\.dw \.dw-outcome \{ align-items: flex-start/)
+  assert.match(css, /@container dw \(max-width: 1099px\) \{\s*\.dw \.dw-outcome \{ align-items: flex-start/)
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-fA-F]{3,8}\b|rgb\(/, 'tokens only')
   const bar = await read('../src/styles/daily-work.css')
   assert.match(bar, /\.dw-view\.is-active \{[^}]*var\(--primary\)/)
@@ -328,8 +328,8 @@ test('a list of ended rows has a wider STAGE and no TODAY column; the Remarks an
   const all = m.taskColumnsFor(true, true, 'all')
   assert.equal(widthOf(all, 'stage'), m.ENDED_STAGE_WIDTH)
   assert.ok(!keys(all).includes('today'), 'nothing is done today on an ended row')
-  // spare room still goes to REMARKS and NOTES up to the same caps, so those cells keep a readable width at 1900px
-  const wide = m.widthsWithSpare(all, 1586)
+  // spare room still goes to REMARKS and NOTES up to the same caps, so those cells keep a readable width on a very wide panel (1900px)
+  const wide = m.widthsWithSpare(all, 1900)
   assert.equal(wide.remarks, m.REMARKS_MAX)
   assert.equal(wide.notes, m.NOTES_MAX)
   assert.equal(m.closedRowsOf([]), 'none')

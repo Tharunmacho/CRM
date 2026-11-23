@@ -117,7 +117,7 @@ test('Tasks (the reference): the table is framed (on its scroll box, a thin 6px-
   const frame = rule(work, '  .dw .tk-table-wrap {')
   assert.match(frame, /border: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
   assert.match(frame, /border-radius: var\(--table-frame-radius, 6px\)/, 'a small 6px curve')
-  assert.match(work, /@container dw \(min-width: 1080px\) \{\n\s+\.dw \.tk-table-wrap \{/, 'only where it is a table (a panel of 1080px or more), under that the rows are cards')
+  assert.match(work, /@container dw \(min-width: 1100px\) \{\n\s+\.dw \.tk-table-wrap \{/, 'only where it is a table (a panel of 1100px or more), under that the rows are cards')
   assert.match(work, /\.dw-table thead th \{[^}]*border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
   const tasks = await read('styles/tasks-table.css')
   const P = ':root .dw .tw-table.dw-table.dw-main'
@@ -174,7 +174,7 @@ test('Travelled, Client tracker, Fee collections, Weekly report: the scroll box 
   assert.match(tv, /@media \(max-width: 899px\) \{[\s\S]*:root:root:root \.tv-table \{ overflow: visible; border: 0; border-radius: 0; \}/, 'the phone cards have no frame')
   assert.match(tv, /\.tv-table td:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-column-line\); \}/, 'a light line between body columns')
   const ct = await read('styles/client-tracker.css')
-  // the tracker's scroll box is the thin 1px frame with the small 6px curve (a table from 1080px of card width, framed cards below)
+  // the tracker's scroll box is the thin 1px frame with the small 6px curve (a table from 1100px of card width, framed cards below)
   assert.match(ct, /\.ct-scroll \{ box-sizing: border-box; max-height: 72vh; overflow: auto; border: var\(--table-frame-width\) solid var\(--table-line-strong\); border-radius: var\(--table-frame-radius, 6px\); \}/)
   assert.match(ct, /\.ct-scroll tbody tr\.is-first-of-client > td \{ border-top: var\(--table-frame-width\) solid var\(--table-line-strong\); \}/)
   assert.match(await read('styles/fee-collections.css'), /\.fee-collection-scroll \{ box-sizing: border-box; border: var\(--table-frame-width\) solid var\(--table-line-strong\);/)

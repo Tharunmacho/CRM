@@ -93,7 +93,7 @@
 .dw-doc-add:hover { background: var(--tint-2); }
 .dw-doc-add:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 /* narrow panels: each candidate is a labelled card; the name leads it whatever the column order is */
-@container dw (max-width: 1079px) {
+@container dw (max-width: 1099px) {
   .tw-table .dw-row > td[data-label='CANDIDATE NAME'] { order: -1; }
   .tw-table .dw-row > td[data-label='DOC'] .dw-doc-add { padding-left: 0; }
 }

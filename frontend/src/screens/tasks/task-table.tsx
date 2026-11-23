@@ -6,7 +6,7 @@ import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { useAutoGrow } from '@/shared/ui/use-auto-grow'
 import { RecordIdentity } from '@/shared/ui/workspace'
-import { agencyLabel, clockTime, closedRowsOf, countryCell, isClosed, nothingYet, noteWhen, notesNewestFirst, PENDING_NOTE, rowAction, sendNote, taskColumnsFor, widthsWithSpare, todayChips, todayPlace, type DailyNote, type TaskRow } from '@/features/daily-work/daily-work-model'
+import { agencyLabel, clockTime, closedRowsOf, countryCell, isClosed, nothingYet, noteWhen, notesNewestFirst, PENDING_NOTE, rowAction, sendNote, staffPlace, taskColumnsFor, widthsWithSpare, todayChips, todayPlace, type DailyNote, type TaskRow } from '@/features/daily-work/daily-work-model'
 import { getNoteDraft, noteDraftKey, setNoteDraft } from '@/features/daily-work/note-drafts'
 import { DELETE_NOTE_HINT, DELETE_NOTE_LABEL, DELETE_NOTE_TITLE } from '@/features/daily-work/note-delete-model'
 import { OwnerTag } from './task-identity'
@@ -19,7 +19,7 @@ import {
  * One list for every recruiter's candidates, with what happened to each of them today. The columns and their widths are
  * TASK_LIST_COLUMNS in the daily-work model (S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY, REMARKS, NOTES, actions): the widths add
  * up to 1108px for a supervisor (1021px for a recruiter) without TODAY and are used as percentages, so the table always fills its panel (1111px at a 1440px
- * window with the sidebar open) and never scrolls sideways; under 1080px of panel width the list is a stack of cards instead. Headers and cells are
+ * window with the sidebar open) and never scrolls sideways; under 1100px of panel width the list is a stack of cards instead. Headers and cells are
  * centred; text wraps (the full text is the tooltip) instead of being cut with an ellipsis. The rows arrive sorted by DOC (taskRows). A candidate
  * whose placement ended (Declined, Rejected, Travelled) shows its outcome in STAGE and a dash in TODAY; DOC, REMARKS and NOTES are filled in and edited exactly as on a current row (saved by placement, since there is no open task) and show everything the recruiters wrote.
  * TODAY is a column of its own only when the panel holds the whole plan (`todayPlace`); on a narrower table its chip sits in the STAGE cell, under the
@@ -176,7 +176,9 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
   const mayDelete = (row: TaskRow, note: DailyNote) => !!onDeleteNote && !!canDeleteNote?.(row, note)
   const ask = (row: TaskRow, note: DailyNote) => () => setAsking({ row, note })
   const place = todayPlace(supervisor, panelWidth)
-  const columns = taskColumnsFor(supervisor, place !== 'stage', closedRowsOf(rows))   // ended rows: a wider STAGE, and no TODAY column when every row ended
+  // As the panel narrows: TODAY folds into STAGE first, then a supervisor's Recruiter folds under the candidate's name (staffPlace); cards keep every field as a labelled row.
+  const staff = staffPlace(supervisor, panelWidth)
+  const columns = taskColumnsFor(supervisor, place !== 'stage', closedRowsOf(rows), staff !== 'candidate')   // ended rows: a wider STAGE, and no TODAY column when every row ended
   const showToday = columns.some((c) => c.key === 'today')
   // REMARKS and NOTES take the room the panel has beyond the minimum plan (widthsWithSpare); every other column keeps its measured width.
   const widths = widthsWithSpare(columns, panelWidth)
@@ -201,8 +203,11 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
                 <td data-label="DOC" className={cn(!row.commencementDate && !(work && row.applicationId) && 'is-empty')}><DocCell item={row} canAdd={work} onSave={(iso) => onSaveDoc(row, iso)} /></td>
                 <td data-label="CLIENT" className={cn(!row.client && 'is-empty')}><ClientCell item={row} country /></td>
                 <td data-label="JOB" className={cn(!row.position && 'is-empty')}><PositionCellView item={row} /></td>
-                <td data-label="CANDIDATE NAME"><RecordIdentity name={row.candidate} /></td>
-                {supervisor && <td data-label="Recruiter">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
+                <td data-label="CANDIDATE NAME">
+                  <RecordIdentity name={row.candidate} />
+                  {staff === 'candidate' && name && <span className="tw-owner-line" title={`Recruiter: ${name}`}>{name}</span>}
+                </td>
+                {supervisor && staff !== 'candidate' && <td data-label="Recruiter">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
                 <td data-label="AGENCY" className={cn(!agencyLabel(row) && 'is-empty')}><AgencyCell item={row} /></td>
                 <td data-label="STAGE"><StageCell item={row} zone={zone} />{place === 'stage' && !closed && <TodayChips row={row} zone={zone} inStage />}</td>
                 {showToday && (

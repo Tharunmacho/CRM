@@ -5,7 +5,7 @@
  * notes, newest on top), actions (widths: TASK_LIST_COLUMNS in the daily-work model; 6px cell padding).
  * The measurable rules, all asserted by tests/tasks-doc-remarks.test.mjs and checked in the browser:
  *   - NO sideways scrolling: the table is table-layout fixed at width 100% of its frame, its columns are percentages of the panel, so it always fills the
- *     panel exactly. It is a table from 1080px of panel width (a 1440px window with the sidebar open gives 1111px; 1366px gives about 1037px); below
+ *     panel exactly. It is a table from 1100px of panel width (a 1440px window with the sidebar open gives 1111px; 1366px gives about 1037px); below
  *     that every candidate is a labelled card (the stacked layout at the end of this file), never a scroller.
  *   - compact density: 13px text, cells padded 8px 10px, rows at least 60px that grow to fit a second line (never more than two lines: the
  *     full text is the tooltip); every cell is vertically centred. Names, client, job, agency and recruiter wrap before any ellipsis; the
@@ -21,13 +21,13 @@
  *   - controls: the Remarks select (filling its cell), the Complete / Open / View button (72px wide) and the row menu are 36px tall; the DOC "Add date" button has a 32px hit area.
  *   - the remark's status (Saving / Saved / error) is a small badge on the control's edge and the "custom remark" note is a tooltip, so a row
  *     never grows and no space is reserved for them.
- * Everything that sets the table's metrics lives inside the container query: below 1080px a candidate is a card (daily-work.css).
+ * Everything that sets the table's metrics lives inside the container query: below 1100px a candidate is a card (daily-work.css).
  * The long selector prefix is deliberate: it out-ranks the shared .dw-table rules, which the Follow-up and Reports tables still use.
  */
 /* The approved Tasks look: a THIN (1px) outer border with SQUARE corners, a faint line under each row, no column lines. */
 .dw { --table-frame-width: 1px; --table-frame-radius: 6px; --table-line: var(--border-main); --table-line-strong: var(--border-control); --table-column-line: color-mix(in srgb, var(--border-main) 55%, var(--bg-card)); }
 
-@container dw (min-width: 1080px) {
+@container dw (min-width: 1100px) {
   :root .dw .tw-table.dw-table.dw-main { --tw-pad-l: 6px; --tw-pad-r: 6px; width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
 
   /* ---- header: 44px, one line, one left edge with the cells ---- */
@@ -52,6 +52,8 @@
   .dw .tw-table .record-identity { justify-content: center; }
   .dw .tw-table .record-identity > div { align-items: center; text-align: center; }
   .dw .tw-table .tk-owner { justify-content: center; }
+  /* a supervisor's table too narrow for the Recruiter column: the recruiter's name sits as a muted line under the candidate's name */
+  .dw .tw-table .tw-owner-line { display: block; margin-top: 2px; max-width: 100%; font-size: 11.5px; font-weight: 500; line-height: 1.3; text-align: center; overflow-wrap: break-word; color: var(--text-muted); }
   .dw .tw-table .tk-owner-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 500; line-height: 1.35; text-align: center; white-space: normal; overflow-wrap: break-word; text-overflow: clip; }
   .dw .tw-table .dw-none { text-align: center; }
 
@@ -88,10 +90,11 @@
 
   /* the shared skin gives every select a 40px minimum with a very specific selector (:root:root ... input.ui-input:not(...), skin.css), so this
    * one needs !important to be 36px like the other controls of the row */
-  .dw .tw-table .dw-remark .custom-select-trigger { height: auto !important; min-height: 36px !important; padding: 5px 8px; font-size: 12px; }   /* grows with the remark: never a fixed height */
+  .dw .tw-table .dw-remark .custom-select-trigger { box-sizing: border-box; width: 100%; height: auto !important; min-height: 36px !important; padding: 6px 8px; gap: 6px; align-items: center; font-size: 12px; }   /* fills its cell and grows with the remark: never a fixed height */
   .dw .tw-table .dw-remark-add input { min-height: 36px; }
   /* the select's value (the current remark) is shown IN FULL: it wraps onto as many lines as it needs and the control grows (no ellipsis, no line clamp) */
-  .dw .tw-table .dw-remark .custom-select-trigger > span:first-child { display: block; overflow: visible; font-size: 11.5px; line-height: 14px; text-align: left; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
+  .dw .tw-table .dw-remark .custom-select-trigger > span:first-child { display: block; flex: 1 1 auto; min-width: 0; overflow: visible; font-size: 11.5px; line-height: 15px; text-align: left; text-overflow: clip; white-space: normal; overflow-wrap: break-word; word-break: normal; hyphens: manual; }
+  .dw .tw-table .dw-remark .custom-select-trigger > svg { flex: none; width: 14px; height: 14px; }   /* a small fixed chevron: it never steals text width */
   .dw .tw-table .dw-remark .custom-select-trigger[data-placeholder] > span:first-child { display: block; overflow: visible; white-space: normal; overflow-wrap: break-word; }
   .dw .tw-table .dw-stage-text b { font-weight: 700; }
 
@@ -124,31 +127,34 @@
 
 /* NOTES: an always-visible input at the top (people who may work the candidate), then EVERY note newest first, shown IN FULL: the list has no height cap and no inner scroll box, the cell and the row grow with the notes.
  * A note is its time ("11:40", "18 Nov 09:15"), its author (small), its text (wraps at spaces, never cut) and its trash. */
-/* A note never makes its cell wider: the cell, the list, each note and its text may all shrink below their longest word (min-width: 0, a minmax(0, 1fr) track),
- * and the text breaks wherever it must (spaces first, then inside a long word or URL: `anywhere`, unlike break-word, also counts in the min-content width). */
-.tw-notes-cell { display: flex; flex-direction: column; align-items: stretch; gap: 6px; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; text-align: left; }
+/* A note never makes its cell wider: the cell, the list, each note and its text may shrink below their longest word (min-width: 0, a minmax(0, 1fr) track); the text wraps at spaces first,
+ * and only a word longer than the whole cell (a URL) breaks inside itself (`anywhere`, unlike break-word, also counts in the min-content width). The cells are wide enough that ordinary words never split. */
+/* ONE bordered box that fills the cell: the note input (the send button inside its right edge) on top, then every note in full, all left-aligned on the same 8px padding. */
+.tw-notes-cell { display: flex; flex-direction: column; align-items: stretch; gap: 0; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); text-align: left; }
+.tw-notes-cell:focus-within { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 16%, transparent); }
 .tw-note-add { position: relative; min-width: 0; }
-.tw-note-input { box-sizing: border-box; display: block; width: 100%; min-width: 0; min-height: 32px; margin: 0; padding: 6px 28px 6px 8px; border: 1px solid var(--border-control); border-radius: 6px; background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 12px; line-height: 18px; resize: none; overflow-wrap: break-word; }
+.tw-note-input { box-sizing: border-box; display: block; width: 100%; min-width: 0; min-height: 34px; margin: 0; padding: 8px 34px 8px 8px; border: 0; border-radius: 0; background: transparent; color: var(--text-main); font: inherit; font-size: 12px; line-height: 18px; resize: none; overflow-wrap: break-word; }
 .tw-note-input::placeholder { color: var(--text-muted); }
-.tw-note-input:focus { outline: 2px solid var(--primary); outline-offset: 0; border-color: var(--primary); }
+.tw-note-input:focus { outline: none; }   /* the whole box shows the focus ring (.tw-notes-cell:focus-within) */
 .tw-note-input:disabled { opacity: .6; cursor: progress; }
-.tw-note-input[aria-invalid='true'] { border-color: var(--error-ink); }
-.tw-note-send { position: absolute; right: 3px; bottom: 3px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--primary); color: var(--on-primary); cursor: pointer; }
+.tw-note-input[aria-invalid='true'] { color: var(--error-ink); }
+.tw-note-send { position: absolute; right: 5px; bottom: 5px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--primary); color: var(--on-primary); cursor: pointer; }
 .tw-note-send:disabled { opacity: .35; cursor: not-allowed; }
 .tw-note-send:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.tw-note-error { margin: 0; font-size: 11.5px; line-height: 1.3; color: var(--error-ink); overflow-wrap: anywhere; }
-.tw-note-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; min-width: 0; max-width: 100%; margin: 0; padding: 0; list-style: none; }
-.tw-note-list li { min-width: 0; max-width: 100%; padding: 5px 0; }
-.tw-note-list li:first-child { padding-top: 0; }
+.tw-note-error { margin: 0; padding: 4px 8px; border-top: 1px solid var(--error-edge); background: var(--error-fill); font-size: 11.5px; line-height: 1.3; color: var(--error-ink); overflow-wrap: anywhere; }
+/* the notes under the input: a hairline separates them from it, each note is 8px above and below its text, a hairline between notes; wrapping at spaces */
+.tw-note-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; min-width: 0; max-width: 100%; margin: 0; padding: 0 8px; list-style: none; }
+.tw-note-add + .tw-note-list, .tw-note-error + .tw-note-list { border-top: 1px solid var(--table-line); }
+.tw-note-list li { min-width: 0; max-width: 100%; padding: 8px 0; }
 .tw-note-list li + li { border-top: 1px solid var(--table-line); }
 .tw-note-list li.is-pending { opacity: .6; }
-.tw-note-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 2px; min-height: 18px; }
-.tw-note-when { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 5px; min-width: 0; font-size: 11.5px; line-height: 1.3; }
+.tw-note-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 20px; }
+.tw-note-when { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; min-width: 0; font-size: 11.5px; line-height: 1.3; }
 .tw-note-when time { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-main); }
-.tw-note-when small { min-width: 0; font-size: 10.5px; color: var(--text-muted); overflow-wrap: anywhere; }
-.tw-note-body { min-width: 0; max-width: 100%; margin: 1px 0 0; font-size: 12px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-/* A note's "Delete note" button: a small quiet trash that turns red on hover or focus; 44px to touch on phones. The note itself stays centred. */
-.tw-note-del { display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; margin: -3px 0 0 0; border-radius: 6px; color: var(--text-muted); cursor: pointer; transition: background-color .12s, color .12s; }
+.tw-note-when small { min-width: 0; font-size: 10.5px; color: var(--text-muted); overflow-wrap: break-word; }
+.tw-note-body { min-width: 0; max-width: 100%; margin: 2px 0 0; font-size: 12px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+/* A note's "Delete note" button: a small quiet trash that turns red on hover or focus; 44px to touch on phones. */
+.tw-note-del { display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; margin: 0; border-radius: 6px; color: var(--text-muted); cursor: pointer; transition: background-color .12s, color .12s; }
 .tw-note-del:hover { background: var(--error-fill); color: var(--error-ink); }
 .tw-note-del:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .tw-note-quote { margin: 0; padding: 10px 12px; border: 1px solid var(--border-main); border-radius: 8px; background: var(--tint-1); }
@@ -156,12 +162,13 @@
 .tw-note-quote p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (pointer: coarse) { .tw-note-del { width: 44px; height: 44px; } }
 
-/* ---- cards (the panel is under 1080px wide: phones, tablets and a 1280px window with the sidebar open): 14px text, 16px inputs (no iOS zoom), 44px targets ---- */
-@container dw (max-width: 1079px) {
+/* ---- cards (the panel is under 1100px wide: phones, tablets and a 1280px window with the sidebar open): 14px text, 16px inputs (no iOS zoom), 44px targets ---- */
+@container dw (max-width: 1099px) {
   .dw .tw-table .dw-row { font-size: 14px; }
   .dw .tw-table td[data-label='NOTES'] { grid-column: 1 / -1; }
-  .dw .tw-table .tw-note-input { min-height: 44px; padding: 10px 44px 10px 12px; font-size: 16px; line-height: 22px; }
+  .dw .tw-table .tw-note-input { min-height: 44px; padding: 10px 48px 10px 12px; font-size: 16px; line-height: 22px; }
   .dw .tw-table .tw-note-send { right: 4px; bottom: 4px; width: 36px; height: 36px; }
+  .dw .tw-table .tw-note-list { padding-inline: 12px; }
   .dw .tw-table .tw-note-when { font-size: 13px; }
   .dw .tw-table .tw-note-when small { font-size: 12.5px; }
   .dw .tw-table .tw-note-body { font-size: 14px; line-height: 1.4; }
@@ -196,7 +203,7 @@
 .dw .dw-outcome-chip.is-travelled { border-color: var(--success-edge); background: var(--success-fill); color: var(--success-ink); }
 .dw .dw-outcome-why { max-width: 100%; font-size: 11.5px; font-weight: 500; line-height: 1.3; overflow-wrap: break-word; color: var(--text-main); }
 .dw .dw-outcome-meta { max-width: 100%; font-size: 11px; line-height: 1.3; overflow-wrap: break-word; color: var(--text-muted); }
-@container dw (max-width: 1079px) {
+@container dw (max-width: 1099px) {
   .dw .dw-outcome { align-items: flex-start; max-width: 260px; margin-inline: 0; text-align: left; }
   .dw .dw-outcome-chip { justify-content: flex-start; }
   .dw .dw-outcome-why { font-size: 13px; }

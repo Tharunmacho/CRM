@@ -24,39 +24,63 @@ const sum = (list) => list.reduce((total, c) => total + c.width, 0)
 
 /* ------------------------------------------------------------------ the plan at the breakpoints */
 
-test('the plan: supervisor 12 columns fit the 1111px panel (within 1%) and recruiter 11 columns 1040px, with NOTES and without TODAY', () => {
+test('the plan: a table without TODAY and without a Recruiter column is 1100px (the card breakpoint) and fits the 1111px panel of a 1440px window', () => {
+  const folded = m.taskColumnsFor(true, false, 'none', false)
+  assert.deepEqual(folded.map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'agency', 'stage', 'remarks', 'notes', 'actions'])
+  assert.equal(sum(folded), 1100)
+  assert.equal(m.TASK_CARD_BREAKPOINT, 1100)
+  assert.ok(sum(folded) <= 1111, 'a 1440px window (1111px panel) shows the table')
   const supervisor = m.taskColumnsFor(true, false)
-  assert.deepEqual(supervisor.map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'remarks', 'notes', 'actions'])
-  assert.ok(sum(supervisor) <= 1111 * 1.01, `${sum(supervisor)}px is the 1111px panel of a 1440px window, shared (the DOT column was removed again)`)
-  assert.ok(sum(m.taskColumnsFor(false, false)) <= 1040, 'a recruiter has no Recruiter column')
-  assert.equal(m.taskPlanWidth(true, false), sum(supervisor))
-  const notes = supervisor.find((c) => c.key === 'notes')
-  assert.ok(notes.width >= 100, 'a note is readable (REMARKS and NOTES gave DOT its room; a wider panel gives it back)')
-  assert.equal(supervisor.find((c) => c.key === 'doc').width, 90, 'the DOC input keeps its 90px')
-  assert.equal(supervisor.find((c) => c.key === 'actions').width, 124, 'the actions keep their 124px')
+  assert.equal(sum(supervisor), 1187, 'a supervisor with the Recruiter column and without TODAY')
+  assert.equal(m.taskPlanWidth(true, false), 1187)
+  assert.equal(sum(m.taskColumnsFor(false, false)), 1100, 'a recruiter has no Recruiter column')
+  const width = (key) => m.TASK_LIST_COLUMNS.find((c) => c.key === key).width
+  assert.ok(width('remarks') >= 140 && width('notes') >= 180, 'a remark and a note wrap at their spaces: REMARKS >= 140px, NOTES >= 180px')
+  assert.equal(width('doc'), 84)
+  assert.equal(width('actions'), 118)
 })
 
-test('the full 12-column plan (with TODAY) needs 1161px for a supervisor and 1074px for a recruiter', () => {
+test('the full 12-column plan (with TODAY) needs 1291px for a supervisor and 1204px for a recruiter', () => {
   const full = m.taskColumnsFor(true, true)
   assert.equal(full.length, 12)
   assert.deepEqual(full.map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'today', 'remarks', 'notes', 'actions'])
-  assert.equal(m.taskPlanWidth(true, true), 1161)
-  assert.equal(m.taskPlanWidth(false, true), 1074)
+  assert.equal(m.taskPlanWidth(true, true), 1291)
+  assert.equal(m.taskPlanWidth(false, true), 1204)
   assert.equal(m.taskColumnsFor(true).length, 12, 'the default plan is the full one')
 })
 
-test('where TODAY is shown at each panel width', () => {
-  const at = (supervisor, width) => m.todayPlace(supervisor, width)
-  // the owner's 125% zoom (a 1225px table) holds the supervisor's whole plan only from 1161px
-  assert.deepEqual([1080, 1111, 1150, 1160].map((w) => at(true, w)), ['stage', 'stage', 'stage', 'stage'])
-  assert.deepEqual([1161, 1225, 1366, 1500, 1590].map((w) => at(true, w)), ['column', 'column', 'column', 'column', 'column'])
-  // a recruiter's whole plan (1074px) is narrower than the card breakpoint: every table width has the TODAY column
-  assert.deepEqual([1080, 1111, 1133].map((w) => at(false, w)), ['column', 'column', 'column'])
-  assert.equal(at(false, 1074), 'row', 'under 1080px a card has a TODAY row')
-  assert.equal(at(true, 1079), 'row', 'under 1080px a card has a TODAY row')
-  assert.equal(at(true, 390), 'row')
-  assert.equal(at(true, 0), 'stage', 'not measured yet')
-  assert.equal(m.TASK_CARD_BREAKPOINT, 1080)
+test('where TODAY and the Recruiter are shown at each panel width: TODAY folds into STAGE first, then the Recruiter under the candidate, then cards', () => {
+  const today = (supervisor, width) => m.todayPlace(supervisor, width)
+  const staff = (supervisor, width) => m.staffPlace(supervisor, width)
+  assert.deepEqual([1100, 1111, 1207, 1290].map((w) => today(true, w)), ['stage', 'stage', 'stage', 'stage'])
+  assert.deepEqual([1291, 1366, 1591, 1920].map((w) => today(true, w)), ['column', 'column', 'column', 'column'])
+  assert.deepEqual([1100, 1111, 1203].map((w) => today(false, w)), ['stage', 'stage', 'stage'])
+  assert.deepEqual([1204, 1591].map((w) => today(false, w)), ['column', 'column'])
+  assert.deepEqual([1100, 1111, 1186].map((w) => staff(true, w)), ['candidate', 'candidate', 'candidate'])
+  assert.deepEqual([1187, 1207, 1591].map((w) => staff(true, w)), ['column', 'column', 'column'])
+  assert.equal(staff(false, 1591), 'none', 'a recruiter has no Recruiter column')
+  assert.equal(today(true, 1099), 'row', 'under 1100px a card has a TODAY row')
+  assert.equal(staff(true, 1099), 'row', 'and a Recruiter row')
+  assert.equal(today(true, 390), 'row')
+  assert.equal(today(true, 0), 'stage', 'not measured yet')
+  assert.equal(staff(true, 0), 'column', 'not measured yet: the full plan')
+  assert.equal(m.TASK_CARD_BREAKPOINT, 1100)
+})
+
+test('at every common window width the table fits its panel (or is a card list), no column is narrower than its measured width, REMARKS and NOTES take the spare room', () => {
+  const SIDEBAR = 329   // a 1440px window with the sidebar open gives a 1111px panel
+  for (const window of [1280, 1366, 1440, 1536, 1920]) {
+    const panel = window - SIDEBAR
+    for (const supervisor of [true, false]) {
+      if (panel < m.TASK_CARD_BREAKPOINT) { assert.equal(m.todayPlace(supervisor, panel), 'row', `${window}px window: cards`); continue }
+      const columns = m.taskColumnsFor(supervisor, m.todayPlace(supervisor, panel) !== 'stage', 'none', m.staffPlace(supervisor, panel) !== 'candidate')
+      const widths = m.widthsWithSpare(columns, panel)
+      const total = Object.values(widths).reduce((a, b) => a + b, 0)
+      assert.ok(total <= panel, `${window}px window, ${supervisor ? 'supervisor' : 'recruiter'}: ${total}px of ${panel}px, no sideways scroll`)
+      for (const column of columns) assert.ok(widths[column.key] >= column.width, `${window}px: ${column.key} keeps its measured width`)
+      assert.ok(widths.remarks >= 140 && widths.notes >= 184, `${window}px: a remark and a note have their room`)
+    }
+  }
 })
 
 /* ------------------------------------------------------------------ newest first, all of them */
@@ -134,7 +158,9 @@ test('the table: NOTES always a column, the Remarks cell holds only the select, 
   const table = await code('../src/screens/tasks/task-table.tsx')
   assert.doesNotMatch(table, /has-notes|tw-remark-notes|showsNotesColumn|tw-remark-note-text/)
   assert.match(table, /todayPlace\(supervisor, panelWidth\)/)
-  assert.match(table, /taskColumnsFor\(supervisor, place !== 'stage', closedRowsOf\(rows\)\)/)
+  assert.match(table, /taskColumnsFor\(supervisor, place !== 'stage', closedRowsOf\(rows\), staff !== 'candidate'\)/)
+  assert.match(table, /staffPlace\(supervisor, panelWidth\)/)
+  assert.match(table, /staff === 'candidate' && name && <span className="tw-owner-line"/, 'a narrow supervisor table shows the recruiter under the candidate')
   assert.match(table, /<StageCell item=\{row\} zone=\{zone\} \/>\{place === 'stage' && !closed && <TodayChips row=\{row\} zone=\{zone\} inStage \/>\}/)
   assert.match(table, /\{showToday && \(\s*<td data-label="TODAY"/)
   // the REMARKS cell: the select (or a dash) and nothing else
@@ -170,8 +196,12 @@ test('the styles: no second line under the remark, the notes list is NOT capped 
   const noteList = css.match(/\.tw-note-list \{[^}]*\}/)[0]
   assert.doesNotMatch(noteList, /max-height|overflow-y|overflow:\s*(auto|scroll)|overscroll/)
   assert.doesNotMatch(css, /\.tw-note-list \{[^}]*max-height/)
-  assert.match(css, /\.tw-note-input \{[^}]*min-height: 32px/)
-  assert.match(css, /\.tw-note-body \{[^}]*overflow-wrap: anywhere/)
+  assert.match(css, /\.tw-note-input \{[^}]*min-height: 34px/)
+  assert.match(css, /\.tw-note-body \{[^}]*overflow-wrap: anywhere/, 'a note wraps at spaces first; only a word longer than the cell breaks')
+  // ONE bordered box that fills the cell, the input inside it
+  assert.match(css, /\.tw-notes-cell \{[^}]*border: 1px solid var\(--border-control\)[^}]*border-radius: 8px/)
+  assert.match(css, /\.tw-note-input \{[^}]*border: 0/, 'the input has no box of its own: the cell is the box')
+  assert.match(css, /\.tw-note-list \{[^}]*padding: 0 8px/, 'the notes sit on the same 8px padding as the input')
   assert.match(css, /td\[data-label='NOTES'\] \{ grid-column: 1 \/ -1; \}/)
   assert.match(css, /\.tw-today\.is-in-stage \{ margin-top: 6px; \}/)
   assert.match(css, /--tw-pad-l: 6px; --tw-pad-r: 6px;/)

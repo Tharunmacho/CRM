@@ -67,7 +67,7 @@
 /* the outer frame of every .dw table (Tasks, Follow-up, the Reports people tables): a strong border around header and rows, the radius kept.
    It sits on the scroll wrapper (.tk-table-wrap), so it stays whole when the table scrolls sideways; a table without a wrapper carries it itself.
    Only where it is a table (the panel is over 760px wide); below that each row is a card with its own single var(--table-line) border. */
-@container dw (min-width: 1080px) {
+@container dw (min-width: 1100px) {
   .dw .tk-table-wrap { box-sizing: border-box; overflow-x: auto; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); }
   .dw .tk-table-wrap .dw-table thead th { border-top-width: 0; }
   .dw .dw-table:where(:not(.tk-table-wrap .dw-table)) { box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: 16px; overflow: hidden; }
@@ -187,7 +187,7 @@
 .dw-staff-name { display: block; font-weight: 600; }
 
 /* ---------- Narrow panels: each candidate becomes a labelled card ---------- */
-@container dw (max-width: 1079px) {
+@container dw (max-width: 1099px) {
   .dw .tk-table-wrap { overflow-x: visible; }
   .dw-table { min-width: 0 !important; }
   .dw-table, .dw-table tbody { display: block; }
@@ -214,8 +214,8 @@
   .dw-row.is-done { box-shadow: inset 3px 0 0 var(--success-ink); }
   .dw-panel-head { padding-left: 16px; padding-right: 16px; }
 }
-/* tablets and a 1280-1440px window with the sidebar open (a panel of 640-1079px): the cards sit in a grid, each one a framed card, instead of one long list */
-@container dw (min-width: 640px) and (max-width: 1079px) {
+/* tablets and a 1280-1440px window with the sidebar open (a panel of 640-1099px): the cards sit in a grid, each one a framed card, instead of one long list */
+@container dw (min-width: 640px) and (max-width: 1099px) {
   .dw-table tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; padding: 16px; }
   .dw-group { grid-column: 1 / -1; }
   .dw-table tbody > .dw-row, .dw-table tbody > .dw-staff-row { align-content: start; border: var(--table-line-width) solid var(--table-line); border-radius: 16px; }

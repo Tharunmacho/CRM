@@ -515,28 +515,31 @@ export interface TaskRow extends DailyItem { today: TodayWork }
 export interface TaskColumn { key: string; title: string; width: number; /** The header's tooltip (the title is a short code). */ tip?: string; left?: boolean; supervisor?: boolean; quiet?: boolean; /** Only a column of a roomy panel: below it the same content sits inside another cell (see TASK_LIST_COLUMNS). */ roomy?: boolean }
 
 /** A panel narrower than this shows every candidate as a labelled card instead of a table row (daily-work.css, tasks-table.css). */
-export const TASK_CARD_BREAKPOINT = 1080
+export const TASK_CARD_BREAKPOINT = 1100
 
 /**
  * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), CLIENT (the name, and under it the country in
  * a smaller muted line), JOB, CANDIDATE, Recruiter (supervisors only), AGENCY, STAGE, TODAY, REMARKS, NOTES and the untitled actions cell. Every
  * header is one short word so it never wraps. The table never scrolls sideways: its columns are these widths as percentages of the panel
- * (columnLayout), so it fills the panel at any width from 1080px (below that the Tasks list is a stack of cards). Every column is centred (header and
- * cells), the actions included (the 72px Open / Complete / View button, the 4px gap and the 36px row menu fill their 116px cell).
+ * (columnLayout), so it fills the panel at any width from 1100px (below that the Tasks list is a stack of cards). Every column is centred (header and
+ * cells), the actions included (the 72px Open / Complete / View button, the 4px gap and the 36px row menu fill their 118px cell).
  *
  * Every width is its longest word plus the cell's 13px (6px padding on both sides and the 1px column line), measured in Poppins at the table's
  * sizes: CLIENT "International" (86px at 13px / 600), CANDIDATE "EMAYAVARAMBAN" (121px), JOB "SUPERVISOR" (78px), AGENCY "LAVOROTECH" (86px), Recruiter
  * "Srivathsala" (74px), STAGE "Prescreening" (77px in its 16px chip), TODAY the whole "Moved 10:45" chip (75px + 16px chip padding), and the headers S NO (29px),
- * CANDIDATE (70px) and RECRUITER (65px). DOC and REMARKS are the two with give: the empty "dd/mm/yyyy" hint may lose its last pixels and the remark
- * dropdown clips a long remark to two lines (its full text is the tooltip). There is no DOT (date of travel) column on this list (it was removed: the date lives on the Travelled screen); REMARKS and NOTES are the two columns that take the spare width of a wider panel, up to REMARKS_MAX / NOTES_MAX, and their text wraps and scrolls inside the cell.
+ * CANDIDATE (70px) and RECRUITER (65px). DOC has give: the empty "dd/mm/yyyy" hint may lose its last pixels. A remark shows in full (it wraps, nothing is clipped). There is no DOT (date of travel) column on this list (it was removed: the date lives on the Travelled screen); REMARKS and NOTES are the two columns that take the spare width of a wider panel, up to REMARKS_MAX / NOTES_MAX, and their text wraps inside the cell (the row grows).
  *
- * NOTES is a column of every table. TODAY is a column only when the panel has room for the whole plan (`taskPlanWidth(supervisor, true)`: 1221px for a
- * supervisor, 1134px for a recruiter); a narrower table needs only `taskPlanWidth(supervisor, false)` (1117px / 1030px: a 1440px window gives the
- * table 1111px, the columns share the 0.5% they lack) and shows the TODAY chip inside the STAGE cell, under the stage chip and its dashes. A phone card has a TODAY row of its own.
+ * REMARKS (140px) and NOTES (184px) are sized so that a remark or a note wraps only at its spaces: the longest word of the remark list ("attestation", "remedial") is ~65px
+ * at 11.5px, the select's padding and chevron take ~40px, a note is 12px text inside a bordered box with 8px padding. They grow with the spare room up to REMARKS_MAX / NOTES_MAX.
+ *
+ * NOTES is a column of every table. Three plans, folded in this order as the panel narrows: the full plan (1291px for a supervisor, 1204px for a recruiter) has a TODAY column;
+ * under that the TODAY chip sits inside the STAGE cell (`taskPlanWidth(supervisor, false)`: 1187px / 1100px); under 1187px a supervisor's Recruiter name moves under the candidate's
+ * name (`staffPlace`: 1100px for everyone); under TASK_CARD_BREAKPOINT (1100px: a 1440px window with the sidebar open gives 1111px, a 1366px window about 1037px) the list is a stack
+ * of labelled cards, never a scroller. A phone card has a TODAY row and a Recruiter row of its own.
  */
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
   { key: 'no', title: 'S NO', width: 44 },
-  { key: 'doc', title: 'DOC', width: 90 },
+  { key: 'doc', title: 'DOC', width: 84 },
   { key: 'client', title: 'CLIENT', width: 99 },
   { key: 'position', title: 'JOB', width: 92 },
   { key: 'candidate', title: 'CANDIDATE', width: 134 },
@@ -544,14 +547,14 @@ export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
   { key: 'agency', title: 'AGENCY', width: 99 },
   { key: 'stage', title: 'STAGE', width: 106 },
   { key: 'today', title: 'TODAY', width: 104, roomy: true },
-  { key: 'remarks', title: 'REMARKS', width: 82 },
-  { key: 'notes', title: 'NOTES', width: 100 },
-  { key: 'actions', title: 'Actions', width: 124, quiet: true },
+  { key: 'remarks', title: 'REMARKS', width: 140 },
+  { key: 'notes', title: 'NOTES', width: 184 },
+  { key: 'actions', title: 'Actions', width: 118, quiet: true },
 ]
 
-/** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own); `roomForToday` keeps the TODAY column. */
-export const taskColumnsFor = (supervisor: boolean, roomForToday = true, closed: ClosedRows = 'none'): TaskColumn[] => {
-  const columns = TASK_LIST_COLUMNS.filter((column) => (supervisor || !column.supervisor) && (roomForToday || !column.roomy) && !(closed === 'all' && column.key === 'today'))
+/** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own); `roomForToday` keeps the TODAY column and `roomForStaff` the Recruiter column (a supervisor's narrower table shows the recruiter's name under the candidate instead). */
+export const taskColumnsFor = (supervisor: boolean, roomForToday = true, closed: ClosedRows = 'none', roomForStaff = true): TaskColumn[] => {
+  const columns = TASK_LIST_COLUMNS.filter((column) => (!column.supervisor || (supervisor && roomForStaff)) && (roomForToday || !column.roomy) && !(closed === 'all' && column.key === 'today'))
   return closed === 'none' ? columns : columns.map((column) => (column.key === 'stage' ? { ...column, width: ENDED_STAGE_WIDTH } : column))
 }
 
@@ -573,8 +576,8 @@ export const closedRowsOf = (rows: readonly { outcome?: Partial<DailyOutcome> | 
  * left after that is spread over every column. On a panel at or below the plan nothing changes: every column keeps its measured width.
  * Returns each column's width in px for a panel `panelWidth` px wide (0 = not measured yet: the plan as it is).
  */
-export const REMARKS_MAX = 240
-export const NOTES_MAX = 330
+export const REMARKS_MAX = 300
+export const NOTES_MAX = 420
 export function widthsWithSpare(columns: readonly TaskColumn[], panelWidth: number): Record<string, number> {
   const widths: Record<string, number> = Object.fromEntries(columns.map((column) => [column.key, column.width]))
   const plan = columns.reduce((total, column) => total + column.width, 0)
@@ -590,15 +593,25 @@ export function widthsWithSpare(columns: readonly TaskColumn[], panelWidth: numb
 }
 
 /** The plan's width in px for one person's columns: the panel width from which they all keep their measured room. */
-export const taskPlanWidth = (supervisor: boolean, roomForToday: boolean): number => taskColumnsFor(supervisor, roomForToday).reduce((total, column) => total + column.width, 0)
+export const taskPlanWidth = (supervisor: boolean, roomForToday: boolean, roomForStaff = true): number => taskColumnsFor(supervisor, roomForToday, 'none', roomForStaff).reduce((total, column) => total + column.width, 0)
 
 /**
  * Where the TODAY chip is for a panel this wide (px; 0 = not measured yet): its own `column` when the whole plan fits, a `row` of a phone card under
- * 1080px, otherwise inside the `stage` cell.
+ * 1100px (TASK_CARD_BREAKPOINT), otherwise inside the `stage` cell.
  */
 export function todayPlace(supervisor: boolean, panelWidth: number): 'column' | 'stage' | 'row' {
   if (panelWidth > 0 && panelWidth < TASK_CARD_BREAKPOINT) return 'row'   // a card, whatever the plan needs
   return panelWidth >= taskPlanWidth(supervisor, true) ? 'column' : 'stage'
+}
+
+/**
+ * Where a supervisor's Recruiter name is for a panel this wide (px; 0 = not measured yet): its own `column` while the plan with it (and without TODAY, which folds first) fits,
+ * a labelled `row` of a card under TASK_CARD_BREAKPOINT, otherwise a muted line under the candidate's name (`candidate`). A recruiter's own list has no such column.
+ */
+export function staffPlace(supervisor: boolean, panelWidth: number): 'column' | 'candidate' | 'row' | 'none' {
+  if (!supervisor) return 'none'
+  if (panelWidth > 0 && panelWidth < TASK_CARD_BREAKPOINT) return 'row'
+  return panelWidth === 0 || panelWidth >= taskPlanWidth(true, false, true) ? 'column' : 'candidate'
 }
 
 /** The notes of a candidate, newest first whatever order they arrived in (equal times keep the arrival order). */
