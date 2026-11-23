@@ -6,7 +6,7 @@ import { ScrollEdges } from '@/screens/tasks/daily-table'
 import { hueOf } from './report-table'
 import { LongestWaitingPanel } from './report-lists'
 import { flowByStage, daysText, stuckOf, taskSummary, waitingByStage } from './report-management'
-import { buildStageMatrix, numberText, reportPeople, shownOverdue, type MatrixRow } from './daily-report-view'
+import { buildStageMatrix, buildWorkDoneMatrix, numberText, periodTitle, reportPeople, shownOverdue, type MatrixRow, type WorkDoneRow } from './daily-report-view'
 import type { ViewProps } from './report-views'
 
 /** A figure: a button when there is a list behind it, plain when not, a dash for zero or not counted. */
@@ -25,6 +25,7 @@ const NAME_WIDTH = 150
 const TOTAL_WIDTH = 56
 const STUCK_WIDTH = 62
 const MATRIX_MIN = NAME_WIDTH + TOTAL_WIDTH + STUCK_WIDTH + 14 * 44
+const WORK_MIN = NAME_WIDTH + TOTAL_WIDTH + STUCK_WIDTH + 13 * 44
 
 function Person({ name }: { name: string }) {
   return <span className="dwr-person"><span className={cn('record-avatar', `avatar-hue-${hueOf(name)}`)} aria-hidden="true">{initials(name)}</span><span className="dwr-who">{name}</span></span>
@@ -34,10 +35,12 @@ function Person({ name }: { name: string }) {
  * The Task report, read as a manager: two cards at the top (stages completed, stopped or lost in the period), the 13 stages recruiter by recruiter with a Stuck column, stage by stage with its waits, where candidates are lost and who has waited longest.
  * Waiting is what is true now; completed and lost follow the period; the recruiter filter narrows all of it to one person.
  */
-export function TaskReportView({ report, roster, staff, onDrill }: ViewProps) {
+export function TaskReportView({ report, roster, staff, today, onDrill }: ViewProps) {
   const team = report.scope === 'team'
   const picked = team ? staff : ''
   const matrix = buildStageMatrix(report, picked)
+  const work = buildWorkDoneMatrix(report, picked)
+  const periodText = periodTitle(report.period, today)
   const insight = report.taskInsight
   const summary = taskSummary(report)
   const waits = waitingByStage(report)
@@ -48,11 +51,21 @@ export function TaskReportView({ report, roster, staff, onDrill }: ViewProps) {
   const line = insight?.stuckDays ?? 7
   const drill = (no: number, id: string | null) => ((matrix.total[String(no)] ?? 0) > 0 ? () => onDrill(`stage:${no}`, id && id !== 'other' ? id : null) : undefined)
   const one = picked ? people.find(row => row.id === picked)?.name : undefined
+  /** A figure of the Work done table: a list of exactly those stage records behind it (done: every record, lost: the ones that ended the placement). */
+  const doneDrill = (kind: 'done' | 'lost', which: string, id: string | null, value: number | null | undefined) =>
+    (value ?? 0) > 0 ? () => onDrill(`${kind}:${which}`, id && id !== 'other' ? id : null) : undefined
 
   const cards = summary ? [
     { label: 'Stages completed', value: numberText(summary.completed), icon: CheckCircle2, tone: 'green' as const },
     { label: 'Stopped or lost', value: numberText(summary.stopped), icon: UserX, tone: 'amber' as const },
   ] : []
+
+  const workRow = (item: WorkDoneRow) => <tr key={item.id} className="dwm-row">
+    <th scope="row" className="dwr-name"><Person name={item.name} /></th>
+    {work!.stages.map(stage => <td key={stage.no} className="is-num"><Figure value={item.cells[String(stage.no)]} label={`completed at ${stage.name}`} onOpen={doneDrill('done', String(stage.no), item.id, item.cells[String(stage.no)])} /></td>)}
+    <td className="is-num is-strong"><Figure value={item.total} label="stages completed in total" onOpen={doneDrill('done', 'all', item.id, item.total)} /></td>
+    <td className="is-num"><Figure value={item.lost} tone="stuck" label="stopped or lost" onOpen={doneDrill('lost', 'all', item.id, item.lost)} /></td>
+  </tr>
 
   const row = (item: MatrixRow) => <tr key={item.id} className="dwm-row">
     <th scope="row" className="dwr-name"><Person name={item.name} /></th>
@@ -76,14 +89,41 @@ export function TaskReportView({ report, roster, staff, onDrill }: ViewProps) {
   return <>
     {cards.length > 0 && <div className="rp-cards" data-count={cards.length}><SummaryCards items={cards} /></div>}
 
-    <section className="dw-panel dwm-panel rp-panel" aria-label="The stages, recruiter by recruiter">
+    {work && <section className="dw-panel dwm-panel rp-panel" aria-label="Work done, recruiter by recruiter">
       <div className="dw-panel-head">
-        <div><h2>{one ? `${one}: candidates waiting at each stage` : 'Candidates waiting at each stage'}</h2></div>
+        <div><h2>{one ? `${one}: work done` : 'Work done'}<span className="rp-sub"> ({periodText})</span></h2></div>
+      </div>
+      {work.rows.length === 0
+        ? <p className="dwb-none">Nobody in this selection.</p>
+        : <ScrollEdges label="Work done in the chosen period, by recruiter and stage. Scroll sideways for more stages">
+          <table className="dwr-table dwm-table is-matrix is-done" style={{ minWidth: WORK_MIN }}>
+            <caption className="rp-sr">Stage records completed in the period ({periodText}), by recruiter and stage, with the number that ended the placement</caption>
+            <colgroup><col style={{ width: NAME_WIDTH }} />{Array.from({ length: 13 }, (_, i) => <col key={i} />)}<col style={{ width: TOTAL_WIDTH }} /><col style={{ width: STUCK_WIDTH }} /></colgroup>
+            <thead><tr>
+              <th scope="col" className="dwr-name-head">Recruiter</th>
+              {work.stages.map(stage => <th key={stage.no} scope="col" className="is-num" title={`Stage ${stage.no}: ${stage.name}`}><span className="dwm-h-no">{stage.no}</span><span className="dwm-h-name">{stage.short}</span></th>)}
+              <th scope="col" className="is-num" title="Stage records completed in the period"><span className="dwm-h-no">&Sigma;</span><span className="dwm-h-name">Total</span></th>
+              <th scope="col" className="is-num is-stuck" title="Of those, the ones that ended the placement (stopped or lost)"><span className="dwm-h-no">&times;</span><span className="dwm-h-name">Lost</span></th>
+            </tr></thead>
+            <tbody>{work.rows.map(workRow)}</tbody>
+            <tfoot><tr className="dwr-total dwm-row">
+              <th scope="row" className="dwr-name">Total</th>
+              {work.stages.map(stage => <td key={stage.no} className="is-num"><Figure value={work.total.cells[String(stage.no)]} label={`completed at ${stage.name}`} onOpen={doneDrill('done', String(stage.no), null, work.total.cells[String(stage.no)])} /></td>)}
+              <td className="is-num is-strong"><Figure value={work.total.total} label="stages completed in total" onOpen={doneDrill('done', 'all', null, work.total.total)} /></td>
+              <td className="is-num"><Figure value={work.total.lost} tone="stuck" label="stopped or lost" onOpen={doneDrill('lost', 'all', null, work.total.lost)} /></td>
+            </tr></tfoot>
+          </table>
+        </ScrollEdges>}
+    </section>}
+
+    <section className="dw-panel dwm-panel rp-panel" aria-label="Waiting now, recruiter by recruiter">
+      <div className="dw-panel-head">
+        <div><h2>{one ? `${one}: waiting now` : 'Waiting now'}<span className="rp-sub"> {'\u2014'} where candidates are at this moment (not limited to the chosen period)</span></h2></div>
         {overdue != null && overdue > 0 && <button type="button" className="rp-link" onClick={() => onDrill('tasksOverdue', null)}>{numberText(overdue)} overdue {overdue === 1 ? 'task' : 'tasks'}</button>}
       </div>
       {matrix.rows.length === 0
         ? <p className="dwb-none">Nobody in this selection.</p>
-        : <ScrollEdges label="Candidates waiting at each stage, by recruiter. Scroll sideways for more stages">
+        : <ScrollEdges label="Candidates waiting now at each stage, by recruiter. Scroll sideways for more stages">
           <table className="dwr-table dwm-table is-matrix" style={{ minWidth: MATRIX_MIN }}>
             <caption className="rp-sr">Candidates waiting at each stage now, by recruiter, with the number stuck for more than {line} days</caption>
             <colgroup><col style={{ width: NAME_WIDTH }} />{Array.from({ length: 14 }, (_, i) => <col key={i} />)}<col style={{ width: TOTAL_WIDTH }} /><col style={{ width: STUCK_WIDTH }} /></colgroup>

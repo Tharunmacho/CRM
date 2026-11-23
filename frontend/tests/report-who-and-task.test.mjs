@@ -13,7 +13,7 @@ test('the Task report has no Completed view switch: two period cards, the matrix
   const task = withoutComments(await read('report-task.tsx'))
   for (const gone of ['STAGE_MODES', 'StageMode', 'dwr-seg', 'aria-pressed', 'localStorage', 'OctagonX', 'flow.total.completed', 'item.completed', 'LostReasonsPanel', 'Where candidates are lost'])
     assert.ok(!task.includes(gone), `${gone} must be gone from the Task report`)
-  assert.ok(task.includes('Candidates waiting at each stage'))
+  assert.ok(task.includes("'Work done'") && task.includes("'Waiting now'"), 'the main table is the work done, the second one where candidates are now')
   assert.deepEqual([...task.matchAll(/label: '([^']+)', value: numberText\(summary\./g)].map((x) => x[1]), ['Stages completed', 'Stopped or lost'])
   const heads = [...task.slice(task.indexOf('<caption className="rp-sr">Stage by stage')).matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((x) => x[1])
   assert.deepEqual(heads, ['Stage', 'Waiting now', 'Average wait', 'Stuck &gt;{line}d', 'Completed', 'Stopped'])

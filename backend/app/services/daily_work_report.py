@@ -80,7 +80,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import HTTPException
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Date, DateTime, String, and_, case, cast, exists, extract, func, literal, or_, select, text, union_all, update
+from sqlalchemy import Date, DateTime, String, and_, case, cast, exists, extract, false, func, literal, or_, select, text, union_all, update
 from sqlalchemy.orm import aliased
 
 from app.core.roles import ROLE_LABELS
@@ -956,6 +956,7 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
             "longest": [{"candidateId": cid, "careId": care, "name": cname or "No name", "staffId": uid, "staffName": names.get(uid) or "Unassigned",
                          "stage": no, "stageLabel": STAGE_NOW_KEYS[no][1], "since": since.isoformat() if since else None, "days": int(days)}
                         for uid, no, cid, cname, care, since, days in longest_rows],
+            "workDone": _work_done(flow_staff, shown),
             "completed": {"value": completed, "previous": None if p.all_time else sum(flow_prev["done"].get(uid, 0) for uid in shown)},
             "stopped": {"value": stopped, "previous": None if p.all_time else sum(flow_prev["ended"].get(uid, 0) for uid in shown)},
             "exitReasons": reasons[:REASONS_MAX], "exitOther": sum(x["count"] for x in reasons[REASONS_MAX:]),
@@ -993,6 +994,23 @@ def _build(db, viewer, from_date, to_date, staff, client, zone, now, force_self,
     if stages is not None:
         report["stages"] = stages
     return report, raw.get("submissions", [])
+
+
+def _work_done(flow_staff: dict, shown: set) -> dict:
+    """WHAT WAS DONE in the chosen period, recruiter by stage (the Task report's main table): the stage records each shown person completed and, of those, the ones
+    that ended the placement. Built from the very rows behind the two cards, over the same people (`shown`), so the grand totals equal 'Stages completed' and
+    'Stopped or lost' exactly."""
+    numbers = range(1, TOTAL_STAGES + 1)
+    per_staff = []
+    for uid in sorted(shown):
+        person = flow_staff.get(uid, {"completed": {}, "stopped": {}})
+        completed = {str(no): int(person["completed"].get(str(no), 0)) for no in numbers}
+        stopped = {str(no): int(person["stopped"].get(str(no), 0)) for no in numbers}
+        per_staff.append({"id": uid, "completed": completed, "stopped": stopped, "total": sum(completed.values()), "lost": sum(stopped.values())})
+    totals = {"completed": {str(no): sum(x["completed"][str(no)] for x in per_staff) for no in numbers},
+              "stopped": {str(no): sum(x["stopped"][str(no)] for x in per_staff) for no in numbers}}
+    totals["total"], totals["lost"] = sum(totals["completed"].values()), sum(totals["stopped"].values())
+    return {"perStaff": per_staff, "totals": totals}
 
 
 # ------------------------------------------------------------------ my day and the day-close submission
@@ -1166,6 +1184,10 @@ def metric_label(metric: str) -> str | None:
     found = re.fullmatch(r"stage:(\d{1,2})", metric)
     if found and int(found.group(1)) in STAGE_NOW_KEYS:
         return STAGE_NOW_KEYS[int(found.group(1))][1]
+    done = re.fullmatch(r"(done|lost):(all|\d{1,2})", metric)
+    if done and (done.group(2) == "all" or 1 <= int(done.group(2)) <= TOTAL_STAGES):
+        what = "Stages completed" if done.group(1) == "done" else "Stopped or lost"
+        return what if done.group(2) == "all" else f"{what} at stage {done.group(2)}: {STAGE_NOW_KEYS[int(done.group(2))][1]}"
     return None
 
 
@@ -1285,6 +1307,38 @@ def _stage_now_rows(session, number, staff_id, offset, limit, zone: str | None =
              "careId": r[4], "name": r[3], "client": r[5], "job": r[6], "detail": f"At stage {number}: {title} · since {_day_text(r[0], zone)}"} for r in rows], (int(rows[0][7]) if rows else 0)
 
 
+def _flow_rows(session, kind: str, which: str, p: Period, staff_id, client_id, offset, limit):
+    """The stage records behind a 'work done' cell: one row per record completed in the period (newest first), by whom and when. The very conditions of
+    `read_stage_flow` (completed in the period, never reopened, a person to credit, not 'Unfit: reapplying', the client filter) over the people the report
+    counts (the Administrator account is no row, so its records are no cell either), so the number of rows always equals the number clicked.
+    `kind` is 'done' (every record) or 'lost' (the ones that ended the placement); `which` is a stage number or 'all'."""
+    AS, A, C, O = m.ApplicationStage, m.Application, m.Candidate, m.Order
+    who = func.coalesce(AS.completed_by, AS.owner_id)
+    hidden = select(m.User.id).where(m.User.role.in_(sorted(HIDDEN_ROLES)))
+    conditions = [AS.completed_at >= p.start, AS.completed_at < p.end, _clean(AS), who.is_not(None), AS.outcome != "Unfit: reapplying",
+                  who.not_in(hidden)]
+    if which != "all":
+        conditions.append(AS.stage == int(which))
+    if kind == "lost":
+        ends = [and_(AS.stage == no, AS.outcome.in_(sorted(outcomes))) for no, outcomes in STOPPED_OUTCOMES.items()
+                if outcomes and (which == "all" or no == int(which))]
+        conditions.append(or_(*ends) if ends else false())
+    if staff_id:
+        conditions.append(who == staff_id)
+    if client_id:
+        conditions.append(AS.application_id.in_(select(A.id).join(O, O.id == A.order_id).where(O.company_id == client_id)))
+    rows = session.execute(
+        select(AS.completed_at, m.User.name, C.id, C.name, C.care_id, m.Company.name, m.Designation.title, AS.stage, AS.outcome, func.count().over())
+        .select_from(AS).outerjoin(A, A.id == AS.application_id).outerjoin(C, C.id == A.candidate_id).outerjoin(O, O.id == A.order_id)
+        .outerjoin(m.Company, m.Company.id == O.company_id).outerjoin(m.Designation, m.Designation.id == O.designation_id)
+        .outerjoin(m.User, m.User.id == who).where(*conditions)
+        .order_by(AS.completed_at.desc(), AS.id).offset(offset).limit(limit)).all()
+    verb = "Stopped" if kind == "lost" else "Completed"
+    return [{"at": r[0].isoformat(), "staffName": r[1] or "Unknown user", "kind": "candidate", "candidateId": r[2], "leadId": None, "careId": r[4],
+             "name": r[3] or "No name", "client": r[5], "job": r[6],
+             "detail": f"{verb} stage {r[7]}: {STAGE_NOW_KEYS[r[7]][1]}" + (f" · {r[8]}" if r[8] else "")} for r in rows], (int(rows[0][9]) if rows else 0)
+
+
 def _stuck_rows(session, number, staff_id, now, offset, limit):
     """The candidates whose current stage has waited longer than STUCK_DAYS (at one stage when `number`), the longest waiting first."""
     A, C, O = m.Application, m.Candidate, m.Order
@@ -1330,6 +1384,8 @@ def drilldown(db, viewer, metric: str, from_date, to_date, staff, client, page: 
             return _lead_list_rows(db, metric, p, staff, offset, limit, now)
         if metric in ("tasksDone", "tasksPending", "tasksOverdue"):
             return _task_rows(db, metric, p, staff, now, offset, limit)
+        if metric.startswith(("done:", "lost:")):
+            return _flow_rows(db, metric[:4], metric[5:], p, staff, client, offset, limit)
         if metric.startswith("stage:"):
             return _stage_now_rows(db, int(metric[6:]), staff, offset, limit, zone)
         if metric.startswith("stuck"):
@@ -1496,8 +1552,20 @@ def task_report_workbook(report: dict) -> bytes:
                [f"Stuck: waiting more than {STUCK_DAYS} days", waiting.get("stuck", 0), None],
                ["Busiest stage", f'{busiest["no"]}. {busiest["label"]}' if busiest else "", None],
                ["Average days waiting there", busiest.get("avgDays"), None], []] + _period_lines(report)
-    return lead_xlsx.build_workbook([_sheet("Task report", matrix), _sheet("Stage by stage", stages), _sheet("Where candidates are lost", reasons),
-                                     _sheet("Longest waiting", longest), _sheet("Summary", summary)])
+    work = insight.get("workDone") or {}
+    by_id = {x["id"]: x for x in work.get("perStaff", [])}
+    done_head = ["Recruiter"] + [f"{s.no}. {s.title}" for s in STAGES] + ["Stages completed", "Stopped or lost"]
+    done_sheet, done_sums = [done_head], [0] * (len(done_head) - 1)
+    for r in people:
+        x = by_id.get(r["id"], {"completed": {}, "stopped": {}})
+        line = [x["completed"].get(str(no), 0) for no in range(1, TOTAL_STAGES + 1)]
+        line += [sum(line), sum(x["stopped"].get(str(no), 0) for no in range(1, TOTAL_STAGES + 1))]
+        done_sums = [a + b for a, b in zip(done_sums, line)]
+        done_sheet.append([r["name"]] + line)
+    done_sheet.append(["Total"] + done_sums)
+    done_sheet += [[], ["Work done in the period: stage records completed, and of those the ones that ended the placement"]] + _period_lines(report)
+    return lead_xlsx.build_workbook([_sheet("Work done", done_sheet), _sheet("Waiting now", matrix), _sheet("Stage by stage", stages),
+                                     _sheet("Where candidates are lost", reasons), _sheet("Longest waiting", longest), _sheet("Summary", summary)])
 
 
 def lead_report_workbook(report: dict, whole_team: bool = True) -> bytes:

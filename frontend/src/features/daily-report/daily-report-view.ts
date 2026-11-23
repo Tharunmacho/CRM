@@ -4,7 +4,7 @@
  * lines, queries, paging and the CSV of a drill-down list. No React, no imports except types, so node can test it as it
  * is (tests/daily-report-view.test.mjs).
  */
-import type { DailyMetric, DailyPeriod, DailyQuery, DailyReport, DrillRow, Figures, LeadSheetSummary, MetricKey, MyDay, StaffRow } from './daily-report-types'
+import type { DailyMetric, DailyPeriod, DailyQuery, DailyReport, DrillRow, Figures, LeadSheetSummary, MetricKey, MyDay, StaffRow, WorkDonePerson } from './daily-report-types'
 
 /** The agency works in India; the server's own zone (bootstrap agencyTimezone) overrides this wherever the screen has it. */
 export const AGENCY_TIMEZONE = 'Asia/Kolkata'
@@ -461,6 +461,45 @@ export function buildStageMatrix(report: Pick<DailyReport, 'staff' | 'stages' | 
   return { stages, rows, total }
 }
 
+/** The words for the chosen period over the Work done table: "Today", "Yesterday", "All time", a day or a range. */
+export function periodTitle(period: { from: string; to: string; allTime?: boolean }, today: string): string {
+  if (period.allTime) return 'All time'
+  if (period.from === period.to) {
+    if (period.to === today) return 'Today'
+    if (period.to === shiftDay(today, -1)) return 'Yesterday'
+  }
+  return rangeLabel(period.from, period.to, today)
+}
+
+export interface WorkDoneRow { id: string; name: string; cells: Record<string, number>; total: number; lost: number }
+export interface WorkDoneMatrix { stages: MatrixStage[]; rows: WorkDoneRow[]; total: { cells: Record<string, number>; total: number; lost: number } }
+/**
+ * The Task report's MAIN table: what each person DID in the chosen period, one row per person (recruiters and the MD, alphabetical), the stage records
+ * they completed at each of the 13 stages, a Total and the "stopped or lost" ones. It comes from `taskInsight.workDone`, the rows behind the two cards, so
+ * the Total row equals "Stages completed" and the last column "Stopped or lost". `staff` narrows it to one person ('' for everyone). A person the report
+ * does not list (a former employee) is kept together in an "Other" row. Null when the server sent no work-done reading.
+ */
+export function buildWorkDoneMatrix(report: Pick<DailyReport, 'staff' | 'stages' | 'stageFlow' | 'taskInsight'>, staff = ''): WorkDoneMatrix | null {
+  const work = report.taskInsight?.workDone
+  if (!work) return null
+  const stages = matrixStages(report)
+  const byId = new Map(work.perStaff.map(item => [item.id, item]))
+  const known = new Set(report.staff.map(row => row.id))
+  const people = reportPeople(report.staff).filter(row => !staff || row.id === staff).map(row => ({ id: row.id, name: row.name }))
+    .sort((x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: 'base' }))
+  const strangers = work.perStaff.filter(item => !known.has(item.id))
+  if (!staff && strangers.length) people.push({ id: 'other', name: 'Other' })
+  const rowOf = (id: string, name: string, items: WorkDonePerson[]): WorkDoneRow => {
+    const cells: Record<string, number> = {}
+    for (const stage of stages) cells[String(stage.no)] = items.reduce((all, item) => all + (item.completed[String(stage.no)] ?? 0), 0)
+    return { id, name, cells, total: items.reduce((all, item) => all + item.total, 0), lost: items.reduce((all, item) => all + item.lost, 0) }
+  }
+  const rows = people.map(person => rowOf(person.id, person.name, person.id === 'other' ? strangers : byId.has(person.id) ? [byId.get(person.id)!] : []))
+  const cells: Record<string, number> = {}
+  for (const stage of stages) cells[String(stage.no)] = rows.reduce((all, row) => all + (row.cells[String(stage.no)] ?? 0), 0)
+  return { stages, rows, total: { cells, total: rows.reduce((all, row) => all + row.total, 0), lost: rows.reduce((all, row) => all + row.lost, 0) } }
+}
+
 export interface StageTableRow { no: number; name: string; waiting: number | null; share: number; drill?: string }
 export interface StageTable { rows: StageTableRow[]; total: { waiting: number | null } }
 /**
@@ -524,6 +563,13 @@ export function drillTitle(metric: string, report?: DailyReport | null): string 
     return no === 0 ? 'Not on an order yet' : found ? `Stage ${no}: ${found.label}` : `Stage ${no}`
   }
   if (/^stuck(:\d{1,2})?$/.test(metric)) return 'Stuck: waiting more than 7 days'
+  const flow = /^(done|lost):(all|\d{1,2})$/.exec(metric)
+  if (flow) {
+    const what = flow[1] === 'done' ? 'Stages completed' : 'Stopped or lost'
+    if (flow[2] === 'all') return what
+    const no = Number(flow[2])
+    return `${what} at stage ${no}: ${report?.stages?.totals.find(item => item.no === no)?.label ?? STAGE_NAMES[no - 1] ?? ''}`.trim()
+  }
   const fixed: Record<string, string> = { leadsStale: 'Leads not contacted for more than 3 days', leadsFollowUp: 'Leads that need a follow-up now', leadsTotal: 'All leads', leadsNotContacted: 'Leads not contacted', leadsAssigned: 'Leads assigned', leadsNewInPeriod: 'New leads', leadsAssignedInPeriod: 'Leads assigned', leadsBacklog: 'Leads still to contact', tasksDone: 'Tasks done', tasksPending: 'Tasks pending', tasksOverdue: 'Tasks overdue' }
   return fixed[metric] ?? METRIC_LABELS[metric as MetricKey] ?? 'Details'
 }

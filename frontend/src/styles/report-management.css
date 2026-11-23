@@ -43,6 +43,7 @@ html:root .rp-cards .summary-value { font-size: 30px; }
 /* ---------------------------------------------------------------- panels */
 .dwr .rp-panel { margin-bottom: 16px; }
 .dwr .rp-panel > .dw-panel-head { align-items: center; }
+.dwr .rp-sub { font-size: 13px; font-weight: 500; color: var(--text-muted); }
 .rp-empty { margin: 0; padding: 4px 20px 22px; }
 
 /* ---------------------------------------------------------------- figures and names inside the tables */

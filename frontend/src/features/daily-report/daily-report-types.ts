@@ -131,11 +131,20 @@ export interface LongestWaiting { candidateId: string; careId: string | null; na
 export interface ExitReason { label: string; count: number }
 export interface Compared { value: number }
 /** The Task report's management figures: how long candidates have waited at their stage now, how many are stuck, what was completed and lost in the period. */
+/** One person's WORK DONE in the chosen period: stage records completed per stage (keys '1' to '13') and, of those, the ones that ended the placement. */
+export interface WorkDonePerson { id: string; completed: Record<string, number>; stopped: Record<string, number>; total: number; lost: number }
+/** The Task report's main table, from the very rows behind the two cards: its grand totals ARE the 'Stages completed' and 'Stopped or lost' numbers. */
+export interface WorkDone {
+  perStaff: WorkDonePerson[]
+  totals: { completed: Record<string, number>; stopped: Record<string, number>; total: number; lost: number }
+}
 export interface TaskInsight {
   stuckDays: number
   waiting: { total: number; stuck: number; byStage: WaitingStage[]; busiest: WaitingStage | null }
   stuckPerStaff: Record<string, number>
   longest: LongestWaiting[]
+  /** Additive: recruiter by stage, what was completed in the period (older servers send none). */
+  workDone?: WorkDone
   completed: Compared
   stopped: Compared
   exitReasons: ExitReason[]

@@ -1425,8 +1425,8 @@ def test_the_task_and_lead_exports_are_the_tabs_as_shown_and_cannot_run_a_formul
     assert task.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     assert 'filename="task-report_2026-11-02_2026-11-05.xlsx"' in task.headers["content-disposition"] and task.headers["cache-control"] == "private, no-store"
     sheets, raw = lead_sheets_of(task.content)
-    assert list(sheets) == ["Task report", "Stage by stage", "Where candidates are lost", "Longest waiting", "Summary"]
-    matrix = sheets["Task report"]
+    assert list(sheets) == ["Work done", "Waiting now", "Stage by stage", "Where candidates are lost", "Longest waiting", "Summary"]
+    matrix = sheets["Waiting now"]
     assert matrix[0][0] == "Recruiter" and matrix[0][-1] == "Stuck (> 7 days)" and matrix[0][1] == "No job" and matrix[0][2] == "1. Prescreening"
     names = [row[0] for row in matrix[1:]]
     assert "Admin" not in names and names[-1] == "Total" and names[:-1] == sorted(names[:-1], key=str.casefold)
@@ -1457,3 +1457,101 @@ def test_the_task_and_lead_exports_are_the_tabs_as_shown_and_cannot_run_a_formul
         with env.world.sessions() as db:
             db.execute(text("UPDATE crm_candidates SET name = 'Candidate c18' WHERE id = 'c18'"))
             db.commit()
+
+
+# ------------------------------------------------------------------ work done in the period (the Task report's main table)
+
+PERIODS = [("thursday", {"from": "2026-11-05", "to": "2026-11-05"}), ("wednesday", {"from": "2026-11-04", "to": "2026-11-04"}),
+           ("week", {"from": "2026-11-02", "to": "2026-11-05"}), ("total", {"period": "all"})]
+
+
+def test_work_done_matrix_adds_up_to_the_two_cards_for_every_period_and_filter(env):
+    """The grand totals of the Work done table ARE the numbers on the 'Stages completed' and 'Stopped or lost' cards."""
+    for label, params in PERIODS:
+        for extra in ({}, {"staff": "asha"}, {"staff": "ravi"}, {"staff": "meena"}):
+            body = report(env, **params, **extra)
+            insight, work = body["taskInsight"], body["taskInsight"]["workDone"]
+            assert work["totals"]["total"] == insight["completed"]["value"], (label, extra)
+            assert work["totals"]["lost"] == insight["stopped"]["value"], (label, extra)
+            assert sum(x["total"] for x in work["perStaff"]) == work["totals"]["total"] and sum(x["lost"] for x in work["perStaff"]) == work["totals"]["lost"]
+            for no in range(1, 14):
+                assert work["totals"]["completed"][str(no)] == sum(x["completed"][str(no)] for x in work["perStaff"])
+                assert work["totals"]["stopped"][str(no)] == sum(x["stopped"][str(no)] for x in work["perStaff"])
+            assert all(x["lost"] <= x["total"] for x in work["perStaff"])   # a stopping record is also a completed one
+            if "staff" in extra:   # one person picked: only that person
+                assert [x["id"] for x in work["perStaff"]] == [extra["staff"]]
+    # the day the report is read for is the day the work was done
+    thu = report(env, **PERIODS[0][1])["taskInsight"]["workDone"]["totals"]
+    assert (thu["total"], thu["lost"]) == (20, 8)
+    assert report(env, **PERIODS[1][1])["taskInsight"]["workDone"]["totals"]["total"] == 3
+    # a recruiter reads only their own work
+    own = report(env, "ravi", **PERIODS[0][1])["taskInsight"]["workDone"]
+    assert [x["id"] for x in own["perStaff"]] == ["ravi"] and own["totals"]["total"] == report(env, "ravi", **PERIODS[0][1])["taskInsight"]["completed"]["value"]
+
+
+def test_work_done_follows_the_agency_day_not_utc_and_the_snapshot_is_a_different_number(env):
+    """00:30 IST on Thursday is still Wednesday in UTC (19:00): it counts for Thursday. 23:30 IST on Wednesday counts for Wednesday."""
+    wed = {x["id"]: x for x in report(env, **PERIODS[1][1])["taskInsight"]["workDone"]["perStaff"]}
+    thu = {x["id"]: x for x in report(env, **PERIODS[0][1])["taskInsight"]["workDone"]["perStaff"]}
+    assert wed["asha"]["completed"]["1"] == 1 and thu["asha"]["completed"]["1"] == 3   # c15 | c16 (00:30), c1, c2
+    drill = lambda day, **kw: get(env, "admin", "/drilldown", metric="done:1", staff="asha", page_size=100, **{"from": day, "to": day}, **kw).json()
+    assert sorted(r["name"] for r in drill("2026-11-04")["rows"]) == ["Candidate c15"]
+    assert sorted(r["name"] for r in drill("2026-11-05")["rows"]) == ["Candidate c1", "Candidate c16", "Candidate c2"]
+    # what is waiting NOW is another table: it does not change with the day chosen, and it is not the work done
+    now_wed = report(env, **PERIODS[1][1])["stages"]["totals"]
+    now_thu = report(env, **PERIODS[0][1])["stages"]["totals"]
+    assert now_wed == now_thu
+
+
+def test_every_work_done_cell_lists_exactly_the_records_it_counts(env):
+    """Click a number, get that many rows: per person and stage, per person, per stage and the grand total, for done and for stopped."""
+    for label, params in PERIODS:
+        body = report(env, **params)
+        work = body["taskInsight"]["workDone"]
+
+        def drill(metric_key, **extra):
+            return get(env, "admin", "/drilldown", metric=metric_key, page_size=100, **params, **extra).json()
+
+        for kind, field in (("done", "completed"), ("lost", "stopped")):
+            assert drill(f"{kind}:all")["total"] == len(drill(f"{kind}:all")["rows"]) == work["totals"]["total" if kind == "done" else "lost"], (label, kind)
+            for entry in work["perStaff"]:
+                mine = drill(f"{kind}:all", staff=entry["id"])
+                assert mine["total"] == len(mine["rows"]) == entry["total" if kind == "done" else "lost"], (label, kind, entry["id"])
+                assert {r["staffName"] for r in mine["rows"]} <= {entry["id"].title()}
+                for no in range(1, 14):
+                    cell = entry[field][str(no)]
+                    page = drill(f"{kind}:{no}", staff=entry["id"])
+                    assert page["total"] == len(page["rows"]) == cell, (label, kind, entry["id"], no)
+            for no in range(1, 14):
+                page = drill(f"{kind}:{no}")
+                assert page["total"] == len(page["rows"]) == work["totals"][field][str(no)], (label, kind, no)
+    page = get(env, "admin", "/drilldown", metric="done:2", page_size=100, **PERIODS[0][1]).json()
+    assert page["label"] == "Stages completed at stage 2: Forwarded to client"
+    assert all(r["kind"] == "candidate" and r["candidateId"] and r["detail"].startswith("Completed stage 2: ") and r["at"] for r in page["rows"])
+    stopped = get(env, "admin", "/drilldown", metric="lost:10", page_size=100, **PERIODS[0][1]).json()
+    assert stopped["label"].startswith("Stopped or lost at stage 10") and [r["name"] for r in stopped["rows"]] == ["Candidate c10"]
+    # the same client filter narrows the cards, the table and the lists alike
+    client_id = report(env, **PERIODS[0][1])["clients"][0]["id"]
+    narrowed = report(env, client=client_id, **PERIODS[0][1])
+    assert narrowed["taskInsight"]["workDone"]["totals"]["total"] == narrowed["taskInsight"]["completed"]["value"]
+    assert get(env, "admin", "/drilldown", metric="done:all", client=client_id, page_size=100, **PERIODS[0][1]).json()["total"] == narrowed["taskInsight"]["completed"]["value"]
+
+
+def test_work_done_lists_keep_a_recruiter_to_their_own_work_and_refuse_unknown_metrics(env):
+    get(env, "ravi", "/drilldown", metric="done:all", staff="asha", expect=403, **PERIODS[0][1])
+    own = get(env, "ravi", "/drilldown", metric="done:all", page_size=100, **PERIODS[0][1]).json()
+    assert own["total"] == len(own["rows"]) == report(env, "ravi", **PERIODS[0][1])["taskInsight"]["completed"]["value"] > 0
+    assert {r["staffName"] for r in own["rows"]} == {"Ravi"}
+    for bad in ("done:0", "done:14", "done:x", "lost:0", "lost:99", "done:", "lost"):
+        get(env, "admin", "/drilldown", metric=bad, expect=422, **PERIODS[0][1])
+
+
+def test_the_task_export_starts_with_the_work_done_sheet_that_matches_the_cards(env):
+    task = get(env, "admin", "/export/task", **PERIODS[0][1])
+    sheets, _ = lead_sheets_of(task.content)
+    done = sheets["Work done"]
+    assert done[0][0] == "Recruiter" and done[0][1] == "1. Prescreening" and done[0][-2:] == ["Stages completed", "Stopped or lost"]
+    totals = done[[(r[0] if r else "") for r in done].index("Total")]
+    insight = report(env, **PERIODS[0][1])["taskInsight"]
+    assert totals[-2] == insight["completed"]["value"] and totals[-1] == insight["stopped"]["value"]
+    assert [row[0] for row in sheets["Waiting now"][1:-1]] == [row[0] for row in done[1:len(sheets["Waiting now"]) - 1]]   # the same people, the same order

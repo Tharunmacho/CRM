@@ -1,4 +1,4 @@
-"""Daily CRM Work Report endpoints (the figures and their definitions live in app/services/daily_work_report.py).
+﻿"""Daily CRM Work Report endpoints (the figures and their definitions live in app/services/daily_work_report.py).
 
 CONTRACT (camelCase JSON). Dates are agency-time days `YYYY-MM-DD` (setting AGENCY_TIMEZONE, Asia/Kolkata). Include this router
 BEFORE the generic reports router: `/api/reports/{report}/export` would otherwise read "daily-work" as a report name.
@@ -48,7 +48,9 @@ previousUntil are null, period.partial false, period.allTime true), series by we
     newest first, one row per (person, date) with the latest snapshot; a recruiter reads only their own.
 
 (2) GET /api/reports/daily-work/drilldown?metric=<key>&from=&to=&staff=&client=&page=0&page_size=25   (page_size 1-100)
-    metric also accepts leadsAssigned, tasksDone, tasksPending, tasksOverdue and stage:<0-12> (candidates now at that stage).
+    metric also accepts leadsAssigned, tasksDone, tasksPending, tasksOverdue and stage:<0-12> (candidates now at that stage), and done:<1-13|all> / lost:<1-13|all>
+    (the stage records COMPLETED in the period, or the ones that ended the placement: the cells of the Task report's "Work done" table, newest first,
+    as many rows as the number clicked; report.taskInsight.workDone = {perStaff: [{id, completed, stopped, total, lost}], totals: {...}} has those numbers).
     {"metric","label","total","page","pageSize","rows": [{"at": ISO, "staffName", "kind": "candidate"|"lead", "candidateId"|null,
       "leadId"|null, "careId"|null, "name", "client"|null, "job"|null, "detail"}]}   newest first; never a phone/passport/ID number.
 
