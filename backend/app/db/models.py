@@ -1574,6 +1574,15 @@ class WhatsAppConversation(Base, PkMixin, TimestampMixin):
     )
 
 
+class WhatsAppIgnoredNumber(Base, PkMixin):
+    __tablename__ = "whatsapp_ignored_numbers"
+    phone_key: Mapped[str] = mapped_column(String(40), nullable=False, unique=True, comment="The number as the CRM compares numbers (normalize_phone): digits only, the agency's calling code dropped.")
+    label: Mapped[str] = mapped_column(String(200), nullable=False, server_default=text("''"), comment="Who this is or why it is ignored (staff, agent, client, spam ...).")
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    __table_args__ = {"comment": "WhatsApp numbers the CRM never works on: their files are kept as ignored (no reading, no candidate) and they get no automatic reply. An admin keeps the list."}
+
+
 class WhatsAppSendAttempt(Base, PkMixin, TimestampMixin):
     __tablename__ = "whatsapp_send_attempts"
     conversation_id: Mapped[str] = mapped_column(ForeignKey("whatsapp_conversations.id"), nullable=False, index=True)

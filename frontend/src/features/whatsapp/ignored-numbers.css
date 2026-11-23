@@ -1,0 +1,25 @@
+/* "Numbers to ignore" card of the WhatsApp Number settings tab: tokens only (light and dark), 44px controls on touch screens. */
+.wa-ignore { display: flex; flex-direction: column; gap: 14px; }
+.wa-ignore-intro, .wa-ignore-confirm { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+.wa-ignore-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: start; gap: 12px 14px; }
+.wa-ignore-form > .ui-button { margin-top: 22px; }   /* lines the button up with the inputs, under the field labels */
+.wa-ignore-state { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13.5px; color: var(--text-muted); }
+.wa-ignore-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 0; padding: 10px 12px; border: 1px solid var(--error-edge); border-radius: 10px; background: var(--error-fill); font-size: 13px; color: var(--error-ink); }
+.wa-ignore-list { display: grid; margin: 0; padding: 0; list-style: none; border: 1px solid var(--border-main); border-radius: 10px; overflow: hidden; }
+.wa-ignore-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 10px 14px; background: var(--bg-card); }
+.wa-ignore-list > li + li { border-top: 1px solid var(--border-main); }
+.wa-ignore-who { display: grid; gap: 2px; min-width: 0; }
+.wa-ignore-who strong { font-size: 14px; font-weight: 600; color: var(--text-main); }
+.wa-ignore-who span { overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.wa-ignore-when { font-size: 12.5px; white-space: nowrap; color: var(--text-muted); }
+@media (max-width: 760px) {
+  .wa-ignore-form { grid-template-columns: minmax(0, 1fr); }
+  .wa-ignore-form > .ui-button { margin-top: 0; width: 100%; }
+  .wa-ignore-list > li { grid-template-columns: minmax(0, 1fr) auto; }
+  .wa-ignore-when { grid-column: 1 / 2; grid-row: 2; }
+}
+@media (max-width: 1023px), (pointer: coarse) {
+  .wa-ignore .ui-input, .wa-ignore .ui-button { min-height: 44px; }
+  .wa-ignore .ui-input { font-size: 16px; }   /* no zoom on focus */
+  .wa-ignore-intro, .wa-ignore-confirm, .wa-ignore-who span, .wa-ignore-when { font-size: 14px; }
+}

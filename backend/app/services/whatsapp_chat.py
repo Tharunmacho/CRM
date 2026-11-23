@@ -300,13 +300,13 @@ def record_inbound_payload(db, payload, settings, *, at=None):
                 if not isinstance(message, dict): continue
                 try:
                     with db.begin_nested():
-                        _record_inbound_message(db, message, phone_id)
+                        _record_inbound_message(db, message, phone_id, at=at)
                 except Exception as exc:
                     if not is_data_error(exc): raise   # the savepoint is already rolled back; a transient failure is a 5xx so Meta redelivers
                     log.error("A WhatsApp message could not be added to its conversation (%s); the receipt is kept.", type(exc).__name__)
 
 
-def _record_inbound_message(db, message, phone_id):
+def _record_inbound_message(db, message, phone_id, *, at=None):
     row = db.scalar(select(WhatsAppMessage).options(load_only(WhatsAppMessage.id, WhatsAppMessage.sender_number,
         WhatsAppMessage.sender_name, WhatsAppMessage.created_at, WhatsAppMessage.received_at, WhatsAppMessage.body,
         WhatsAppMessage.file_name, WhatsAppMessage.message_type)).where(WhatsAppMessage.provider_message_id == clean_text(message.get("id", "")),
@@ -321,9 +321,12 @@ def _record_inbound_message(db, message, phone_id):
     incoming = insert(WhatsAppConversation).values(id=str(uuid4()), phone_number_id=phone_id,
         peer_number=number, display_name=row.sender_name, last_inbound_at=stamp,
         last_message_at=row.received_at, last_preview=(row.body or row.file_name or row.message_type)[:500])
-    db.execute(incoming.on_conflict_do_nothing(index_elements=["phone_number_id", "peer_number"]))
+    created = db.execute(incoming.on_conflict_do_nothing(index_elements=["phone_number_id", "peer_number"]).returning(WhatsAppConversation.id)).first() is not None
     conversation = db.scalar(select(WhatsAppConversation).where(WhatsAppConversation.phone_number_id == phone_id,
         WhatsAppConversation.peer_number == number).with_for_update())
+    # A redelivered payload carries a message the conversation has already recorded (its time is not newer than the last inbound one): it
+    # must not notify anyone a second time.
+    is_new = created or not conversation.last_inbound_at or stamp > conversation.last_inbound_at
     if not conversation.last_inbound_at or stamp > conversation.last_inbound_at:
         conversation.last_inbound_at = stamp
     if not conversation.last_message_at or row.received_at >= conversation.last_message_at:
@@ -338,6 +341,48 @@ def _record_inbound_message(db, message, phone_id):
                     conversation.candidate_id = match.id
                     _link_audit(db, conversation, match.id, "Linked automatically: the sender's number matches this candidate.")
         except Exception: pass
+    if is_new and conversation.candidate_id:
+        try:
+            with db.begin_nested():
+                notify_owner_of_reply(db, conversation, row, at=at)
+        except Exception as exc:
+            if not is_data_error(exc): raise
+            log.error("The owner could not be told about a WhatsApp reply (%s); the message itself is kept.", type(exc).__name__)
+
+
+# What a candidate's inbound message looks like in the owner's bell: text-like messages show their first words, files say what they are.
+# Reactions, locations, stickers and anything unknown are not worth a notification.
+REPLY_TEXT_TYPES = ("text", "button", "interactive")
+REPLY_FILE_WORDS = {"image": "a photo", "document": "a file", "audio": "a voice message", "video": "a video"}
+REPLY_SNIPPET = 80
+REPLY_NOTICE_EVERY = timedelta(hours=1)
+REPLY_KIND = "whatsapp_reply"
+
+
+def notify_owner_of_reply(db, conversation, message, *, at=None) -> bool:
+    """Tell the recruiter who owns a linked candidate that the candidate wrote on WhatsApp. At most one notice per candidate per hour (a chat
+    of ten quick messages is one bell entry); none when the candidate has no active owner, when the message is not a reply (reaction, location,
+    sticker, unknown) or when the chat is not linked. The phone number is never written into the notice. Returns whether one was created.
+    Runs in the caller's transaction; the change feed already publishes the `notifications` topic for the insert."""
+    from app.services.assignment_notifications import candidate_label
+    from app.db.models import Notification
+    at = at or utcnow()
+    kind = message.message_type or ""
+    text = " ".join((message.body or "").split())
+    if kind in REPLY_TEXT_TYPES and text: said = f"“{text[:REPLY_SNIPPET]}{'…' if len(text) > REPLY_SNIPPET else ''}”"
+    elif kind in REPLY_FILE_WORDS: said = f"Sent {REPLY_FILE_WORDS[kind]}."
+    else: return False
+    candidate = db.get(Candidate, conversation.candidate_id) if conversation.candidate_id else None
+    if candidate is None or not candidate.owner_id: return False
+    owner = db.get(User, candidate.owner_id)
+    if owner is None or not owner.active: return False
+    link = f"/candidates/{candidate.id}"
+    if db.scalar(select(Notification.id).where(Notification.user_id == owner.id, Notification.kind == REPLY_KIND,
+                                               Notification.link_to == link, Notification.created_at >= at - REPLY_NOTICE_EVERY).limit(1)):
+        return False
+    label = candidate_label(candidate.name, getattr(candidate, "care_id", None), getattr(candidate, "ref", None))
+    db.add(Notification(user_id=owner.id, kind=REPLY_KIND, title=f"{label} replied on WhatsApp"[:200], detail=said, link_to=link))
+    return True
 
 
 def _fingerprint(conversation_id, kind, body, template, content_hash, filename, content_type, source_id):

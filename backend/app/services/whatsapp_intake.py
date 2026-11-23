@@ -17,6 +17,7 @@ from app.services.candidate_identity import enrich_empty, identity_matches, norm
 from app.services.document_extraction import extract_candidate_attachment as extract_attachment, ExtractionPending, request_extraction_retry
 from app.services import intake_documents
 from app.services.document_storage import put_bytes, read_bytes
+from app.services.whatsapp_ignore import IGNORED_REASON, ignored_keys, is_ignored, key_of
 from app.services.whatsapp_chat import clean_text, is_data_error, number_holders, payload_dict, payload_list, peer_number, sender_candidate_ids
 
 log = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def message_body(message, kind, media):
     return clean_text(body, 65000)
 
 
-def _store_message(db, channel, phone_id, message, contacts):
+def _store_message(db, channel, phone_id, message, contacts, ignored=frozenset()):
     """Insert one provider message; returns 1 when it is new, 0 when it was skipped or already received."""
     provider_id, sender = clean_text(message.get("id", "")), clean_text(message.get("from", ""))
     if not provider_id or len(provider_id) > 255 or not sender or len(sender) > 40:
@@ -80,6 +81,10 @@ def _store_message(db, channel, phone_id, message, contacts):
     received = _timestamp(message.get("timestamp", utcnow().timestamp()))
     has_media = bool(media.get("id"))
     state = "pending" if has_media and kind in {"document", "image"} and channel.auto_ingest and channel.enabled else "received" if has_media else "ignored"
+    # A sender on the admin's ignore list is kept (visible, auditable) but never read and never becomes a candidate.
+    on_list = bool(ignored) and key_of(sender) in ignored
+    if on_list:
+        state = "ignored"
     default_name = {"image": "image.jpg", "audio": "audio.ogg", "video": "video.mp4", "sticker": "sticker.webp"}.get(kind, "document")
     row_id = db.scalar(insert(WhatsAppMessage).values(
         provider_message_id=provider_id, phone_number_id=phone_id, sender_number=sender, sender_name=contacts.get(sender) or None,
@@ -87,7 +92,7 @@ def _store_message(db, channel, phone_id, message, contacts):
         media_id=clean_text(media["id"], 100) if has_media else None,
         file_name=clean_text(media.get("filename") or default_name, 255) if has_media else None,
         content_type=clean_text(media.get("mime_type") or "", 120) if has_media else None,
-        received_at=received, status=state,
+        received_at=received, status=state, last_error=IGNORED_REASON if on_list else None,
     ).on_conflict_do_nothing(index_elements=["provider_message_id"]).returning(WhatsAppMessage.id))
     return int(bool(row_id))
 
@@ -120,10 +125,11 @@ def receive_payload(db, payload, settings):
             for contact in payload_list(value.get("contacts")):
                 if isinstance(contact, dict):
                     contacts[clean_text(contact.get("wa_id"))] = clean_text(payload_dict(contact.get("profile")).get("name", ""), 200)
+            ignored = ignored_keys(db)
             for message in messages:
                 try:
                     with db.begin_nested():
-                        count += _store_message(db, channel, phone_id, message, contacts)
+                        count += _store_message(db, channel, phone_id, message, contacts, **({"ignored": ignored} if ignored else {}))
                 except Exception as exc:
                     if not is_data_error(exc): raise   # the savepoint is already rolled back; a transient failure is a 5xx so Meta redelivers
                     log.error("A WhatsApp message could not be stored (%s); it was skipped and the rest of the delivery kept.", type(exc).__name__)
@@ -265,6 +271,10 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             return
         message = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update().execution_options(populate_existing=True))
         if not message or message.status not in {"pending", "processing", "retry"}:
+            return
+        if is_ignored(db, message.sender_number):   # added to the ignore list after the file arrived: it is not read
+            message.status, message.last_error = "ignored", IGNORED_REASON
+            db.commit()
             return
         message.status = "processing"
         state, key, media_id = deepcopy(message.processing_state or {}), message.object_key, message.media_id

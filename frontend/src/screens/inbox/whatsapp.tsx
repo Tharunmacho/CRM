@@ -18,6 +18,7 @@ import { WhatsAppChat } from '@/features/whatsapp/whatsapp-chat'
 import { conversationFromSearch } from '@/features/whatsapp/chat-types'
 import { CandidateChip, FileIcon } from '@/features/inbox/mail-parts'
 import { IntakeAcknowledgements } from '@/features/intake/intake-acknowledgements'
+import { IgnoredNumbers } from '@/features/whatsapp/ignored-numbers'
 import { DocumentBundleReview } from '@/features/candidates/components/document-bundle-review'
 import { idLine } from '@/features/candidates/candidate-ids'
 import { isAdminLevel } from '@/shared/model/role-labels'
@@ -140,6 +141,7 @@ export default function WhatsAppPage() {
       {channel.lastError && <p className="wa-channel-error">{channel.lastError}</p>}
       <IntakeAcknowledgements sourceKind="whatsapp" channelId={channel.id} channelLabel={channel.displayNumber || channel.id} canManage={admin} />
     </Panel>)}</div>}
+    {view === 'settings' && admin && <IgnoredNumbers />}
     {view === 'intake' && <Panel flush className="wa-intake tb-blue ops-fit ops-whatsapp"><PanelHeader title="Incoming candidate documents" meta={data ? `${data.total} messages found` : 'Messages for the chosen filters'} />
       <div className="wa-toolbar"><SearchInput placeholder="Search sender or message" value={query} onChange={(value) => { setQuery(value); setPage(1) }} /><Select aria-label="Processing status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }}><option value="">All statuses</option>{STATUSES.map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</Select></div>
       {!data ? <p className="wa-loading" role="status">Loading messages…</p> : <>

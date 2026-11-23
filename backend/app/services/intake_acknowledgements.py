@@ -116,6 +116,9 @@ WHATSAPP_ACK_INTERVAL = timedelta(hours=24)
 def whatsapp_suppression(db, channel_id, recipient, *, now=None):
     """Why an automatic WhatsApp reply must not go to this sender, or None. Staff are never thanked for their own test files, and nobody gets
     the same reply twice in a day. Numbers are compared the way the rest of the CRM compares them (the home calling code is optional)."""
+    from app.services.whatsapp_ignore import IGNORED_ACK_REASON, is_ignored
+    if is_ignored(db, recipient):
+        return IGNORED_ACK_REASON
     sender = normalize_phone(recipient)
     if sender:
         for phone in db.scalars(select(User.phone).where(User.phone.is_not(None))):

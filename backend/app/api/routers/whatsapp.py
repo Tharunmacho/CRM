@@ -8,17 +8,19 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
 from starlette.concurrency import run_in_threadpool
 
 from app.api.routers.candidates import lock_assignment_cursor
 from app.core.config import get_settings
 from app.core.deps import current_user, require_role, require_admin_level
-from app.db.models import AuditEntry, Candidate, Role, User, WhatsAppChannel, WhatsAppMessage
+from app.db.models import AuditEntry, Candidate, Role, User, WhatsAppChannel, WhatsAppIgnoredNumber, WhatsAppMessage
 from app.db.session import get_db
 from app.integrations.whatsapp import missing_settings, verify_signature
 from app.services.document_extraction import request_extraction_retry
 from app.services.document_storage import file_response
+from app.services.whatsapp_ignore import key_of
 from app.services.whatsapp_intake import attach_original, receive_payload
 from app.services.whatsapp_chat import record_inbound_payload, reconcile_payload
 from app.services.parallel_reads import parallel_reads
@@ -247,3 +249,55 @@ def resolve(message_id: str, body: ResolveIn, db: Session = Depends(get_db), use
                       target=candidate.name, meta={"messageId": row.id, "reason": body.reason}))
     db.commit()
     return {"candidateId": candidate.id}
+
+
+# ------------------------------------------------------------------------------------------------ numbers to ignore (admin)
+
+class IgnoredIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    number: str = Field(min_length=1, max_length=40)
+    label: str = Field(default="", max_length=200)
+
+
+def _ignored_json(row: WhatsAppIgnoredNumber) -> dict:
+    return {"id": row.id, "number": row.phone_key, "label": row.label, "createdAt": row.created_at}
+
+
+@router.get("/ignored-numbers")
+def list_ignored_numbers(db: Session = Depends(get_db), user: User = Depends(admin)):
+    """The numbers this CRM never works on (admin only). `number` is the comparison key: digits, the agency's calling code left off."""
+    rows = db.scalars(select(WhatsAppIgnoredNumber).order_by(WhatsAppIgnoredNumber.created_at.desc(), WhatsAppIgnoredNumber.id)).all()
+    return {"items": [_ignored_json(row) for row in rows]}
+
+
+@router.post("/ignored-numbers", status_code=201)
+def add_ignored_number(body: IgnoredIn, db: Session = Depends(get_db), user: User = Depends(admin)):
+    key = key_of(body.number)
+    if not key:
+        raise HTTPException(422, "Enter a valid phone number: 7 to 15 digits, with the country code for a number outside the agency's own country.")
+    if db.scalar(select(WhatsAppIgnoredNumber.id).where(WhatsAppIgnoredNumber.phone_key == key)):
+        raise HTTPException(409, "This number is already on the list.")
+    row = WhatsAppIgnoredNumber(phone_key=key, label=body.label, created_by=user.id)
+    try:
+        with db.begin_nested():
+            db.add(row)
+            db.flush()
+    except IntegrityError:   # two admins adding the same number at once
+        raise HTTPException(409, "This number is already on the list.") from None
+    db.add(AuditEntry(actor_id=user.id, action="Added a WhatsApp number to the ignore list", entity_type="whatsapp_ignored_number",
+                      entity_id=row.id, target=key, meta={"label": body.label}))
+    db.commit()
+    db.refresh(row)
+    return _ignored_json(row)
+
+
+@router.delete("/ignored-numbers/{ignored_id}")
+def remove_ignored_number(ignored_id: str, db: Session = Depends(get_db), user: User = Depends(admin)):
+    row = db.get(WhatsAppIgnoredNumber, ignored_id)
+    if row is None:
+        raise HTTPException(404, "This number is not on the list.")
+    db.add(AuditEntry(actor_id=user.id, action="Removed a WhatsApp number from the ignore list", entity_type="whatsapp_ignored_number",
+                      entity_id=row.id, target=row.phone_key, meta={"label": row.label}))
+    db.delete(row)
+    db.commit()
+    return {"ok": True}

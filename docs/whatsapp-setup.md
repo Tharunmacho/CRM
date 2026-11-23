@@ -193,6 +193,21 @@ The CRM shows the plain-language version of these codes in the message history, 
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | Not needed to start the worker. Without it, templates cannot be synced or sent and the CRM says so. |
 | `WHATSAPP_GRAPH_VERSION` | An empty value means the default `v24.0`. |
 
+## 6b. Numbers to ignore (staff, agents, clients, spam)
+
+Staff, agents, clients and spammers share the business number with candidates, and every image or PDF a number sends is read as a possible CV. An administrator (Admin or MD) can list numbers the CRM must never work on: **WhatsApp > Number settings > Numbers to ignore**.
+
+| Behaviour | Detail |
+| --- | --- |
+| A file from a listed number | Kept as a receipt with the status **Skipped** and the note "Sender is on the ignore list". It is never downloaded for reading and never becomes a candidate. |
+| A file that arrived before the number was added | The background reader skips it too (it is marked Skipped when it reaches it). |
+| Automatic replies | A listed number is never acknowledged. |
+| Writing to them yourself | Still possible from the chat: the list only governs what arrives. |
+| Number formats | `+91 98765 43210`, `919876543210`, `09876543210` and `9876543210` are the same number. A number from another country keeps its country code and is never mixed up with an Indian one. |
+| Removing a number | Future files are read again. Files already skipped stay skipped (use **Link** or **Try again** on the message if one is wanted). |
+
+The list needs migration `0059_whatsapp_ignored_numbers` (see `docs/operations.md`). Every addition and removal is recorded in the audit log.
+
 ## 7. Safety notes
 
 - **Tokens and secrets** (`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`) belong only in the server environment. Never in git, screenshots, chat or email, and never in this documentation. The `.env.example` files hold blanks only.
