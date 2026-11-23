@@ -183,8 +183,8 @@ export function buildRow(person: StaffAttendance, policy: PolicyDay | null, day:
   const pill = PILLS[kind]
   const specific = policy && kind !== 'late' && kind !== 'early' ? CODE_LABEL[policy.status] : undefined
   const idleDay = kind === 'off' || kind === 'holiday'
-  // Signed in and using the CRM right now (a live heartbeat), but no check-in: attendance only starts with Check in, so the status stays "pending",
-  // but the board says what is true instead of a flat "Not clocked in yet".
+  // Using the CRM right now (a live heartbeat) but no session today: signing in starts attendance, so this is rare (a role without attendance, or a
+  // session not yet read), and the board says what is true instead of a flat "Not clocked in yet".
   // An "online" reading is only as fresh as its last heartbeat: past the server's 90-second rule it is no longer online, even if the page has not
   // asked again yet (the board is asked again every few seconds and ticks this clock in between).
   const seenAt = person.presence?.lastSeenAt ? new Date(person.presence.lastSeenAt).getTime() : NaN

@@ -50,7 +50,7 @@ export function AttendanceClock({ targetMinutes }: { targetMinutes?: number }) {
     </div>
     <div className="att-clock-foot">
       {own?.attendance.checkedInAt && <p>Current session started {stamp(own.attendance.checkedInAt, zone)}{agencyTimezone ? ` (${agencyTimezone})` : ''}.</p>}
-      <p>Check out when your shift ends. Closing the browser or signing out does not check you out.</p>
+      <p>Signing in starts your day and signing out ends it. If this page sends nothing for 30 minutes you are checked out at your last activity. You can also use Check in and Check out yourself.</p>
       {loading && <p role="status">Loading your attendance…</p>}
       {error && <div role="alert" className="att-clock-error"><span>{error}</span><Button size="sm" disabled={busy} onClick={() => void refresh()}>Refresh attendance</Button></div>}
       {me.role === 'staff' && presenceError && <p role="status" className="att-clock-warn">CRM use could not be updated just now. {presenceError} Your check-in and check-out are saved anyway.</p>}

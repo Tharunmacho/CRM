@@ -8,6 +8,9 @@ export interface AttendanceSession {
   unclosed?: boolean
   correctionReason?: string | null
   correctedBy?: string | null
+  /** Who opened / closed the session: 'login', 'heartbeat' (already signed in), 'manual' (a button press); closed by 'logout', 'inactivity' (30 minutes of silence), 'missed' (a manager's forgotten session) or 'manual'. */
+  checkInSource?: 'login' | 'heartbeat' | 'manual' | null
+  checkOutSource?: 'logout' | 'inactivity' | 'missed' | 'manual' | null
 }
 export interface PresenceSummary {
   status: PresenceStatus

@@ -4,8 +4,11 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select
+from uuid import uuid4
+
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 
 from app.services.parallel_reads import parallel_reads
 from app.db.models import (AuditEntry, Role, Session as LoginSession, not_deleted_user,
@@ -18,6 +21,27 @@ from app.core.roles import is_admin_level
 HEARTBEAT_SECONDS = 30
 OFFLINE_AFTER_SECONDS = 90
 IDLE_AFTER_SECONDS = 300
+# A recruiter whose browser has sent no heartbeat for this long has gone: the open session is closed at their last heartbeat.
+ABANDONED_AFTER_SECONDS = 30 * 60
+# After the sweep closed a session for silence (a tab hidden for 30 minutes, a laptop asleep), the page coming back starts a NEW session, so the
+# rest of the day is counted. A deliberate check-out or sign-out is never undone by a heartbeat. False = the strict rule: a heartbeat
+# starts a session only when the person has no session at all today.
+RESTART_AFTER_INACTIVITY = True
+# The roles that have attendance (the same two the Check in button accepts). Administrators have none.
+TRACKED_ROLES = (Role.staff, Role.manager)
+# Where a session came from / went to is kept in the request key (no schema change): a manual press carries a browser uuid.
+LOGIN_KEY, HEARTBEAT_KEY, LOGOUT_KEY, SWEEP_KEY, MISSED_KEY = "login:", "auto:", "logout:", "sweep:", "missed:"
+KEY_SOURCES = ((LOGIN_KEY, "login"), (HEARTBEAT_KEY, "heartbeat"), (LOGOUT_KEY, "logout"), (SWEEP_KEY, "inactivity"), (MISSED_KEY, "missed"))
+
+
+def key_source(key):
+    """'login', 'heartbeat', 'logout', 'inactivity' or 'missed' for a session the system opened or closed itself, 'manual' for a button press."""
+    if not key:
+        return None
+    for prefix, name in KEY_SOURCES:
+        if key.startswith(prefix):
+            return name
+    return "manual"
 
 
 def utcnow():
@@ -128,7 +152,8 @@ def staff_summary(user, attendance, presence, start, end, at):
             "sessions": [{"id": row.id, "checkedInAt": row.checked_in_at, "checkedOutAt": row.checked_out_at,
                 "durationSeconds": seconds([(max(start, row.checked_in_at), min(cutoff, stop(row)))]) if stop(row) is not None else 0,
                 # True for a shift that was never checked out and whose day is over (a missed check-out): it has no hours.
-                "unclosed": row.checked_out_at is None and finished,
+                "unclosed": (row.checked_out_at is None and finished) or (row.checkout_request_key or "").startswith(MISSED_KEY),
+                "checkInSource": key_source(row.checkin_request_key), "checkOutSource": key_source(row.checkout_request_key),
                 "correctionReason": row.correction_reason, "correctedBy": row.corrected_by}
                 for row in sorted(attendance, key=lambda item: item.checked_in_at) if row.checked_in_at < end and (row.checked_out_at or at) >= start]},
         "presence": {"status": state, "tracked": tracked,
@@ -219,6 +244,108 @@ def check_out(db, user, session_id, request_key, *, auth_session_id, at=None):
     return _remember_request(db, user, "check_out", request_key, row, at)
 
 
+# ----------------------------------------------------------------------------------------------- sign-in counts as attendance
+# A sign-in (and, for people already signed in, the first page load of the day) starts the day's attendance, a sign-out ends it, and a
+# browser that went silent for ABANDONED_AFTER_SECONDS is closed at its last heartbeat. The Check in / Check out buttons stay as a manual
+# override. Everything here uses the same table, the same one-open-session index and the same audit as the buttons; the request key says
+# who opened or closed the row (LOGIN_KEY / HEARTBEAT_KEY / LOGOUT_KEY / SWEEP_KEY / MISSED_KEY), so no schema change is needed.
+
+def _agency_day_start(at):
+    from app.core.config import get_settings
+    zone = get_settings().agency_timezone
+    return bounds(at.astimezone(ZoneInfo(zone)).date(), zone)[0]
+
+
+def _last_activity(db, row):
+    """The last moment this open session was seen: the newest heartbeat of the person since check-in, else the check-in itself."""
+    seen = db.scalar(select(func.max(Presence.last_seen_at)).where(Presence.user_id == row.user_id, Presence.last_seen_at >= row.checked_in_at))
+    return max(row.checked_in_at, seen) if seen is not None else row.checked_in_at
+
+
+def _close_automatically(db, row, when, key, source, *, actor_id=None, action="Attendance closed automatically", **meta):
+    row.checked_out_at, row.checkout_request_key = max(when, row.checked_in_at), key
+    db.add(AuditEntry(actor_id=actor_id, action=action, entity_type="attendance", entity_id=row.id,
+                      meta={"checkedOutAt": row.checked_out_at.isoformat(), "source": source, **meta}))
+    db.flush()
+
+
+def start_session(db, user, source, *, key=None, at=None):
+    """Make sure an attendance session is open for this person; return it, or None when their role has no attendance.
+
+    Idempotent: a second sign-in, a second tab or a second heartbeat finds the open session instead of starting another (the partial unique
+    index allows only one open row per person). An open session that was abandoned is closed first, so the new one starts clean:
+    a recruiter's at their last heartbeat; a manager has no heartbeat, so an open session from before today is closed at its own start
+    (no hours, flagged as a missed check-out) instead of being given invented hours. `source='heartbeat'` (already signed in when this
+    was deployed, or the cookie outlived the day, or the tab was hidden past the 30-minute limit) starts a session when the person has no
+    session today, or the last one was closed for silence; it never restarts the day after a check-out or a sign-out."""
+    at = at or utcnow()
+    if not user.active or user.role not in TRACKED_ROLES:
+        return None
+    db.scalar(select(User.id).where(User.id == user.id).with_for_update())
+    day_start = _agency_day_start(at)
+    row = db.scalar(select(Attendance).where(Attendance.user_id == user.id, Attendance.checked_out_at.is_(None)).with_for_update())
+    if row is not None:
+        if user.role == Role.staff:
+            last = _last_activity(db, row)
+            stale, close_at, close_key, why = last <= at - timedelta(seconds=ABANDONED_AFTER_SECONDS), last, SWEEP_KEY + row.id, "inactivity"
+        else:
+            stale, close_at, close_key, why = row.checked_in_at < day_start, row.checked_in_at, MISSED_KEY + row.id, "missed"
+        if not stale:
+            return row
+        _close_automatically(db, row, close_at, close_key, why)
+    if source == "heartbeat":
+        latest = db.scalar(select(Attendance).where(
+            Attendance.user_id == user.id,
+            or_(Attendance.checked_in_at >= day_start, Attendance.checked_out_at >= day_start)).order_by(Attendance.checked_in_at.desc()).limit(1))
+        if latest is not None:
+            closed_for_silence = (latest.checkout_request_key or "").startswith((SWEEP_KEY, MISSED_KEY))
+            if not (RESTART_AFTER_INACTIVITY and closed_for_silence):
+                return None
+    key = (key or ((LOGIN_KEY if source == "login" else HEARTBEAT_KEY) + uuid4().hex))[:64]
+    created = Attendance(user_id=user.id, checked_in_at=at, checkin_request_key=key)
+    try:
+        with db.begin_nested():
+            db.add(created)
+            db.flush()
+    except IntegrityError:
+        return db.scalar(select(Attendance).where(Attendance.user_id == user.id, Attendance.checked_out_at.is_(None)))
+    db.add(AuditEntry(actor_id=user.id, action="Recruiter checked in", entity_type="attendance", entity_id=created.id,
+                      meta={"checkedInAt": at.isoformat(), "source": source}))
+    _remember_request(db, user, "check_in", key, created, at)
+    return created
+
+
+def close_abandoned_sessions(db, *, at=None):
+    """The presence worker's sweep: close every recruiter's open session whose browser has sent nothing for ABANDONED_AFTER_SECONDS, at the
+    last heartbeat (their hours stay honest and 'Missed check-outs' keeps only what really could not be closed). Managers have no heartbeat,
+    so they are never swept here; theirs is closed at the next sign-in (see start_session) or by the person."""
+    at = at or utcnow()
+    seen = (select(func.max(Presence.last_seen_at)).where(Presence.user_id == Attendance.user_id, Presence.last_seen_at >= Attendance.checked_in_at)
+            .correlate(Attendance).scalar_subquery())
+    last = func.greatest(Attendance.checked_in_at, func.coalesce(seen, Attendance.checked_in_at))
+    rows = db.execute(select(Attendance, last).join(User, User.id == Attendance.user_id)
+                      .where(Attendance.checked_out_at.is_(None), User.role == Role.staff,
+                             last <= at - timedelta(seconds=ABANDONED_AFTER_SECONDS))
+                      .order_by(Attendance.id).with_for_update(of=Attendance, skip_locked=True)).all()
+    for row, stopped in rows:
+        _close_automatically(db, row, stopped, SWEEP_KEY + row.id, "inactivity")
+    return len(rows)
+
+
+def _close_on_logout(db, login, at):
+    user = db.get(User, login.user_id)
+    if user is None or user.role not in TRACKED_ROLES:
+        return
+    # Still working in another browser (a page that sent a heartbeat in the last 90 s under a different login): the day goes on.
+    elsewhere = db.scalar(select(Presence.id).where(Presence.user_id == login.user_id, Presence.ended_at.is_(None), Presence.auth_session_id != login.id,
+                                                    Presence.last_seen_at > at - timedelta(seconds=OFFLINE_AFTER_SECONDS)).limit(1))
+    if elsewhere is not None:
+        return
+    row = db.scalar(select(Attendance).where(Attendance.user_id == login.user_id, Attendance.checked_out_at.is_(None)).with_for_update())
+    if row is not None:
+        _close_automatically(db, row, at, LOGOUT_KEY + login.id, "logout", actor_id=login.user_id, action="Recruiter checked out")
+
+
 def heartbeat(db, user, client_id, auth_session_id, visible, interaction_age_seconds, *, sequence, at=None):
     at = lock_staff_login(db, user, auth_session_id, at=at)
     client = db.get(PresenceClient, (user.id, client_id))
@@ -242,6 +369,9 @@ def heartbeat(db, user, client_id, auth_session_id, visible, interaction_age_sec
         db.flush(); row = None
     if visible:
         if row is None:
+            # A page appearing (or coming back after 90 s of silence) is the moment to make sure the day's attendance exists: this covers
+            # people who were already signed in. It must run BEFORE this page's presence row exists, or the new row would look like activity.
+            start_session(db, user, "heartbeat", at=at)
             row = Presence(user_id=user.id, client_id=client_id, auth_session_id=auth_session_id,
                            state=wanted, started_at=at, last_seen_at=at)
             db.add(row)
@@ -272,9 +402,13 @@ def close_login_presence(db, session_id, *, at=None):
     return login
 
 
-def logout_session(db, session_id, *, at=None):
+def logout_session(db, session_id, *, at=None, close_attendance=False):
+    """Remove a login and end its presence. Only an explicit sign-out (`close_attendance=True`, routers/auth.py) also ends the day's attendance:
+    cleaning up an EXPIRED login found later (core/deps.py) must never check out someone who is working in another browser right now."""
     login = close_login_presence(db, session_id, at=at)
     if login is not None:
+        if close_attendance:
+            _close_on_logout(db, login, at or utcnow())
         db.delete(login)
 
 

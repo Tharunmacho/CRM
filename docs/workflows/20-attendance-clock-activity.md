@@ -18,12 +18,12 @@ The account must be active and signed in. The matching application/database must
 
 1. Open **Attendance** from the sidebar or the clock shortcut in the top bar. Recruiter sees **My attendance**; Manager can switch between the team and their own record.
 2. Wait for **Your attendance today** to load. The current badge says **Checked out** or **Checked in**. A loading/error state must not be mistaken for a confirmed clock state.
-3. Select **Check in**. While the request saves, the button is disabled. The server records its current time and returns the active session; the screen shows the check-in time and today's checked-in duration.
+3. **Signing in has already started today's session** (the badge reads **Checked in**, with the sign-in time as the check-in time). **Check in** is only a manual override: if a session is open it simply shows it. If you were signed out, were away for more than 30 minutes, or checked out, select **Check in** (or sign in again) to start a new one. While a request saves, the button is disabled; the server records its current time.
 4. Use the CRM normally. Navigating between screens does not start another shift. Multiple tabs share the employee's single open attendance session.
 5. At the end of the shift, select **Check out**. The request identifies the exact session being closed. Confirm the badge changes to **Checked out** and inspect the recorded time in **Sessions & activity**.
 6. A later deliberate **Check in** can start another session. Daily attendance sums each session's overlap with the selected date; time between sessions is excluded.
 
-Closing the browser, locking the device, losing the connection or signing out does **not** check the employee out. The employee must explicitly finish the session, or Admin must make a reasoned correction. No login, page refresh or recovered request automatically creates a new attendance action.
+**Signing out checks the employee out** at that moment (unless they are still active in another browser). Closing the browser, locking the device or losing the connection does not check out at once, but after 30 minutes without a heartbeat the system closes a Recruiter's session at the **last heartbeat** (never at "now", so hours stay honest); a Manager, who sends no heartbeat, is checked out by signing out or pressing **Check out**. Admin can still make a reasoned correction. A sign-in (or the first page of the day for someone already signed in) starts the session automatically; a page refresh or a recovered request never creates another one, and a heartbeat never undoes a deliberate check-out or sign-out. See `docs/attendance.md`, "Sign-in counts as attendance".
 
 ## Review the duration and history journey
 

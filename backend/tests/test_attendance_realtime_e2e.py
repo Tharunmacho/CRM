@@ -116,21 +116,23 @@ def world(workspace, monkeypatch):
 def test_every_step_is_visible_in_the_very_next_read_and_online_expires_with_the_heartbeat(world):
     page = str(uuid4())
     world.move(at(D21, 10, 0))
-    # signing in and using the CRM is not attendance: nothing exists until the person checks in
+    # signing in (or, for someone already signed in, the first page of the day) IS attendance: the first heartbeat starts today's session
     world.pulse("owner", page, 1)
     with world.workspace() as db:
-        assert db.scalar(select(func.count()).select_from(Attendance)) == 0
+        assert db.scalar(select(func.count()).select_from(Attendance)) == 1
     row = world.board(D21)
-    assert row["attendance"]["status"] == "checked_out" and row["attendance"]["sessions"] == []
+    assert row["attendance"]["status"] == "checked_in" and len(row["attendance"]["sessions"]) == 1
+    assert row["attendance"]["sessions"][0]["checkInSource"] == "heartbeat"
     assert row["presence"]["status"] == "online" and row["attendance"]["totalSeconds"] == 0
+    session_id = row["attendance"]["sessionId"]
 
-    # check in: the next board read shows it, with the hours running to "now"
+    # pressing Check in now returns that same open session (the button is a manual override), and the hours run from the first punch to "now"
     world.move(at(D21, 10, 0, 10))
-    session_id = world.check_in("owner")
+    assert world.check_in("owner") == session_id
     world.move(at(D21, 10, 0, 40))
     row = world.board(D21)
     assert row["attendance"]["status"] == "checked_in" and row["attendance"]["sessionId"] == session_id
-    assert row["attendance"]["totalSeconds"] == 30 and row["attendance"]["sessions"][0]["unclosed"] is False
+    assert row["attendance"]["totalSeconds"] == 40 and row["attendance"]["sessions"][0]["unclosed"] is False
     assert row["presence"]["status"] == "online"
 
     # the page stops sending heartbeats: 90 seconds later it is no longer online, while the person is still checked in
@@ -146,7 +148,7 @@ def test_every_step_is_visible_in_the_very_next_read_and_online_expires_with_the
     world.move(at(D21, 12, 0, 10))
     world.check_out("owner", session_id)
     row = world.board(D21)
-    assert row["attendance"]["status"] == "checked_out" and row["attendance"]["totalSeconds"] == 2 * 3600
+    assert row["attendance"]["status"] == "checked_out" and row["attendance"]["totalSeconds"] == 2 * 3600 + 10   # 10:00:00 (first heartbeat) to 12:00:10
     day = world.month()[D21.isoformat()]
     assert day["checkIn"] is not None and day["checkOut"] is not None
     assert day["checkIn"][:16] == row["attendance"]["sessions"][0]["checkedInAt"][:16]

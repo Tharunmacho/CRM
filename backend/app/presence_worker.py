@@ -3,7 +3,7 @@ import logging
 import signal
 import threading
 from app.db.session import SessionLocal
-from app.services.staff_activity import close_stale_presence
+from app.services.staff_activity import close_abandoned_sessions, close_stale_presence
 from app.services.attendance_hr import run_cover_sweep
 
 # Each sweep is ~9 statements; against a hosted database a minute is plenty (offline is computed from last_seen_at,
@@ -20,6 +20,10 @@ def main():
         try:
             with SessionLocal() as db:
                 close_stale_presence(db)
+                db.commit()
+            # Own transaction too: a recruiter whose browser went silent for 30 minutes is checked out at their last heartbeat.
+            with SessionLocal() as db:
+                close_abandoned_sessions(db)
                 db.commit()
             # Own transaction: cover failures cannot roll back presence expiry.
             # The cursor lock and durable ledger make parallel workers safe.

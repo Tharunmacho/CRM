@@ -86,10 +86,12 @@ def test_presence_timeout_creates_new_interval_without_counting_disconnection(wo
         user=db.get(User,'owner')
         activity.check_in(db,user,'longgap',auth_session_id='login-owner',at=START)
         activity.heartbeat(db,user,'tab','login-owner',True,0,sequence=1,at=START);db.commit()
-        activity.heartbeat(db,user,'tab','login-owner',True,0,sequence=2,at=START+timedelta(hours=1));db.commit()
-        result=activity.attendance_report(db,user,date(2026,10,21),'Asia/Kolkata',at=START+timedelta(hours=1,seconds=10))['staff'][0]
+        # a 20-minute gap: longer than the 90 s offline limit (a new presence interval) but shorter than the 30-minute abandonment limit, so the
+        # shift stays open; a longer gap closes it at the last heartbeat (see test_attendance_login_counts.py)
+        activity.heartbeat(db,user,'tab','login-owner',True,0,sequence=2,at=START+timedelta(minutes=20));db.commit()
+        result=activity.attendance_report(db,user,date(2026,10,21),'Asia/Kolkata',at=START+timedelta(minutes=20,seconds=10))['staff'][0]
         assert result['presence']['activeSeconds']==100
-        assert result['presence']['offlineSeconds']==3510
+        assert result['presence']['offlineSeconds']==1110
         assert db.scalar(select(func.count()).select_from(Presence))==2
 
 
@@ -321,7 +323,7 @@ def test_logout_waits_for_inflight_heartbeat_then_closes_it(workspace):
     def logout():
         with workspace() as db:
             ready.set()
-            activity.logout_session(db, 'login-owner', at=START + timedelta(seconds=1))
+            activity.logout_session(db, 'login-owner', at=START + timedelta(seconds=1), close_attendance=True)
             db.commit()
     with workspace() as db, ThreadPoolExecutor(max_workers=1) as pool:
         user = db.get(User, 'owner')
@@ -334,7 +336,8 @@ def test_logout_waits_for_inflight_heartbeat_then_closes_it(workspace):
         db.expire_all()
         assert db.get(LoginSession, 'login-owner') is None
         assert db.scalar(select(Presence)).ended_at == START + timedelta(seconds=1)
-        assert db.scalar(select(Attendance)).checked_out_at is None
+        # signing out ends the day's attendance at the sign-out time (the owner's rule: signing in counts, signing out ends it)
+        assert db.scalar(select(Attendance)).checked_out_at == START + timedelta(seconds=1)
         assert db.scalar(select(PresenceClient)).auth_session_id is None
 
 

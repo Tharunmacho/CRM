@@ -5,6 +5,7 @@ Sessions are rows, not JWTs, so an admin's "force logout" can actually revoke on
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
@@ -120,6 +121,16 @@ def login(body: LoginIn, response: Response, db: DbSession = Depends(get_db)) ->
 
     row = SessionRow(user_id=user.id, expires_at=session_expiry())
     db.add(row)
+    if user.role in (Role.staff, Role.manager):
+        # Signing in counts as attendance (docs/attendance.md): today's session starts in this same transaction, idempotently (a second
+        # sign-in finds the open one). Best effort: an attendance problem must never stop anyone signing in.
+        db.flush()  # the sign-in row is written outside the savepoint, so a failed attendance step can never take it with it
+        try:
+            with db.begin_nested():
+                from app.services.staff_activity import LOGIN_KEY, start_session
+                start_session(db, user, "login", key=LOGIN_KEY + row.id)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Attendance was not started at sign-in (%s)", type(exc).__name__)
     db.commit()
 
     response.set_cookie(
@@ -152,7 +163,7 @@ def logout(
 ) -> None:
     if crm_session:
         from app.services.staff_activity import logout_session
-        logout_session(db, crm_session)
+        logout_session(db, crm_session, close_attendance=True)   # an explicit sign-out also ends the day's attendance
         db.commit()
     response.delete_cookie(SESSION_COOKIE, path="/")
     response.delete_cookie(USER_HINT_COOKIE, path="/")

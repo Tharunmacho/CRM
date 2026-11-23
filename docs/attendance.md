@@ -1,6 +1,22 @@
 # Recruiter attendance and activity
 
-Attendance is a deliberate Recruiter or Manager check-in/check-out. The monthly policy uses those clock records. Activity is a separate estimate of Recruiter interaction with the CRM browser.
+Attendance for a Recruiter or Manager starts when they **sign in** (or press **Check in**) and ends when they **sign out**, press **Check out**, or go silent for 30 minutes (see "Sign-in counts as attendance" below). The monthly policy uses those clock records. Activity is a separate estimate of Recruiter interaction with the CRM browser. Administrators have no attendance.
+
+## Sign-in counts as attendance
+
+This replaces the earlier rule that only the Check in button created attendance (owner's decision: "when I log in it should count").
+
+| Event | What happens |
+|---|---|
+| **Sign in** (Recruiter or Manager) | Today's session starts at the sign-in time, in the same transaction as the sign-in, with the audit entry "Recruiter checked in" (`source: login`). Idempotent: a second sign-in, a second browser or a second tab finds the open session; the one-open-session index allows only one. An attendance problem never stops anyone signing in. |
+| **First page of the day for someone already signed in** (cookie outlived the day, or signed in before this rule) | The first visible heartbeat of a new page starts a session (`source: heartbeat`) when there is no open session and none yet today. |
+| **Page comes back after the 30-minute silence limit** (tab hidden, laptop asleep) | The sweep (or the page itself) closed the old session at its last heartbeat; the returning page starts a new one, so the rest of the day counts. The gap is never counted. A deliberate check-out or sign-out is **never** undone by a heartbeat. Constant `RESTART_AFTER_INACTIVITY` in `staff_activity.py` switches this off (strict rule: a heartbeat only starts a session when there is none today). |
+| **Sign out** | The open session is closed at the sign-out time (`source: logout`), so *Last logout* and *Hours worked* fill in. If the person is still active in another browser (a heartbeat in the last 90 s under a different login) the day goes on. A later sign-in the same day starts a new session. |
+| **Silence for 30 minutes** (`ABANDONED_AFTER_SECONDS`) | The presence worker's sweep closes a **Recruiter's** open session at their **last heartbeat** (never "now"), `source: inactivity`. With no heartbeat at all the session closes at its own start (no invented hours). Managers send no heartbeat, so silence proves nothing and they are never swept. |
+| **A Manager's forgotten session from an earlier day** | At the next sign-in it is closed at its own start (no hours, flagged as a missed check-out) and today's session starts. |
+| **Check in / Check out buttons** | Still work as a manual override. If a session is already open, Check in returns it (the button shows as checked in). |
+
+The session's request key records who opened and closed it (`login:`, `auto:`, `logout:`, `sweep:`, `missed:`, or a browser id for a button press); the attendance API returns `checkInSource` and `checkOutSource` for every session. No migration is involved.
 
 ## Reference policy adopted on 21 October 2026
 
@@ -62,7 +78,7 @@ Hours on the board are time logged in on that day; the month grid shows the poli
 - Interaction age is measured with `performance.now()`, not the device's wall clock. Queued updates recompute the age when dispatched. The server uses that bounded age only to classify online/idle; it owns every stored timestamp. Changing the device clock cannot extend activity or change recorded attendance times.
 - Multiple tabs are merged. Online takes priority over idle during an overlap, so opening more tabs cannot increase the time counted.
 - Online, idle and offline durations are calculated only inside checked-in periods. Offline is the remaining checked-in time after observed activity intervals. Historical timelines contain all three states.
-- Logout, session expiry, password/session revocation, CLI password reset and deactivation end presence. They do not fabricate a checkout. Recruiter should check out explicitly; Admin can correct a forgotten checkout with a reason.
+- Logout, session expiry, password/session revocation, CLI password reset and deactivation end presence. **Logout also ends the day's attendance** at the logout time (unless the person is still active in another browser); the others do not fabricate a checkout, but the 30-minute silence sweep closes the session at the last heartbeat. Admin can still correct any session with a reason.
 
 Only CRM browser signals are collected. The application does not monitor other apps, device activity, screenshots or keystroke contents. Browser activity is not proof of work or a payroll calculation.
 
@@ -80,4 +96,4 @@ Clock/presence writes and logout/revocation follow User → Login → Presence l
 
 The heartbeat body is `{clientId, sequence, visible, interactionAgeSeconds}`; age is null before the first interaction and bounded to 0–86400 seconds. Leave sends `{clientId, sequence}`. Absolute client interaction timestamps are rejected. These signals remain browser-reported estimates, not proof that a person is working.
 
-Run `python -m app.runtime` for the API and supervised presence/attendance worker together. The worker checks presence expiry and leave cover every 30 seconds in separate transactions. The monthly workflow requires `0015_attendance_hr`, which adds seven tables while preserving existing clocks, presence and recruitment records. Revision `0014` retains the clock retry ledger and ordered browser checkpoints. Deploy API and frontend together. The database dictionary and release guide describe coordinated upgrade and backups.
+Run `python -m app.runtime` for the API and supervised presence/attendance worker together. The worker checks presence expiry, abandoned attendance sessions (30 minutes of silence) and leave cover every 30 seconds in separate transactions. The monthly workflow requires `0015_attendance_hr`, which adds seven tables while preserving existing clocks, presence and recruitment records. Revision `0014` retains the clock retry ledger and ordered browser checkpoints. Deploy API and frontend together. The database dictionary and release guide describe coordinated upgrade and backups.
