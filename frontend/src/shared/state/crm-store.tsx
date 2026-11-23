@@ -222,6 +222,8 @@ const NOTIFICATIONS_POLL_MS = 30_000
 const WORKSPACE_TOPICS = ['candidates', 'applications', 'tasks', 'clients', 'companies', 'orders', 'designations', 'users', 'todos', 'settings'] as const
 /** Changes arriving within this window are fetched together; kept short because this is the visible latency. */
 const WORKSPACE_LIVE_WINDOW_MS = 200
+/** How often the workspace is re-read while the live stream is down (while it is up, a 60-second safety read applies). */
+const WORKSPACE_POLL_MS = 30_000
 /**
  * Route-entry revalidation window: short when polling is all we have. While the live stream is up every workspace change
  * announces itself and marks the snapshot stale at once (below), so an unchanged snapshot can be trusted much longer; the
@@ -271,6 +273,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * (If-None-Match); "unchanged" (304) then applies this same snapshot again instead of downloading it. Memory only.
    */
   const deskRef = useRef<{ revision: string; payload: Bootstrap } | null>(null)
+  /** The last read answered "unchanged" (304): the stored copy is already this snapshot, so it is not written to storage again. */
+  const unchangedRef = useRef(false)
   const index = useMemo(() => indexWorkspace(data), [data.candidates, data.clients, data.companies,
     data.designations, data.orders, data.users, data.applications, data.tasks, data.remarks])
 
@@ -287,6 +291,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const accept = (wire: Bootstrap & DeskWire): Bootstrap => {
             const { desk, revision } = expandDesk(wire)
             deskRef.current = revision ? { revision, payload: desk } : null
+            unchangedRef.current = false
             return desk
           }
           if (checkSession) {
@@ -302,7 +307,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           const answer = await readDesk<Bootstrap & DeskWire>('/bootstrap?compact=true&slim=true', { signal, revision: deskRef.current?.revision })
           if (answer.same) {
-            if (deskRef.current) return deskRef.current.payload
+            if (deskRef.current) { unchangedRef.current = true; return deskRef.current.payload }
             throw new ApiError(502, 'The server returned an invalid workspace response.')
           }
           if (!answer.payload?.me?.id) {
@@ -320,7 +325,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             // Unchanged records keep their identity, so a refresh that changed nothing renders nothing.
             // A snapshot read before a delete finished must not bring the deleted candidate back.
             setData((current) => reconcile(current, dropDeleted({ ...EMPTY, ...rest })))
-            persistSoon('bootstrap', payload.me.id, () => payload)
+            // Serialising the whole workspace is not free: skip it when the server said nothing changed since the copy already stored.
+            if (!unchangedRef.current) persistSoon('bootstrap', payload.me.id, () => payload)
           } else {
             deskRef.current = null
             setData(EMPTY)
@@ -514,19 +520,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // before it and starting another: against a slow database that loop never delivers a snapshot at all.
     let running = false
     let again = false
-    const reload = () => {
+    // Returns the read's promise so the poller can see a failure and back off (up to 8x) while the server is down, instead of asking every 30 s.
+    // (The snapshot is marked stale by the event subscription below, not by every timer tick: a tick that finds nothing new leaves it fresh.)
+    const reload = (): Promise<void> | void => {
       if (version !== authVersion.current || pendingAuthWrites.current > 0) return
       if (running) { again = true; return }
       running = true
-      lastLoadedAt.current = 0
-      void loadWorkspace(false, true, true).catch(() => {}).finally(() => {
+      const attempt = loadWorkspace(false, true, true).then(() => undefined)
+      void attempt.catch(() => {}).finally(() => {
         running = false
-        if (again) { again = false; reload() }
+        if (again) { again = false; void Promise.resolve(reload()).catch(() => {}) }
       })
+      return attempt
     }
     // The snapshot is stale the moment the server says so, not 200 ms later when the read starts: a route entered in that gap must reload.
     const stopStale = live.subscribe(WORKSPACE_TOPICS, () => { lastLoadedAt.current = 0 }, { debounceMs: 0 })
-    const stopReload = live.subscribe(WORKSPACE_TOPICS, reload, { debounceMs: WORKSPACE_LIVE_WINDOW_MS })
+    // Same trigger, plus a timer: every 30 s while the live stream is down (a proxy that swallows it, a dropped connection) and the
+    // 60-second safety read while it is up, so Clients, Jobs, Candidates, Users and Settings never sit stale until the next page change.
+    // The read sends the revision back (If-None-Match), so an unchanged workspace costs a 304, not a download.
+    const stopReload = liveInterval(reload, WORKSPACE_POLL_MS, WORKSPACE_TOPICS, { debounceMs: WORKSPACE_LIVE_WINDOW_MS, safetyMs: 60_000 })
     return () => { stopStale(); stopReload() }
   }, [me?.id, ready, loadWorkspace])
 
@@ -701,7 +713,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       unmap: async (applicationId) => {
         await run(
           () => api.post(`/applications/${applicationId}/unmap`),
-          'Removed from the order. Open tasks were cancelled and the candidate is back in the Data Bank.',
+          'Removed from the order. Open tasks were cancelled and the candidate is back on the Tasks list.',
         )
       },
       addRemark: async (taskId, body, kind = 'remark') => {
@@ -723,8 +735,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await run(
           () => api.post(`/candidates/${candidateId}/call`, { called, interested, remarks }),
           interested === 'no'
-            ? 'Marked not interested. The candidate stays in the Data Bank.'
-            : 'Call outcome recorded',
+            ? 'Marked not interested. The candidate is on the Declined tab of the Tasks page.'
+            : interested === 'rejected'
+              ? 'Rejected. The candidate is on the Rejected tab of the Tasks page.'
+              : 'Call outcome recorded',
         )
       },
       markNotificationRead: async (id) => {
@@ -754,7 +768,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteOrder: async (id, options) => {
         // The dialog shows the server's reason when it refuses, so a refusal is only thrown here. Once the server has
         // confirmed, the job and its candidates' applications leave every list at once (counts follow), then a quiet
-        // refresh brings anything else that changed (a candidate back in the Data Bank).
+        // refresh brings anything else that changed (a candidate back on the Tasks list).
         const version = authVersion.current
         await api.del(orderDeletePath(id, options?.withdrawApplications))
         if (version !== authVersion.current) return

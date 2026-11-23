@@ -12,9 +12,10 @@ import { HistoryDrawer, SubmissionPanel } from './submission-panels'
 import { LiveBadge } from './report-parts'
 import { LeadReportView } from './report-lead'
 import { TaskReportView } from './report-task'
+import { useAgencyToday } from './use-agency-today'
 import { useDailyReport } from './use-daily-report'
 import {
-  AGENCY_TIMEZONE, apiQuery, asksAllTime, choiceFromParams, DEFAULT_CHOICE, dayInZone, drillTitle, isOutdatedServer, parseChoice, reportPeople, resolveRange, serialiseChoice, type RangeChoice,
+  AGENCY_TIMEZONE, apiQuery, asksAllTime, choiceFromParams, DEFAULT_CHOICE, drillTitle, isOutdatedServer, parseChoice, reportPeople, resolveRange, serialiseChoice, type RangeChoice,
 } from './daily-report-view'
 import type { DailyReport, StaffRow } from './daily-report-types'
 import '@/styles/tasks-page.css'
@@ -48,7 +49,7 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
   const store = useStore()
   const [params] = useSearchParams()
   const timeZone = store.agencyTimezone || AGENCY_TIMEZONE
-  const today = dayInZone(new Date(), timeZone)
+  const today = useAgencyToday(timeZone)   // moves to the new day at midnight even if nothing else redraws the page
   const supervisor = store.can('all_reports')
   // An older link ("View staff report", /staff-report) names a person and dates in the address.
   const [choice, setChoice] = useState<RangeChoice>(() => choiceFromParams(params.get('from'), params.get('to'), today) ?? readChoice())

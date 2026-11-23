@@ -15,14 +15,17 @@ import {
  * Client Information) and 16 numbered rows, the number and label on the left and a box on the right for what the client wrote; the 17th row is the Deadline
  * (a date picker, used for the due-date reminders). Saves only the keys that changed (the server merges them by key); the form scrolls inside the dialog.
  */
-export function DetailsDialog({ item, onClose, onSave }: { item: RequirementItem; onClose: () => void; onSave: (patch: RequirementPatch) => Promise<boolean> }) {
-  const start = detailsFor(item)
+export function DetailsDialog({ item, gone = false, onClose, onSave }: { item: RequirementItem; /** The row was deleted by someone else while this form was open: what was typed stays, saving is off. */ gone?: boolean; onClose: () => void; onSave: (patch: RequirementPatch) => Promise<boolean> }) {
+  // The baseline is frozen when the form opens: a live refresh that changes the row (another person edited the deadline) must not make the form look
+  // changed, and Save must send only the boxes THIS person touched, never somebody else's newer value written back from a stale copy.
+  const [start] = useState(() => detailsFor(item))
   const [form, setForm] = useState<Record<DetailKey, string>>(start)
   const [saving, setSaving] = useState(false)
   const changes = detailsChanges(start, form)
   const dirty = Object.keys(changes).length > 0
   const set = (key: DetailKey, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const submit = async () => {
+    if (gone) return
     if (!dirty) { onClose(); return }
     setSaving(true)
     const ok = await onSave({ details: changes })
@@ -34,9 +37,10 @@ export function DetailsDialog({ item, onClose, onSave }: { item: RequirementItem
       description={item.country ? `Country: ${item.country}` : undefined}
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
-        <Button variant="primary" onClick={() => void submit()} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+        <Button variant="primary" onClick={() => void submit()} disabled={saving || gone}>{saving ? 'Saving...' : 'Save'}</Button>
       </>}>
-      <form className="jr-sheet" onSubmit={(event) => { event.preventDefault(); void submit() }}>
+      {gone && <p role="alert" className="jr-gone">This requirement was deleted by someone else. What you typed is still here, but it can no longer be saved.</p>}
+      <form className="jr-sheet" onSubmit={(event) => { event.preventDefault(); if (!gone) void submit() }}>
         <div className="jr-sheet-head" aria-hidden="true">
           <span className="jr-sheet-no">Sl. No.</span><span>Job Requirements Details</span><span>Client Information</span>
         </div>

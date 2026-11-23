@@ -502,7 +502,8 @@ test('the professional pass: one 60px row, a 44px one-line header, one padding f
   assert.match(rule(`${P} tbody td`), /padding: 8px var\(--tw-pad-r\) 8px var\(--tw-pad-l\)/, 'the same left edge as the header')
   assert.match(css, /\.tw-table\.dw-table\.dw-main \{[^}]*width: 100%; min-width: 0; border-collapse: separate/, 'the table fills its panel and never scrolls sideways')
   // controls
-  assert.match(css, /\.dw \.tw-table \.dw-remark \.custom-select-trigger \{ height: 36px !important; min-height: 36px !important/)
+  // (the remark trigger is no longer a fixed 36px box: it grows with the remark, so the whole text can be read; 36px is only its minimum)
+  assert.match(css, /\.dw \.tw-table \.dw-remark \.custom-select-trigger \{ height: auto !important; min-height: 36px !important/)
   assert.match(css, /\.dw-act \{[^}]*width: 72px[^}]*height: 36px/)
   assert.match(css, /\.dw-more-btn \{ width: 36px; height: 36px/)
   assert.match(css, /\.dw-doc-add \{[^}]*height: 32px[^}]*text-decoration: none/)
@@ -516,7 +517,7 @@ test('the professional pass: one 60px row, a 44px one-line header, one padding f
   assert.match(css, /@container dw \(min-width: 1080px\)/)
   const cards = css.slice(css.indexOf('@container dw (max-width: 1079px)'))
   assert.match(cards, /\.dw-more-btn \{ width: 44px; height: 44px/)
-  assert.match(cards, /\.dw-remark \.custom-select-trigger \{ height: 44px !important[^}]*font-size: 16px/)
+  assert.match(cards, /\.dw-remark \.custom-select-trigger \{ height: auto !important; min-height: 44px !important[^}]*font-size: 16px/)
   assert.match(cards, /\.dw-remark-add input \{[^}]*height: 44px[^}]*font-size: 16px/)
   // tokens only
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-fA-F]{3,8}\b|rgb\(/)

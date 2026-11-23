@@ -1,7 +1,6 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarCheck, ChevronLeft, ChevronRight, Clock3, FileSpreadsheet, LogOut, RefreshCw, Timer, TriangleAlert, UserX, X, Loader2 } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
-import { agencyDay } from '@/shared/lib/task-time'
 import { cn } from '@/shared/lib/cn'
 import { downloadApiFile } from '@/shared/api/download'
 import { Button, IconButton, Select } from '@/shared/ui/primitives'
@@ -13,6 +12,7 @@ import { reportPeople } from './daily-report-view'
 import { boardFigures, boardFilter, buildAttendanceRows, hoursCardText, type BoardFilter } from './attendance-rows'
 import { buildMonthGrid, monthExportName, monthExportPath } from './attendance-month'
 import { useDayAttendance, useMonthAttendance } from './use-attendance-data'
+import { followDay, useAgencyToday } from './use-agency-today'
 import { AttendanceBoard } from './report-attendance'
 import { DailyRecord, MonthGridTable } from './attendance-grid'
 import '@/styles/report-mgmt-tabs.css'
@@ -31,7 +31,7 @@ export function AttendanceReportTab() {
   const store = useStore()
   const notify = store.notify
   const timeZone = store.agencyTimezone || 'Asia/Kolkata'
-  const today = agencyDay(new Date(), timeZone)
+  const today = useAgencyToday(timeZone)
   const team = store.me.role !== 'staff'
   const [month, setMonth] = useState(today.slice(0, 7))
   const [date, setDate] = useState(today)
@@ -41,6 +41,15 @@ export function AttendanceReportTab() {
   const [reload, setReload] = useState(0)
   const [exporting, setExporting] = useState(false)
   const staff = team ? pick : store.me.id
+  // Left open past midnight, the board that was on "today" moves to the new day by itself (a day or month somebody picked by hand stays).
+  const lastToday = useRef(today)
+  useEffect(() => {
+    const previous = lastToday.current
+    if (previous === today) return
+    lastToday.current = today
+    setDate((current) => followDay(current, previous, today))
+    setMonth((current) => followDay(current, previous.slice(0, 7), today.slice(0, 7)))
+  }, [today])
 
   const people = useMemo(() => reportPeople(store.users).filter((user) => !user.deleted && (user.active || user.id === pick)).sort((a, b) => a.name.localeCompare(b.name)), [store.users, pick])
   const changeMonth = useCallback((value: string) => { if (MONTH_RE.test(value) && value >= '2000-01' && value <= '2100-12') setMonth(value) }, [])

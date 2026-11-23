@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { BellOff, Trash2 } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
+import { liveInterval } from '@/shared/state/live'
+import { createCoalescer } from '@/shared/lib/coalesce'
 import { formatPhone } from '@/shared/lib/phone'
 import { homeDigits } from '@/shared/lib/agency'
 import { smartTime } from '@/shared/lib/format'
@@ -33,12 +35,15 @@ export function IgnoredNumbers() {
   const alive = useRef(true)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
 
+  // The newest read wins: a poll that started before an add or a remove can land after the list was re-read, and must not put the old list back.
+  const readNo = useRef(0)
   const load = useCallback(async (signal?: AbortSignal) => {
+    const mine = ++readNo.current
     try {
       const result = await api.get<{ items: IgnoredNumber[] }>('/whatsapp/ignored-numbers', { signal })
-      if (!signal?.aborted && alive.current) { setItems(result.items); setLoadError('') }
+      if (!signal?.aborted && alive.current && mine === readNo.current) { setItems(result.items); setLoadError('') }
     } catch (error) {
-      if (!signal?.aborted && alive.current) setLoadError(error instanceof Error ? error.message : 'We could not load the list. Try again.')
+      if (!signal?.aborted && alive.current && mine === readNo.current) setLoadError(error instanceof Error ? error.message : 'We could not load the list. Try again.')
     }
   }, [])
   useEffect(() => {
@@ -46,6 +51,14 @@ export function IgnoredNumbers() {
     void load(controller.signal)
     return () => controller.abort()
   }, [load, store.me.id])
+
+  // Live: another admin adding or removing a number shows here within seconds (topic `whatsapp`), with a 60 s poll fallback. The topic also
+  // carries every chat message, so a change is answered at most once per 5 seconds (the first at once, the rest of a burst as one read at the end).
+  useEffect(() => {
+    const onChange = createCoalescer(() => { if (document.visibilityState !== 'hidden') void load() }, { waitMs: 5_000, leading: true })
+    const stop = liveInterval(() => { if (document.visibilityState !== 'hidden') return load() }, 60_000, ['whatsapp'], { debounceMs: 800, onChange: () => onChange() })
+    return () => { onChange.cancel(); stop() }
+  }, [load])
 
   async function add(event: FormEvent) {
     event.preventDefault()

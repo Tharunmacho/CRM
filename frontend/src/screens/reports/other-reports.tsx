@@ -6,7 +6,7 @@ import { Button, Input, Select } from '@/shared/ui/primitives'
 import { PageHeader } from '@/shared/ui/display'
 import { Tabs } from '@/shared/ui/overlay'
 import { SummaryCards } from '@/shared/ui/workspace'
-import { agencyDay } from '@/shared/lib/task-time'
+import { useAgencyToday } from '@/features/daily-report/use-agency-today'
 import { downloadReport, useReportData, type ReportResult } from '@/features/reports/report-api'
 import { REPORTS, STAFF_WEEKLY_COPY, type ReportKey } from '@/features/reports/report-config'
 import { ACCOUNT_TABS, paramsForTab, reportTabFromParams, SHOW_LEGACY_REPORTS } from '@/features/reports/report-tabs'
@@ -44,7 +44,7 @@ export default function OtherReports({ embedded = false }: { embedded?: boolean 
   // In the weekly report ?from=&to=&staff= mean its week and the open person; elsewhere they seed the Filters card.
   const linkedStaff = supervisor && !weeklyMode ? params.get('staff') || '' : ''
   // The server's agency day, not the browser's zone or a compiled-in constant.
-  const today = agencyDay(new Date(), store.agencyTimezone)
+  const today = useAgencyToday(store.agencyTimezone || 'Asia/Kolkata')
   const defaultFrom = shiftDay(today, -89)
   const linkedFrom = (!weeklyMode && validDateFilter(params.get('from'))) || defaultFrom
   const linkedTo = (!weeklyMode && validDateFilter(params.get('to'))) || today

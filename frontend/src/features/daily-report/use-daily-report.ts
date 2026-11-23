@@ -23,7 +23,7 @@ export interface DailyState {
 /**
  * The report's numbers, kept live. Any change the server announces on leads, candidates, applications, tasks or staff
  * (the app's one live stream) becomes a single refetch 1.5 s after the first event of a burst; if the stream is down
- * it asks every 30 s, and every 60 s as a safety net when it is up. The previous numbers stay on screen the whole
+ * it asks every 15 s, and every 20 s as a safety net when it is up (POLL_DOWN_MS / POLL_SAFETY_MS). The previous numbers stay on screen the whole
  * time (no skeleton), a hidden tab waits, and coming back to the tab reads again.
  */
 export function useDailyReport(query: DailyQuery, sessionId: string, enabled = true): DailyState {

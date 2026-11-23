@@ -3,7 +3,7 @@ import { api, fileHref, takeEarlyRead } from '@/shared/api/client'
 import { peekReport, rememberReport } from '@/shared/state/snapshot-cache'
 import { createCoalescer } from '@/shared/lib/coalesce'
 import { liveInterval } from '@/shared/state/live'
-import { isPresenceNoise } from '@/shared/state/live-events'
+import { isBusyOnly, isPresenceNoise } from '@/shared/state/live-events'
 
 export interface Option { id: string; label: string }
 export interface OrderMetrics { id: string; ref: string; company: string; client: string; designation: string; status: string; openings: number; matched: number; selected: number; deployed: number }
@@ -81,7 +81,7 @@ const REPORT_TOPICS: readonly string[] = ['reports']
 export const LEAD_REPORT_TOPICS: readonly string[] = ['reports', 'leads']
 
 /** How often a visible report re-reads, and the least time between two reads triggered by focus. */
-const REFRESH_MS = 60_000
+const REFRESH_MS = 30_000
 const FOCUS_REFRESH_MIN_MS = 15_000
 /** Reports are heavy: when the desk is busy a change burst re-reads them at most this often. */
 const LIVE_REPORT_WINDOW_MS = 1_500
@@ -94,7 +94,14 @@ const PRESENCE_NOISE_GAP_MS = 20_000
  * The newest answer for each user and query is remembered, so returning to a screen (or reloading the page,
  * for the dashboard) shows the previous numbers at once while the server confirms them.
  */
-export function useReportData<T>(path: string | null, sessionId: string, revision = '', topics: readonly string[] = REPORT_TOPICS) {
+/**
+ * A change that only touches these topics (a bulk document read announces `documents` for every page it finishes) is answered at most once per
+ * `noisyGapMs`: the first one reads at once, the rest of the burst becomes one read at the end, so a busy extraction never turns one open dashboard
+ * into a read every second. Any other topic announced with it makes it ordinary news again.
+ */
+export interface ReportNoise { noisyTopics: readonly string[]; noisyGapMs?: number }
+
+export function useReportData<T>(path: string | null, sessionId: string, revision = '', topics: readonly string[] = REPORT_TOPICS, noise?: ReportNoise) {
   const [snapshot, setSnapshot] = useState<{ key: string; data: T } | null>(null)
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null)
   const [reload, setReload] = useState(0)
@@ -124,20 +131,24 @@ export function useReportData<T>(path: string | null, sessionId: string, revisio
     }
     void read(true)
     const afterNoise = createCoalescer(() => void read(true), { waitMs: PRESENCE_NOISE_GAP_MS, maxWaitMs: PRESENCE_NOISE_GAP_MS })
+    const afterBusy = createCoalescer(() => void read(true), { waitMs: noise?.noisyGapMs ?? 10_000, leading: true })
     // Any business change makes the numbers stale ('reports' follows every change). A read that was already running
     // began before the change, so it is abandoned and a new one starts.
     const stopLive = liveInterval(() => void read(true), REFRESH_MS, topics, {
       debounceMs: LIVE_REPORT_WINDOW_MS,
+      safetyMs: REFRESH_MS, // a missed event or a buffered stream is caught within 30 s, never the 2-minute default
       onChange: (change) => {
         if (isPresenceNoise(change)) { afterNoise(); return } // a heartbeat, not a business change: one read later, not one now
+        if (isBusyOnly(change, noise?.noisyTopics)) { afterBusy(); return } // a stream of the same kind of event: at most one read per gap
         afterNoise.cancel() // the read below answers it too
+        afterBusy.cancel()
         request?.abort(); request = null; void read(true)
       },
     })
     const visible = () => void read()
     document.addEventListener('visibilitychange', visible)
     window.addEventListener('focus', visible)
-    return () => { active = false; afterNoise.cancel(); request?.abort(); stopLive(); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
+    return () => { active = false; afterNoise.cancel(); afterBusy.cancel(); request?.abort(); stopLive(); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
   }, [key, path, reload])
   const remembered = !path ? null : snapshot?.key === key ? snapshot.data : peekReport<T>(sessionId, path, revision)
   return { data: remembered, error: failure?.key === key ? failure.message : '', refreshing: reading === key, refresh: () => setReload(n => n + 1) }

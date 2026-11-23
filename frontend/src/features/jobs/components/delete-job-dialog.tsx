@@ -83,7 +83,7 @@ export function DeleteJobDialog({
             <label className="mt-3 flex items-start gap-3 font-medium text-amber-900">
               <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0" checked={withdraw} disabled={busy}
                 onChange={(event) => setWithdraw(event.target.checked)} />
-              <span>Also remove the candidates from this job and delete it. Their applications, stage history and stage documents on this job are deleted, active candidates go back to the Data Bank, and this cannot be undone.</span>
+              <span>Also remove the candidates from this job and delete it. Their applications, stage history and stage documents on this job are deleted, active candidates return to the Tasks list, and this cannot be undone.</span>
             </label>
           )}
         </div>

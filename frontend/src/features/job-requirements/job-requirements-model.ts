@@ -512,3 +512,18 @@ export function columnWidths(avail: number, fieldCount: number, texts: ColumnTex
   const client = Math.min(flex - 160, Math.max(170, Math.round((flex * wantClient) / (wantClient + wantDetails))))
   return { client, details: flex - client, country, owner, total: FIXED_TOTAL + countryExtra + ownerExtra + flex + custom }
 }
+
+/** A live, poll or focus read must not be applied (or even started) while a save or a create is being sent, or while a typed change is held unsaved. */
+export const readBlocked = (inFlight: number, unsavedCount: number): boolean => inFlight > 0 || unsavedCount > 0
+
+/**
+ * What a silent read becomes on screen: the server's rows, each with its unsaved change laid back on top, plus any row this person created
+ * a moment ago that the read (started before the create finished) does not have yet, kept at the top, so a new row never flickers away and
+ * the Client-name box it was going to focus never disappears.
+ */
+export function mergeRead(page: readonly RequirementItem[], held: Readonly<Record<string, RequirementPatch>>, current: readonly RequirementItem[], justCreated: ReadonlySet<string>): RequirementItem[] {
+  const merged = page.map((item) => (held[item.id] ? applyPatch(item, held[item.id]) : item))
+  const have = new Set(merged.map((item) => item.id))
+  const kept = current.filter((item) => justCreated.has(item.id) && !have.has(item.id))
+  return kept.length ? [...kept, ...merged] : merged
+}

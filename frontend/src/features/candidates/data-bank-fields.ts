@@ -121,7 +121,7 @@ export const BANK_FIELD_DEFS: readonly BankFieldDef[] = [
 function callOutcomeText(candidate: Candidate): string {
   const outcome = candidate.callOutcome
   if (!outcome) return ''
-  const answer = outcome.interested === 'yes' ? 'Interested' : outcome.interested === 'no' ? 'Not interested' : 'Unreachable'
+  const answer = outcome.interested === 'yes' ? 'Interested' : outcome.interested === 'no' ? 'Not interested' : outcome.interested === 'rejected' ? 'Rejected' : 'Unreachable'   // (kept inline: this file is loaded on its own by its test)
   return outcome.called ? answer : `Not called yet (${answer.toLowerCase()})`
 }
 

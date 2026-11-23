@@ -90,7 +90,7 @@ export function useLeadData({ query, page, pageSize, scope: summaryScope, enable
     return () => controller.abort()
   }, [enabled, facetToken, loadFacets])
 
-  // Live: a lead change reloads the list and the figures. The safety poll (every two minutes while the stream is up) also
+  // Live: a lead change reloads the list and the figures. The safety poll (every minute while the stream is up) also
   // re-reads the filter choices, and so does a resync after an outage, because events may have been missed.
   useEffect(() => {
     if (!enabled) return
@@ -100,6 +100,7 @@ export function useLeadData({ query, page, pageSize, scope: summaryScope, enable
       ['leads'],
       {
         debounceMs: 500,
+        safetyMs: 60_000, // a missed or delayed event is caught within a minute
         onChange: (change) => {
           void loadSummary()
           void loadList()

@@ -29,7 +29,7 @@ export default function DashboardPage() {
   const isTeam = isAdminLevel(store.me.role)
   // Candidates ingested from email (with how many need review and how many accounts feed them). A server that does not send the
   // intake numbers yet keeps the old card: the total number of messages across the connected accounts.
-  const mail = useReportData<InboxCardData>('/inbox?limit=1', store.me.id, '', ['mail'])
+  const mail = useReportData<InboxCardData>('/inbox?limit=1', store.me.id, '', ['mail', 'documents'], { noisyTopics: ['documents'], noisyGapMs: 10_000 })
   const inbox = inboxCard(mail.data)
   const requirements = jobRequirementsCard(useReportData<JobRequirementsCardData>('/job-requirements?status=active&limit=1', store.me.id, '', ['job_requirements']).data)
   const leads = useReportData<LeadSummaryResponse>(`/leads/summary?scope=${isTeam ? 'all' : 'mine'}`, store.me.id, '', ['leads'])

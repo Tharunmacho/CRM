@@ -83,10 +83,10 @@ test('a failing read does not stop later events from being read, and a cancelled
   assert.equal(reads, 2)
 })
 
-test('polling: 30 s while the stream is down, a 60 s safety net while it is up; focus reads again after 5 s', () => {
+test('polling: 15 s while the stream is down, a 20 s safety net while it is up; focus reads again after 5 s', () => {
   assert.equal(live.COALESCE_MS, 1500)
-  assert.equal(live.POLL_DOWN_MS, 30_000)
-  assert.equal(live.POLL_SAFETY_MS, 60_000)
+  assert.equal(live.POLL_DOWN_MS, 15_000)
+  assert.equal(live.POLL_SAFETY_MS, 20_000)
   assert.equal(live.FOCUS_GAP_MS, 5_000)
 })
 
@@ -116,7 +116,8 @@ test('the hook wires the stream, the polling, the burst window and the focus rea
   assert.match(hook, /addEventListener\('focus'/)
   assert.match(hook, /version/) // an open drill-down page re-reads when the report was read again
   const drawer = await readFile(new URL('../src/features/daily-report/drilldown-drawer.tsx', import.meta.url), 'utf8')
-  assert.match(drawer, /version\]\)/)
+  assert.match(drawer, /settled\]\)/, 'the open list re-reads when the report was read again (version), at most once per DRILL_REREAD_MS (settled)')
+  assert.match(drawer, /setSettled\(version\)/)
   const parts = await readFile(new URL('../src/features/daily-report/report-parts.tsx', import.meta.url), 'utf8')
   assert.match(parts, /aria-live="off"/)
   assert.match(parts, /Reconnecting/)

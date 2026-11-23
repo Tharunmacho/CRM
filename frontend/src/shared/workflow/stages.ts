@@ -768,6 +768,7 @@ export const closureLabels: Record<ClosureReason, string> = {
   interview_rejected: 'Rejected at interview',
   medical_unfit: 'Medically unfit',
   unmapped: 'Removed from the order',
+  changed_job: 'Moved to another job',
   offer_declined: 'Offer declined',
   offer_not_received: 'Offer not received',
   stage_rejected: 'Rejected',
@@ -779,6 +780,19 @@ export const closureLabels: Record<ClosureReason, string> = {
   visa_stamping_refused: 'Visa stamping refused',
   not_travelling: 'Not travelling',
   pcc_not_cleared: 'PCC not cleared',
+}
+
+/**
+ * Where a closed placement shows on the Tasks page. This mirrors the server (`DECLINE_CLOSURES` / `NOT_OUTCOMES` in services/daily_work.py):
+ * the candidate's own no is Declined, every other negative end is Rejected, and being removed from a job or moved to another one is no outcome
+ * (the candidate is simply back on today's list). Keep the three lists in step with the backend.
+ */
+export const DECLINED_CLOSURES: readonly ClosureReason[] = ['stage_declined', 'offer_declined', 'not_interested', 'not_travelling']
+export const NO_OUTCOME_CLOSURES: readonly ClosureReason[] = ['unmapped', 'changed_job']
+export type ClosureTab = 'Declined' | 'Rejected' | null
+export function closureTab(reason: ClosureReason | null | undefined): ClosureTab {
+  if (!reason || NO_OUTCOME_CLOSURES.includes(reason)) return null
+  return DECLINED_CLOSURES.includes(reason) ? 'Declined' : 'Rejected'
 }
 
 /** Whether a field should render given the values recorded so far. */

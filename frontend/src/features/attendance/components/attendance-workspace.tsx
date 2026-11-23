@@ -4,7 +4,8 @@ import { CheckCircle2, ChevronLeft, ChevronRight, Clock3, Plus, RefreshCw, Shiel
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
 import { liveInterval } from '@/shared/state/live'
-import { agencyDay, browserTimeZone } from '@/shared/lib/task-time'
+import { browserTimeZone } from '@/shared/lib/task-time'
+import { useAgencyToday } from '@/features/daily-report/use-agency-today'
 import { EmptyState, PageHeader, Panel } from '@/shared/ui/display'
 import { Button, Field, IconButton, Input, Select } from '@/shared/ui/primitives'
 import { Tabs } from '@/shared/ui/overlay'
@@ -31,7 +32,7 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
   const [searchParams] = useSearchParams()
   const { revision } = useAttendance()
   const canManage = store.me.role !== 'staff'
-  const today = agencyDay(new Date(), store.agencyTimezone)
+  const today = useAgencyToday(store.agencyTimezone || 'Asia/Kolkata')
   const [month, setMonth] = useState(today.slice(0, 7))
   const [scope, setScope] = useState(canManage ? 'team' : 'mine')
   const [staffId, setStaffId] = useState('')

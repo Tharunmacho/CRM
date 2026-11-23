@@ -154,7 +154,7 @@ export interface Candidate {
   resumeText: string
   callOutcome?: {
     called: boolean
-    interested: 'yes' | 'no' | 'unreachable'
+    interested: 'yes' | 'no' | 'unreachable' | 'rejected'
     remarks: string
     recordedAt: string
   }
@@ -274,6 +274,7 @@ export type ClosureReason =
   | 'interview_rejected'
   | 'medical_unfit'
   | 'unmapped'
+  | 'changed_job'
   | 'offer_declined'
   | 'offer_not_received'
   | 'stage_rejected'

@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Hourglass, Percent, Plane, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { downloadApiFile } from '@/shared/api/download'
-import { agencyDay } from '@/shared/lib/task-time'
+import { useAgencyToday } from '@/features/daily-report/use-agency-today'
 import { cn } from '@/shared/lib/cn'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { useReportData } from './report-api'
@@ -27,7 +27,7 @@ export function ClientTrackerReport() {
   const store = useStore()
   const notify = store.notify
   const zone = store.agencyTimezone || 'Asia/Kolkata'
-  const today = agencyDay(new Date(), zone)
+  const today = useAgencyToday(zone)
   const [params] = useSearchParams()
   const [view, setView] = useState<View>(() => (stageFromAddress(params) ? 'sheet' : 'clients'))
   const [tab, setTab] = useState<StatusTab>('all')

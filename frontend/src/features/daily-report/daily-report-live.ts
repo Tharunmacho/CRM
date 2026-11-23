@@ -9,9 +9,12 @@ export const LIVE_TOPICS: readonly string[] = ['leads', 'candidates', 'applicati
 export const COALESCE_MS = 1_500
 /** Presence heartbeats announce `attendance` + `reports` all day; the report re-reads for those at most this often. */
 export const PRESENCE_NOISE_GAP_MS = 20_000
-/** While the live stream is down the report asks again this often; while it is up this is only a safety net. */
-export const POLL_DOWN_MS = 30_000
-export const POLL_SAFETY_MS = 60_000
+/**
+ * While the live stream is down the report asks again this often; while it is up this is only a safety net. Both are short on purpose: a stream
+ * that a proxy buffers, or an event that is missed, must never leave a desk looking at numbers that are more than about 20 seconds old.
+ */
+export const POLL_DOWN_MS = 15_000
+export const POLL_SAFETY_MS = 20_000
 /** The least time between two reads caused by the window or tab getting focus back. */
 export const FOCUS_GAP_MS = 5_000
 

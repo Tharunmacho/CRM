@@ -3,7 +3,7 @@ import { AlertTriangle, CalendarPlus, ClipboardList, Clock3, Copy, FileSpreadshe
 import { useStore } from '@/shared/state/crm-store'
 import { isAdminLevel } from '@/shared/model/role-labels'
 import { COUNTRY_NAMES } from '@/shared/lib/country-flag'
-import { agencyDay } from '@/shared/lib/task-time'
+import { useAgencyToday } from '@/features/daily-report/use-agency-today'
 import { cn } from '@/shared/lib/cn'
 import { Button, SearchInput, Select } from '@/shared/ui/primitives'
 import { DatePicker } from '@/shared/ui/date-picker'
@@ -66,7 +66,7 @@ export default function JobRequirementsPage() {
   const sent = useMemo<ListFilters>(() => ({ ...filters, due: view === 'dueSoon' ? 'soon' : view === 'overdue' ? 'overdue' : '' }), [filters, view])
   const data = useJobRequirements(sent)
   const { items, fields, loading, error } = data
-  const today = useMemo(() => agencyDay(new Date(), store.settings.timezone || undefined), [store.settings.timezone])
+  const today = useAgencyToday(store.settings.timezone || store.agencyTimezone || 'Asia/Kolkata')   // due-soon / overdue follow the new day at midnight
 
   useEffect(() => {
     const wanted = typed.replace(/\s+/g, ' ').trim()
@@ -125,6 +125,11 @@ export default function JobRequirementsPage() {
   const close = (id: string, reason: ClosedReason) => { setDialog(null); keep(id, reason ? { status: 'closed', closedReason: reason } : { status: 'closed' }) }
 
   const dialogItem = dialog && 'id' in dialog ? items.find((item) => item.id === dialog.id) : undefined
+  // The last row the open dialog showed: if somebody else deletes it meanwhile, the details form stays open (with what was typed) and says so.
+  const lastDialogItem = useRef<RequirementItem | undefined>(undefined)
+  if (dialogItem) lastDialogItem.current = dialogItem
+  else if (!dialog || !('id' in dialog) || lastDialogItem.current?.id !== dialog.id) lastDialogItem.current = undefined
+  const detailsGone = dialog?.kind === 'details' && !dialogItem && !!lastDialogItem.current
   const rowName = (item: RequirementItem, serial: number) => item.clientName.trim() || `row ${serial}`
   const colSpan = FIXED + fields.length
   const widths = columnWidths(Math.max(0, boxWidth - 2), fields.length, {
@@ -309,8 +314,8 @@ export default function JobRequirementsPage() {
         )}
       </section>
 
-      {dialog?.kind === 'details' && dialogItem && (
-        <DetailsDialog item={dialogItem} onClose={() => setDialog(null)} onSave={(patch) => data.save(dialogItem.id, patch)} />
+      {dialog?.kind === 'details' && (dialogItem ?? lastDialogItem.current) && (
+        <DetailsDialog item={(dialogItem ?? lastDialogItem.current) as RequirementItem} gone={detailsGone} onClose={() => setDialog(null)} onSave={(patch) => data.save((dialogItem ?? lastDialogItem.current as RequirementItem).id, patch)} />
       )}
       {dialog?.kind === 'close' && dialogItem && (
         <CloseDialog item={dialogItem} onClose={() => setDialog(null)} onPick={(reason) => close(dialogItem.id, reason)} />

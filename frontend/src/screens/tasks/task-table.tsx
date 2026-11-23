@@ -1,4 +1,4 @@
-import { ArrowRight, Globe, SendHorizontal, Trash2, UserRound } from 'lucide-react'
+import { ArrowRight, Ban, Globe, SendHorizontal, Trash2, UserRound, UserX } from 'lucide-react'
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { countryCode } from '@/shared/lib/country-flag'
@@ -10,6 +10,7 @@ import { agencyLabel, clockTime, closedRowsOf, countryCell, isClosed, nothingYet
 import { getNoteDraft, noteDraftKey, setNoteDraft } from '@/features/daily-work/note-drafts'
 import { DELETE_NOTE_HINT, DELETE_NOTE_LABEL, DELETE_NOTE_TITLE } from '@/features/daily-work/note-delete-model'
 import { OwnerTag } from './task-identity'
+import { CallDialog } from '@/features/candidates/components/call-dialog'
 import {
   AgencyCell, ClientCell, DocCell, PositionCellView, RemarkCell, RowMenu, ScrollEdges, StageCell, columnLayout,
 } from './daily-table'
@@ -26,7 +27,7 @@ import {
  * NOTES is a column of its own at every width and REMARKS holds only the select (a remark and a note are different things: the remark is the candidate's
  * status line, notes are free text kept as a list): the NOTES cell has an always-visible input at the top (Enter saves, Shift+Enter is a new line, Escape clears;
  * only for people who may work the candidate) and under it ALL the candidate's notes, newest on top, each with its time ("11:40", or "18 Nov 09:15" on an earlier
- * day), its author and its text; the list is at most 168px tall and scrolls inside the cell. In the cards NOTES is a row of its own.
+ * day), its author and its text; every note is shown in full (no height cap, no inner scroll box): the cell and the row grow with the notes. In the cards NOTES is a row of its own.
  * Every note has a small "Delete note" button for the people who may delete it (`canDeleteNote`: the note's author, the candidate's recruiter, Admin and
  * MD; the server enforces the same rule); it asks first in a small dialog, then `onDeleteNote` hides the note at once (the screen restores it and says so
  * when the server refuses). The Remarks dropdown's first entry, "Select remark", empties the cell through `onClearRemark`.
@@ -92,7 +93,7 @@ interface NotesCellProps {
   onAsk: (row: TaskRow, note: DailyNote) => () => void
 }
 
-/** The NOTES cell: the input (people who may work the candidate), then every note newest first in a list that scrolls inside the cell. */
+/** The NOTES cell: the input (people who may work the candidate), then every note newest first, in full: the list grows with the notes and never scrolls inside the cell. */
 function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: NotesCellProps) {
   // What was typed stays in the box when the table is drawn again (see note-drafts.ts); it goes when the note is saved or cleared.
   const draftKey = noteDraftKey(authorName, row.candidateId)
@@ -136,7 +137,7 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
       )}
       {error && <p className="tw-note-error" role="alert">{error}</p>}
       {notes.length > 0 ? (
-        <ul className="tw-note-list" aria-label={`Notes of ${row.candidate}, newest first`} tabIndex={notes.length > 2 ? 0 : undefined}>
+        <ul className="tw-note-list" aria-label={`Notes of ${row.candidate}, newest first`}>
           {notes.map((note) => (
             <li key={note.id} className={cn(note.id.startsWith(PENDING_NOTE) && 'is-pending')}>
               <div className="tw-note-head">
@@ -170,6 +171,8 @@ function TodayChips({ row, zone, inStage }: { row: TaskRow; zone?: string; inSta
 export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, onProfile, onSaveDoc, onRemark, onClearRemark, onAddNote, authorName, canDeleteNote, onDeleteNote, labelledBy, busy }: TaskTableProps) {
   const [measure, panelWidth] = useTableWidth()
   const [asking, setAsking] = useState<{ row: TaskRow; note: DailyNote } | null>(null)
+  // A candidate with no job yet can be declined or rejected right from the row: no client or job is needed before Forwarded to client (stage 2).
+  const [calling, setCalling] = useState<{ id: string; interested: 'no' | 'rejected' } | null>(null)
   const mayDelete = (row: TaskRow, note: DailyNote) => !!onDeleteNote && !!canDeleteNote?.(row, note)
   const ask = (row: TaskRow, note: DailyNote) => () => setAsking({ row, note })
   const place = todayPlace(supervisor, panelWidth)
@@ -221,6 +224,10 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
                       ...(row.applicationId ? [{ label: moved || closed ? 'View stage' : 'Open stage', icon: ArrowRight, onSelect: () => onOpen(row) }] : []),
                       { label: 'Open candidate profile', icon: UserRound, onSelect: () => onProfile(row) },
                       ...(noCountry && !closed ? [{ label: 'Add preferred country', icon: Globe, onSelect: () => onProfile(row) }] : []),
+                      ...(!row.applicationId && !closed && work ? [
+                        { label: 'Not interested (declined)', icon: UserX, onSelect: () => setCalling({ id: row.candidateId, interested: 'no' }) },
+                        { label: 'Rejected (not suitable)', icon: Ban, onSelect: () => setCalling({ id: row.candidateId, interested: 'rejected' }) },
+                      ] : []),
                     ]} />
                   </div>
                 </td>
@@ -229,6 +236,7 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
           })}
         </tbody>
       </table>
+      <CallDialog open={!!calling} candidateId={calling?.id ?? ''} initialInterested={calling?.interested ?? ''} onClose={() => setCalling(null)} />
       <Dialog open={!!asking} onClose={() => setAsking(null)} title={DELETE_NOTE_TITLE} description={DELETE_NOTE_HINT} width="sm"
         footer={<>
           <Button onClick={() => setAsking(null)}>Keep note</Button>

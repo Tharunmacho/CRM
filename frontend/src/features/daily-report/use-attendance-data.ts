@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '@/shared/api/client'
 import { liveInterval } from '@/shared/state/live'
+import { createCoalescer } from '@/shared/lib/coalesce'
 import type { AttendanceResponse } from '../attendance/model'
 import type { MonthlyAttendance } from '../attendance/policy-model'
 
@@ -8,11 +9,16 @@ const MONTH_RE = /^\d{4}-\d{2}$/
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 
 /**
- * Runs `read` now and again every 30 seconds (and whenever the attendance or users data changes elsewhere) until the effect is cleaned up.
+ * Runs `read` now and again every 15 seconds while the live stream is down and every 20 while it is up as a safety net (the month grid: every minute, see MONTH_RATES) (and whenever the attendance or users data changes elsewhere) until the effect is cleaned up.
  * One read at a time: a change that arrives while one is running asks for another when it ends, so the answer is never older than the change.
  * `read` gets `initial` (the first read of a new choice: the caller clears what it shows) and the abort signal.
  */
-function useLive(active: boolean, deps: unknown[], read: (initial: boolean, signal: AbortSignal) => Promise<void>) {
+/** How often a view is read again: the day view keeps the quick rates; the month grid is a heavy read and needs no more than once a minute (and one read per `eventGapMs` when events arrive, every heartbeat of every person is one). */
+export interface LiveRates { downMs: number; safetyMs: number; eventGapMs: number }
+export const DAY_RATES: LiveRates = { downMs: 15_000, safetyMs: 20_000, eventGapMs: 0 }
+export const MONTH_RATES: LiveRates = { downMs: 60_000, safetyMs: 60_000, eventGapMs: 30_000 }
+
+function useLive(active: boolean, deps: unknown[], read: (initial: boolean, signal: AbortSignal) => Promise<void>, rates: LiveRates = DAY_RATES) {
   const latest = useRef(read)
   latest.current = read
   useEffect(() => {
@@ -29,10 +35,13 @@ function useLive(active: boolean, deps: unknown[], read: (initial: boolean, sign
       }
     }
     void load(true)
-    const stop = liveInterval(() => { if (document.visibilityState === 'visible') void load() }, 30_000, ['attendance', 'users'], {
-      onChange: () => { if (running) again = true; else void load() },
+    const onEvent = () => { if (running) again = true; else void load() }
+    const spaced = rates.eventGapMs > 0 ? createCoalescer(onEvent, { waitMs: rates.eventGapMs, leading: true }) : null
+    const stop = liveInterval(() => { if (document.visibilityState === 'visible') void load() }, rates.downMs, ['attendance', 'users'], {
+      safetyMs: rates.safetyMs,
+      onChange: () => { if (spaced) spaced(); else onEvent() },
     })
-    return () => { controller.abort(); stop() }
+    return () => { controller.abort(); spaced?.cancel(); stop() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, ...deps])
 }
@@ -52,7 +61,7 @@ export function useMonthAttendance(month: string, staff: string, reload: number)
     } catch (cause) {
       if (!signal.aborted) setState((previous) => ({ ...previous, loading: false, error: cause instanceof Error ? cause.message : 'We could not load attendance.' }))
     }
-  })
+  }, MONTH_RATES)
   return state
 }
 

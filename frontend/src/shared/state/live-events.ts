@@ -84,6 +84,13 @@ export function isPresenceNoise(change: LiveChange): boolean {
   return topics.length > 0 && topics.includes('attendance') && topics.every((topic) => topic === 'attendance' || topic === 'reports')
 }
 
+/** Whether a change touches only the screen's "busy" topics (plus `reports`, which follows every change). Exported for the tests. */
+export function isBusyOnly(change: LiveChange, noisy: readonly string[] | undefined): boolean {
+  if (!noisy || noisy.length === 0 || change.resync) return false
+  const announced = change.announced ?? change.topics
+  return announced.length > 0 && announced.some((topic) => noisy.includes(topic)) && announced.every((topic) => noisy.includes(topic) || topic === 'reports')
+}
+
 export const DEFAULT_DEBOUNCE_MS = 350
 const BACKOFF_START_MS = 1_000
 const BACKOFF_MAX_MS = 60_000

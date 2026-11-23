@@ -27,7 +27,7 @@ import '@/styles/touch-targets.css'
 /** Removing a candidate from a job closes their application there; the candidate is not deleted. */
 export function UnmapCandidateDialog({ name, saving, error, onClose, onConfirm }: { name: string; saving: boolean; error: string; onClose: () => void; onConfirm: () => void }) {
   return <Dialog open onClose={() => { if (!saving) onClose() }} title="Remove this candidate from the job?"
-    description="This closes their application on this job and cancels its open tasks. The candidate goes back to the Data Bank and can be matched to another job."
+    description="This closes their application on this job and cancels its open tasks. The candidate is back on the Tasks list and can be matched to another job."
     footer={<><Button variant="ghost" disabled={saving} onClick={onClose}>Keep on job</Button><Button variant="danger" disabled={saving} onClick={onConfirm}>{saving ? 'Removing…' : 'Remove from job'}</Button></>}>
     <DialogMark />
     <p className="text-sm text-ink-600">Stages {name} has already done stay on record. If you match them again later, they start again at Stage 1.</p>

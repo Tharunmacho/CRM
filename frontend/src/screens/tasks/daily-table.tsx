@@ -387,11 +387,16 @@ export function DocCell({ item, canAdd, onSave }: { item: Pick<DailyItem, 'comme
 
 export interface MenuEntry { label: string; icon: typeof ArrowRight | typeof ExternalLink; onSelect: () => void }
 
+/** The height the open menu will have, from the real entry count and the real entry height (44px on touch screens and phones, 36px otherwise) plus its padding and border. */
+export function menuHeight(count: number, touch = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse), (max-width: 640px)').matches): number {
+  return count * (touch ? 44 : 36) + 10
+}
+
 /** The three-dot menu, drawn on the page body so the scrolling table never clips it. */
 export function RowMenu({ candidate, items }: { candidate: string; items: MenuEntry[] }) {
   const trigger = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
-  const [at, setAt] = useState({ top: 0, left: 0 })
+  const [at, setAt] = useState({ top: 0, right: 8 })
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
@@ -417,15 +422,16 @@ export function RowMenu({ candidate, items }: { candidate: string; items: MenuEn
         onClick={() => {
           const box = trigger.current?.getBoundingClientRect()
           if (box) {
-            const height = items.length * 38 + 12
-            setAt({ top: box.bottom + height + 8 > window.innerHeight ? Math.max(8, box.top - height - 4) : box.bottom + 4, left: Math.max(8, box.right - 190) })
+            const height = menuHeight(items.length)
+            // Anchored by its RIGHT edge to the button: a long entry ("Not interested (declined)") makes the menu grow to the left, never past the window.
+            setAt({ top: box.bottom + height + 8 > window.innerHeight ? Math.max(8, box.top - height - 4) : box.bottom + 4, right: Math.max(8, window.innerWidth - box.right) })
           }
           setOpen((value) => !value)
         }}>
         <MoreHorizontal size={16} aria-hidden="true" />
       </button>
       {open && createPortal(
-        <div className="dw-menu" role="menu" style={{ top: at.top, left: at.left }}>
+        <div className="dw-menu" role="menu" style={{ top: at.top, right: at.right }}>
           {items.map(({ label, icon: Icon, onSelect }) => (
             <button key={label} type="button" role="menuitem" className="dw-menu-item" onClick={() => { setOpen(false); onSelect() }}><Icon size={15} aria-hidden="true" />{label}</button>
           ))}

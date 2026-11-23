@@ -511,7 +511,7 @@ test('with no job all thirteen stages are locked and nothing can be opened', () 
   const list = stages.stageRows({ ...form, tracking: { summary: {}, rows: [] } }, true)
   assert.equal(list.length, 13)
   assert.ok(list.every((row) => row.key === 'locked' && row.icon === 'lock' && row.chip === 'Locked' && !row.openable && row.date === ''))
-  assert.equal(stages.PROCESS_EMPTY_LINE, 'Choose a job at the top to start the process.')
+  assert.equal(stages.PROCESS_EMPTY_LINE, 'Prescreening needs no client or job. Choose a client and a job at the top to forward the candidate (stage 2 onward needs both).')
 })
 
 test('the lock opens by itself as the candidate reaches each stage: done, current, then locked', () => {

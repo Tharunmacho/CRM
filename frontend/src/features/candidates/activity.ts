@@ -42,7 +42,7 @@ export function buildActivity(cand: Candidate, apps: Application[], look: Activi
     events.push({
       id: `call-${cand.id}`,
       at: recordedAt,
-      title: !called ? 'Initial call not made yet' : interested === 'yes' ? 'Initial call: interested' : interested === 'no' ? 'Initial call: not interested' : 'Initial call: not reachable',
+      title: !called ? 'Initial call not made yet' : interested === 'yes' ? 'Initial call: interested' : interested === 'no' ? 'Initial call: not interested' : interested === 'rejected' ? 'Initial call: rejected' : 'Initial call: not reachable',
       detail: remarks || undefined,
       by: look.userName(cand.ownerId),
       tone: !called || interested === 'unreachable' ? 'warn' : interested === 'yes' ? 'ok' : 'bad',

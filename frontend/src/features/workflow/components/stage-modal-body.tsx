@@ -37,6 +37,7 @@ import {
   STAGES,
   TOTAL_STAGES,
   closureLabels,
+  closureTab,
   fieldVisible,
   MEDICAL_STAGE,
   stageByNo,
@@ -70,6 +71,7 @@ import '@/styles/candidate-v2.css'
 import '@/styles/stage-modal.css'
 import '@/styles/touch-targets.css'
 import { careIdOf, idLine, primaryId } from '@/features/candidates/candidate-ids'
+import { callAnswerWords } from '@/features/candidates/call-outcome'
 
 /**
  * One scrolling application: completed sections keep their saved feedback,
@@ -464,7 +466,7 @@ function CandidateRecord({ app }: { app: Application }) {
 
       {cand.callOutcome && (
         <Segment icon={<PhoneCall className="h-4 w-4" />} title="Initial call" subtitle="Result of the first call">
-          <Fact label="Interested" value={cand.callOutcome.interested === 'yes' ? 'Yes' : cand.callOutcome.interested === 'no' ? 'No' : 'Not reachable'} />
+          <Fact label="Interested" value={callAnswerWords(cand.callOutcome.interested).fact} />
           <Fact label="Recorded" value={dateTimeLabel(cand.callOutcome.recordedAt)} />
           <Fact label="Remarks" value={cand.callOutcome.remarks || 'Not provided'} half />
         </Segment>
@@ -838,7 +840,7 @@ function CurrentStage({
               </div>
               {data.stop != null && data.stop !== '' && result.closes && (
                 <p className="sm-decision-note is-stop" role="status"><CircleSlash className="h-4 w-4" aria-hidden="true" />
-                  This candidate will not go to the next stage. The order closes for them and they go back to the Data Bank.</p>
+                  This candidate will not go to the next stage. The order closes for them and they appear on the Declined or Rejected tab of the Tasks page, and in All.</p>
               )}
             </Field>
           </div>
@@ -868,7 +870,7 @@ function CurrentStage({
         {def.closer && !def.decision && (!compact || result.closes) && (
           <p className="sm-form-note">
             <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-            <span>If this stage ends with a closing result, the order closes for the candidate. They go back to the Data Bank and can be matched to another order.</span>
+            <span>If this stage ends with a closing result, the order closes for the candidate. They appear on the Declined or Rejected tab of the Tasks page, and in All, and can be matched to another order.</span>
           </p>
         )}
 
@@ -984,7 +986,7 @@ function DecisionChoice({ def, field, value, onChange, disabled, stopping, repea
       </div>
       {value && (stopping || repeating) && (
         <p className="sm-decision-note is-stop" role="status"><CircleSlash className="h-4 w-4" aria-hidden="true" />
-          {repeating ? 'This candidate will not go to the next stage until the medical result is Fit.' : 'This candidate will not go to the next stage. The order closes for them and they go back to the Data Bank.'}</p>
+          {repeating ? 'This candidate will not go to the next stage until the medical result is Fit.' : 'This candidate will not go to the next stage. The order closes for them and they appear on the Declined or Rejected tab of the Tasks page, and in All.'}</p>
       )}
       {value && !stopping && !repeating && decision.advances.includes(value) && next && (
         <p className="sm-decision-note is-go" role="status"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />
@@ -1168,16 +1170,16 @@ function DeployedRow() {
 }
 
 function ClosedRow({ app }: { app: Application }) {
-  const notInterested = app.closureReason === 'not_interested' || app.closureReason === 'resume_not_received'
+  const tab = closureTab(app.closureReason)
   return <section className="sm-card sm-end is-closed">
     <span className="sm-end-icon" aria-hidden="true"><CircleSlash className="h-5 w-5" /></span>
     <div>
       <b>Closed: {app.closureReason ? closureLabels[app.closureReason] : 'Closed'}</b>
-      <p>{app.closureReason === 'unmapped'
-        ? 'The candidate was removed from this order and its open tasks were cancelled. They can be matched to another order.'
-        : notInterested
-          ? 'The candidate is marked Not interested. They stay in the Not interested group and can be offered other orders.'
-          : 'The candidate is back in the Data Bank and can be matched to another order.'} Finished stages and files are above. An admin can reopen a finished stage, and must give a reason.</p>
+      <p>{tab === null
+        ? 'The candidate was removed from this order (or moved to another job) and its open tasks were cancelled. They are on the Tasks list again and can be matched to another order.'
+        : tab === 'Declined'
+          ? 'The candidate is on the Declined tab of the Tasks page and in All, and can be offered other orders.'
+          : 'The candidate is on the Rejected tab of the Tasks page and in All, and can be matched to another order.'} Finished stages and files are above. An admin can reopen a finished stage, and must give a reason.</p>
     </div>
   </section>
 }

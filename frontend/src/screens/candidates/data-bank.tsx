@@ -54,7 +54,7 @@ const SEARCH_DELAY_MS = 180
 /** A candidate or staff change is fetched once, this long after the last event of a burst. */
 const LIVE_RELOAD_DEBOUNCE_MS = 500
 /** Poll while the live stream is down (while it is up the safety net is slower, see live.ts). */
-const LIVE_RELOAD_POLL_MS = 60_000
+const LIVE_RELOAD_POLL_MS = 30_000
 
 /** Below this box width (a window of a window under 1100px wide) the candidates read as cards; above it the one table always fits. */
 const DATA_BANK_TABLE_MIN_WIDTH = 900
@@ -120,7 +120,7 @@ export default function DataBankPage() {
   // `silent` reloads (live events, the safety poll) keep the table as it is instead of dimming it and disabling the buttons.
   const [reload, setReload] = useState({ n: 0, silent: false })
   const reloadPage = useCallback((silent = false) => setReload(current => ({ n: current.n + 1, silent })), [])
-  useEffect(() => liveInterval(() => reloadPage(true), LIVE_RELOAD_POLL_MS, ['candidates', 'users'], { debounceMs: LIVE_RELOAD_DEBOUNCE_MS }), [reloadPage])
+  useEffect(() => liveInterval(() => reloadPage(true), LIVE_RELOAD_POLL_MS, ['candidates', 'users'], { debounceMs: LIVE_RELOAD_DEBOUNCE_MS, safetyMs: LIVE_RELOAD_POLL_MS }), [reloadPage])
   const refreshRef = useRef({ ensureFresh: store.ensureFresh, refresh: store.refresh })
   refreshRef.current = { ensureFresh: store.ensureFresh, refresh: store.refresh }
   const staffScopeKey = `${store.me.id}:${staffFilter}:${refreshToken}`

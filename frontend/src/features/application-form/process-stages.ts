@@ -14,7 +14,7 @@ export type StageChip = 'Locked' | 'In progress' | 'Completed' | 'Failed'
 
 // One name per stage in STAGE_NAMES, so adding a stage there adds its row here (this file is loaded without the '@/shared/workflow' alias by the tests).
 export const STAGE_COUNT = Object.keys(STAGE_NAMES).length
-export const PROCESS_EMPTY_LINE = 'Choose a job at the top to start the process.'
+export const PROCESS_EMPTY_LINE = 'Prescreening needs no client or job. Choose a client and a job at the top to forward the candidate (stage 2 onward needs both).'
 
 const CHIPS: Record<StageKey, { icon: StageIcon; chip: StageChip }> = {
   locked: { icon: 'lock', chip: 'Locked' },

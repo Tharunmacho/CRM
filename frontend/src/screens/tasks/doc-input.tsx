@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 
 /** "2026-11-19" -> "19/11/2026"; anything that is not a real date -> "". */
 export function docToText(iso: string | null | undefined): string {
@@ -34,7 +34,12 @@ export function DocInput({ value, candidate, onSave }: { value: string | null; c
   const [text, setText] = useState(saved)
   const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle')
   const [note, setNote] = useState('')
-  useEffect(() => { setText(saved); setState('idle'); setNote('') }, [saved])
+  // Somebody else's change to this date (a live refresh) never throws away what is being typed, and a stale read landing during our own save
+  // never flips the box back for a moment: the box follows the saved value only while it is neither focused nor being saved.
+  const focused = useRef(false)
+  const busy = useRef(false)
+  useEffect(() => { busy.current = state === 'saving' }, [state])
+  useEffect(() => { if (focused.current || busy.current) return; setText(saved); setState('idle'); setNote('') }, [saved])
 
   const commit = async () => {
     if (text === saved) return
@@ -58,5 +63,5 @@ export function DocInput({ value, candidate, onSave }: { value: string | null; c
     aria-label={`Date of commencement for ${candidate}, as dd/mm/yyyy`} aria-invalid={state === 'error' || undefined} aria-busy={state === 'saving' || undefined}
     disabled={state === 'saving'} title={note || 'Date of commencement: type dd/mm/yyyy and press Enter'}
     onChange={(event: ChangeEvent<HTMLInputElement>) => { setText(shapeDocText(event.target.value)); if (state === 'error') { setState('idle'); setNote('') } }}
-    onBlur={() => void commit()} onKeyDown={onKey} />
+    onFocus={() => { focused.current = true }} onBlur={() => { focused.current = false; void commit() }} onKeyDown={onKey} />
 }

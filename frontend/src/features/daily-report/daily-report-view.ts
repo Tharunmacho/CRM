@@ -502,6 +502,20 @@ export function attendanceDay(period: Pick<DailyPeriod, 'from' | 'to'>, allTime:
   return period.to > today ? today : period.to
 }
 
+/**
+ * True for a figure that is a snapshot of NOW (where candidates wait, what is open or overdue, who is still unassigned) and not a count of what happened in the
+ * chosen period. Its list is not filtered by the period, so the drawer says "Right now" instead of "Today", and its date column is the day each row
+ * began waiting.
+ */
+export function isSnapshotMetric(metric: string): boolean {
+  return /^(stage:\d{1,2}|stuck(:\d{1,2})?)$/.test(metric) || ['tasksPending', 'tasksOverdue', 'leadsAssigned', 'leadsStale', 'leadsFollowUp', 'leadsBacklog'].includes(metric)
+}
+/** The heading of the date column of a drill-down list. */
+export function drillWhenHeading(metric: string): string {
+  if (/^(stage:\d{1,2}|stuck(:\d{1,2})?)$/.test(metric)) return 'Waiting since'
+  return isSnapshotMetric(metric) ? 'Since' : 'When'
+}
+
 /** The title of a drill-down list when the server has not named it yet. */
 export function drillTitle(metric: string, report?: DailyReport | null): string {
   if (metric.startsWith('stage:')) {
@@ -581,8 +595,14 @@ export function csvCell(value: unknown): string {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 export const CSV_HEAD = ['Date', 'Time', 'Recruiter', 'Name', 'Candidate ID', 'Type', 'Client', 'Job', 'Detail'] as const
-export function buildCsv(rows: DrillRow[], timeZone: string = AGENCY_TIMEZONE): string {
-  const lines = [CSV_HEAD.map(csvCell).join(',')]
+/** The CSV heading row: for a snapshot figure (where candidates wait now) the date columns say "Waiting since", not a plain "Date" / "Time" that would read as the period. */
+export function csvHead(metric?: string): string[] {
+  if (!metric || !isSnapshotMetric(metric)) return [...CSV_HEAD]
+  const when = drillWhenHeading(metric)
+  return [`${when} (date)`, `${when} (time)`, ...CSV_HEAD.slice(2)]
+}
+export function buildCsv(rows: DrillRow[], timeZone: string = AGENCY_TIMEZONE, metric?: string): string {
+  const lines = [csvHead(metric).map(csvCell).join(',')]
   for (const row of rows) {
     const date = new Date(row.at)
     const valid = !Number.isNaN(date.getTime())
@@ -593,8 +613,10 @@ export function buildCsv(rows: DrillRow[], timeZone: string = AGENCY_TIMEZONE): 
   }
   return lines.join('\r\n')
 }
-export function csvFileName(label: string, from: string, to: string): string {
+/** The file name: the period for a count of what happened in it, the day it was taken for a snapshot of now (`snapshotDay`), which the period does not filter. */
+export function csvFileName(label: string, from: string, to: string, snapshotDay?: string): string {
   const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'list'
+  if (snapshotDay) return `${slug}-as-of-${snapshotDay}.csv`
   return `${slug}-${from === to ? from : `${from}-to-${to}`}.csv`
 }
 

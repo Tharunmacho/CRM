@@ -47,6 +47,7 @@ import { LeadOriginBadge } from '@/features/leads/components/lead-origin-badge'
 import '@/styles/candidate-v2.css'
 import '@/styles/candidate-ids.css'
 import { primaryId } from '@/features/candidates/candidate-ids'
+import { callAnswerWords } from '@/features/candidates/call-outcome'
 import { roleLabel } from '@/shared/model/role-labels'
 
 const FORMAT: ProfileFormat = { money: (amount) => money(amount), date: (value) => dateLabel(value) }
@@ -457,8 +458,8 @@ export default function CandidateProfilePage() {
               <>
                 <div className="cp-call-result">
                   <Badge tone={cand.callOutcome.called ? 'navy' : 'amber'} variant="dot">Called: {cand.callOutcome.called ? 'Yes' : 'No'}</Badge>
-                  <Badge tone={cand.callOutcome.interested === 'yes' ? 'green' : cand.callOutcome.interested === 'no' ? 'amber' : 'neutral'} variant="dot">
-                    {cand.callOutcome.interested === 'yes' ? 'Interested' : cand.callOutcome.interested === 'no' ? 'Not interested' : 'Not reachable'}
+                  <Badge tone={callAnswerWords(cand.callOutcome.interested).tone} variant="dot">
+                    {callAnswerWords(cand.callOutcome.interested).badge}
                   </Badge>
                   <span className="cp-when">{smartTime(cand.callOutcome.recordedAt)}</span>
                 </div>
@@ -550,7 +551,7 @@ export default function CandidateProfilePage() {
       >
         {unmapApp && <div className="cp-unmap">
           <div className="cp-unmap-route"><StageRail status={unmapApp.status} currentStage={unmapApp.currentStage} reached={[...new Set(unmapApp.stages.filter(record => !record.reopenedReason).map(record => record.stage))]} /><StageCaption no={unmapApp.currentStage} status={unmapApp.status} /></div>
-          <p className="text-sm leading-6 text-ink-600">This match is closed because the candidate was removed from the order. Its open tasks are cancelled and the candidate goes back to the Data Bank. You can match them to another order later. That starts again at stage 1.</p>
+          <p className="text-sm leading-6 text-ink-600">This match is closed because the candidate was removed from the order. Its open tasks are cancelled and the candidate is back on the Tasks list, ready to be matched to another order (that starts again at stage 1).</p>
         </div>}
         {unmapError && <p role="alert" className="mt-3 text-sm text-stamp-700">{unmapError}</p>}
       </Dialog>

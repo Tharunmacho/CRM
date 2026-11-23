@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Clock3, TriangleAlert } from 'lucide-react'
-import { agencyDay } from '@/shared/lib/task-time'
+import { useAgencyToday } from './use-agency-today'
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
 import { DatePicker } from '@/shared/ui/date-picker'
@@ -95,7 +95,7 @@ export function AttendancePanel({ day, staff, team, timeZone, onPickStaff, reloa
   reload?: number
   title?: string
 }) {
-  const today = agencyDay(new Date(), timeZone)
+  const today = useAgencyToday(timeZone)   // the same hook as the page around it, so the board and the page agree on 'today' (and both roll over at midnight)
   const [picked, setPicked] = useState<{ from: string; date: string }>({ from: day, date: day })
   const date = picked.from === day ? picked.date : day
   const state = useDayAttendance(date, staff, reload, '', null)

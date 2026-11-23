@@ -303,3 +303,6 @@ html:root:root .jr .jr-table tbody td.is-left { padding-left: 10px; }
 .jr .jr-owner { height: auto; min-height: 40px; padding-block: 4px; align-items: center; }
 .jr .jr-owner > span { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.25; text-align: left; }
 .jr .jr-table .custom-select .custom-select-trigger.jr-owner { height: auto; min-height: 40px; }
+
+/* the requirements form says so when its row was deleted by someone else while it was open (what was typed stays on screen) */
+.jr-gone { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--error-edge); border-radius: 8px; background: var(--error-fill); color: var(--error-ink); font-size: 13px; line-height: 1.4; }

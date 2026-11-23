@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
+import { liveInterval } from '@/shared/state/live'
 import { jobRequirementsApi } from './job-requirements-api'
 import {
-  PAGE_LIMIT, applyPatch, listQuery, mergePatches, mergeSaved, sortedFields, upsert,
+  PAGE_LIMIT, applyPatch, listQuery, mergePatches, mergeRead, mergeSaved, readBlocked, sortedFields, upsert,
   type FieldType, type ListFilters, type RequirementSummary, type RequirementField, type RequirementItem, type RequirementPatch,
 } from './job-requirements-model'
 
@@ -27,6 +28,10 @@ export function useJobRequirements(filters: ListFilters) {
   const [rowSave, setRowSave] = useState<Record<string, RowSave>>({})
   const unsaved = useRef<Record<string, RequirementPatch>>({})
   const inFlight = useRef(0)
+  /** A live read was skipped (or thrown away) because a save or create was going on: it is run once, when that has finished. */
+  const rerun = useRef(false)
+  /** Rows this person created a moment ago: a read that started before the create finished does not have them yet, and must not drop them. */
+  const justCreated = useRef<Set<string>>(new Set())
   const timers = useRef<Record<string, number>>({})
   const alive = useRef(true)
   const readNo = useRef(0)
@@ -49,11 +54,18 @@ export function useJobRequirements(filters: ListFilters) {
     const mine = ++readNo.current
     if (!options.silent) { setLoading(true); setError('') }
     try {
-      const page = await jobRequirementsApi.list(listQuery(filters), { fresh: options.fresh })
+      // A live refresh keeps the rows already loaded ("load more"), so a change made by someone else never shortens the sheet under the reader.
+      const keep = options.silent ? Math.min(2000, Math.max(PAGE_LIMIT, itemsRef.current.length)) : PAGE_LIMIT
+      const page = await jobRequirementsApi.list(listQuery(filters, keep), { fresh: options.fresh })
       if (!alive.current || mine !== readNo.current) return
-      // Unsaved changes win over what the server still has.
+      // A save or create started while this read was on its way: what the server sent may be older than what is on screen, so do not apply it;
+      // it is read again as soon as the sending has finished.
+      if (options.silent && readBlocked(inFlight.current, Object.keys(unsaved.current).length)) { rerun.current = true; return }
+      // Unsaved changes win over what the server still has; a row created a moment ago stays even if this read began before it existed.
       const held = unsaved.current
-      setItems(page.items.map((item) => (held[item.id] ? applyPatch(item, held[item.id]) : item)))
+      const ids = new Set(page.items.map((item) => item.id))
+      justCreated.current.forEach((id) => { if (ids.has(id)) justCreated.current.delete(id) })
+      setItems((current) => mergeRead(page.items, held, current, justCreated.current))
       setFields(sortedFields(page.fields))
       setTotal(page.total)
       if (page.summary) setSummary(page.summary)
@@ -68,17 +80,32 @@ export function useJobRequirements(filters: ListFilters) {
 
   useEffect(() => { void read() }, [read])
 
+  /** Run the one read that was skipped while something was being sent, now that nothing is. */
+  const flush = useCallback(() => {
+    if (!rerun.current || !alive.current || readBlocked(inFlight.current, Object.keys(unsaved.current).length)) return
+    rerun.current = false
+    void read({ silent: true, fresh: true })
+  }, [read])
+
   // Read again when the person comes back to the window (somebody else may have added rows), unless something typed is still unsaved.
   useEffect(() => {
     const again = () => {
       if (document.visibilityState === 'hidden') return
-      if (inFlight.current > 0 || Object.keys(unsaved.current).length > 0) return
+      if (readBlocked(inFlight.current, Object.keys(unsaved.current).length)) { rerun.current = true; return }
       void read({ silent: true, fresh: true })
     }
     window.addEventListener('focus', again)
     document.addEventListener('visibilitychange', again)
     return () => { window.removeEventListener('focus', again); document.removeEventListener('visibilitychange', again) }
   }, [read])
+
+  // Live: a requirement added, edited or closed by somebody else appears within seconds (topic `job_requirements`), with a poll fallback
+  // (30 s while the live stream is down). Nothing is re-read while a typed change is unsaved or being sent, so a refresh never wipes it.
+  useEffect(() => liveInterval(() => {
+    if (document.visibilityState === 'hidden') return
+    if (readBlocked(inFlight.current, Object.keys(unsaved.current).length)) { rerun.current = true; return }   // remembered: it runs when the sending is done
+    return read({ silent: true, fresh: true })
+  }, 30_000, ['job_requirements'], { debounceMs: 400, safetyMs: 30_000 }), [read])
 
   const loadMore = useCallback(async () => {
     setLoadingMore(true)
@@ -111,8 +138,9 @@ export function useJobRequirements(filters: ListFilters) {
       return false
     } finally {
       inFlight.current -= 1
+      flush()
     }
-  }, [mark])
+  }, [mark, flush])
 
   const retry = useCallback(async (id: string) => {
     const held = unsaved.current[id]
@@ -121,16 +149,25 @@ export function useJobRequirements(filters: ListFilters) {
 
   /** A blank row on top, saved at once. Resolves with its id (for focusing the Client name), or null when it failed. */
   const create = useCallback(async (body: RequirementPatch = {}): Promise<string | null> => {
-    const created = await jobRequirementsApi.create(body)
-    if (alive.current) { setItems((current) => upsert(current, created)); setTotal((count) => count + 1) }
-    return created.id
-  }, [])
+    inFlight.current += 1   // a read that lands while the row is being created must not be applied over it
+    try {
+      const created = await jobRequirementsApi.create(body)
+      justCreated.current.add(created.id)
+      if (alive.current) { setItems((current) => upsert(current, created)); setTotal((count) => count + 1) }
+      return created.id
+    } finally {
+      inFlight.current -= 1
+      flush()
+    }
+  }, [flush])
 
   const remove = useCallback(async (id: string) => {
     await jobRequirementsApi.remove(id)
     delete unsaved.current[id]
+    justCreated.current.delete(id)
     if (alive.current) { setItems((current) => current.filter((item) => item.id !== id)); setTotal((count) => Math.max(0, count - 1)); mark(id, null) }
-  }, [mark])
+    flush()
+  }, [mark, flush])
 
   const uploadAd = useCallback(async (id: string, file: File) => {
     const saved = await jobRequirementsApi.uploadAd(id, file)

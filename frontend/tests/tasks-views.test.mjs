@@ -345,7 +345,7 @@ test('a note never leaves its Notes cell: the cell, the list and each note shrin
   assert.match(rule('.tw-notes-cell'), /max-width: 100%/)
   assert.match(rule('.tw-notes-cell'), /overflow: hidden/)
   assert.match(rule('.tw-note-list'), /grid-template-columns: minmax\(0, 1fr\)/, 'an auto grid track grows with a long URL')
-  assert.match(rule('.tw-note-list'), /overflow-x: hidden/)
+  assert.doesNotMatch(rule('.tw-note-list'), /overflow|max-height/, 'the list shows every note in full: no scroll box (the Notes cell clips any sideways overflow)')
   assert.match(rule('.tw-note-list li'), /min-width: 0/)
   assert.match(rule('.tw-note-body'), /overflow-wrap: anywhere/, 'break-word does not count in the min-content width, anywhere does')
   assert.match(rule('.tw-note-body'), /min-width: 0/)

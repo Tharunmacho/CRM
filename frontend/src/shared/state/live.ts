@@ -11,11 +11,11 @@ import { createLiveEvents, type EventSourceLike, type LiveChange, type LiveEvent
 import { forgetSnapshots } from './snapshot-cache'
 
 /**
- * While the stream is up, every screen's poll slows to this safety net (a missed event, or a change made by
- * something that does not announce itself, is then caught within two minutes). While it is down, each screen
- * polls at its own, original interval.
+ * While the stream is up, every screen's poll slows to this safety net (a missed event, a stream that a proxy
+ * buffers, or a change made by something that does not announce itself is then caught within 45 seconds; the live
+ * reports, attendance and tasks use 20). While it is down, each screen polls at its own, original interval.
  */
-export const LIVE_SAFETY_POLL_MS = 120_000
+export const LIVE_SAFETY_POLL_MS = 45_000
 
 export const live: LiveEvents = createLiveEvents({
   url: eventsHref(),

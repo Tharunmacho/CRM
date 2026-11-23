@@ -15,7 +15,9 @@ export function StageControl({ form, canOpen, onOpen }: StageProps) {
   const current = form.tracking.summary.currentStage || application?.currentStage || 1
   const deployed = application?.status === 'deployed'
   const closed = application && !['active', '', 'deployed'].includes(application.status)
-  const label = !application ? 'Choose a job first' : deployed ? 'Deployed' : closed ? 'Application closed' : STAGE_NAMES[current] || `Stage ${current}`
+  // A job the candidate was only moved off (unmapped, or swapped for another job) is not a rejection or a decline: say what happened.
+  const movedOff = closed && ['unmapped', 'changed_job'].includes(application?.closureReason ?? '')
+  const label = !application ? 'Choose a job first' : deployed ? 'Deployed' : movedOff ? 'Removed from this job' : closed ? 'Application closed' : STAGE_NAMES[current] || `Stage ${current}`
   return (
     <div className="af-assign-field af-stage-field" data-assign="stage">
       <div className="af-assign-label"><label htmlFor="af-assign-stage">Current stage</label><span className="af-stage-manual">Manual</span></div>

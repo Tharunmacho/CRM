@@ -47,9 +47,9 @@ function feedFor<T>(sessionId: string, request: string): Feed<T> {
       load: (signal, fresh) => api.get<unknown>(request, { signal, cache: CACHE, fresh }),
       attach: (reload) => liveInterval(
         () => reload(),
-        60_000,
+        15_000,
         TOPICS,
-        { debounceMs: LIVE_WINDOW_MS, onChange: () => { void reload({ afterChange: true }) } },
+        { debounceMs: LIVE_WINDOW_MS, safetyMs: 20_000, onChange: () => { void reload({ afterChange: true }) } },
       ),
     })
     made.set(key, feed)
