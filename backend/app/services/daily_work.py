@@ -197,11 +197,16 @@ def _is_no_outcome(app) -> bool:
     return app.status == ApplicationStatus.closed and (app.closure_reason is None or app.closure_reason in NOT_OUTCOMES)
 
 
+def _closed_time():
+    """When the (subject) placement was closed: its `closed_at` (the event), else, for a row closed before that column existed, its last update."""
+    return func.coalesce(Application.closed_at, Application.updated_at)
+
+
 def _called_yes_since():
     """A "yes" call was recorded after the (subject) placement closed: the candidate is interested again. Not when the candidate's status was
     edited back to "not interested" afterwards (then the status wins and they are on Declined / Rejected)."""
     return and_(Candidate.call_recorded_at.is_not(None), Candidate.call_interested == "yes",
-                Candidate.call_recorded_at > Application.updated_at, Candidate.status != CandidateStatus.not_interested)
+                Candidate.call_recorded_at > _closed_time(), Candidate.status != CandidateStatus.not_interested)
 
 
 def _parked():
@@ -214,7 +219,7 @@ def _parked():
     The candidate is NOT parked any more when, after that placement was closed, a call was recorded with the answer "yes"
     (`record_call` puts a not-interested candidate back to "new" on a yes): they are interested again and are to be worked
     without waiting for a new mapping. "After it was closed" is `Candidate.call_recorded_at` later than the closed placement's
-    `updated_at` (a closed placement is not edited again, so this is the time of the closure). The status plays no part here:
+    closing time (`closed_at`, else the last update of a row closed before that column existed). The status plays no part here:
     a candidate who is "Needs review" and declined stays parked (their status is kept so the flag still shows)."""
     latest = _last_application()
     called_yes_since = _called_yes_since()
@@ -677,8 +682,8 @@ def outcome_of(app, by: str | None = None) -> dict:
     else:
         kind = "declined" if app.closure_reason in DECLINE_CLOSURES else "rejected"
         reason = reason_text(app.closure_reason, app.current_stage) or "Application closed"   # a legacy row closed with no reason
-    # A closed placement is not edited again, so `updated_at` is the time it closed (the same reading as `_parked`).
-    return {"kind": kind, "label": OUTCOME_LABELS[kind], "reason": reason, "stage": app.current_stage, "at": app.updated_at, "by": by}
+    # The time it closed is `closed_at` (the event; never `updated_at`, which a bulk edit or an import touches); a row closed before that column existed falls back on it.
+    return {"kind": kind, "label": OUTCOME_LABELS[kind], "reason": reason, "stage": app.current_stage, "at": app.closed_at or app.updated_at, "by": by}
 
 
 def outcome_of_call(cand) -> dict:
@@ -748,7 +753,7 @@ def fetch_outcome_rows(db, owner_ids, kinds, *, limit: int | None = None) -> lis
         .outerjoin(Client, Client.id == Company.client_id).outerjoin(Designation, Designation.id == Order.designation_id)
         .where(Candidate.owner_id.in_(owner_ids), or_(*(found[kind] for kind in kinds)))
         .order_by(case((_no_outcome(), func.coalesce(Candidate.call_recorded_at, Candidate.updated_at)),
-                       else_=func.coalesce(Application.updated_at, Candidate.call_recorded_at, Candidate.updated_at)).desc().nulls_last(), Application.id, Candidate.id).limit(limit or MAX_OUTCOME_ROWS)).all()
+                       else_=func.coalesce(Application.closed_at, Application.updated_at, Candidate.call_recorded_at, Candidate.updated_at)).desc().nulls_last(), Application.id, Candidate.id).limit(limit or MAX_OUTCOME_ROWS)).all()
 
 
 def outcome_reads(app_ids, candidate_ids) -> tuple:   # `app_ids` holds only real placements (a candidate who was never placed has none)

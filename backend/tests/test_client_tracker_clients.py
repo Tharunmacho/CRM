@@ -11,7 +11,7 @@ from zipfile import ZipFile
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import event
+from sqlalchemy import text, event
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import (
@@ -73,7 +73,7 @@ def env(schema_database):
             db.flush()
             db.add(Application(id=f"app-{key}", candidate_id=f"c-{key}", order_id=order, owner_id=owner, current_stage=stage,
                                status=ApplicationStatus(status), closure_reason=ClosureReason.interview_rejected if status == "closed" else None,
-                               updated_at=updated))
+                               created_at=updated, updated_at=updated))   # a placement's activity is when it was mapped / moved / closed, never its last edit
         db.commit()
     state = SimpleNamespace(sessions=sessions, engine=schema_database, actor=SimpleNamespace(id="admin", role=Role.admin))
     app = FastAPI()
@@ -124,6 +124,18 @@ def test_stalled_idle_and_the_rate_ignores_orders_that_never_happened(env):
     assert (charlie["openings"], charlie["placed"], charlie["status"], charlie["fillRate"]) == (0, 1, "idle", 100.0)
     delta = rows["Delta Test"]                                # closed with nobody placed: idle, and not held against the client
     assert (delta["openings"], delta["status"], delta["fillRate"]) == (0, "idle", None)
+
+
+def test_a_bulk_edit_does_not_make_a_stalled_client_look_active(env):
+    before = named(get(env))["Bravo Test"]
+    assert before["status"] == "stalled"
+    with env.sessions() as db:   # an import or a bulk edit touches updated_at of every placement and order's placements today
+        db.execute(text("UPDATE crm_applications SET updated_at = now()"))
+        db.commit()
+    from app.services import response_cache
+    response_cache.clear()   # the figure is re-read, not served from the short-lived cache
+    after = named(get(env))["Bravo Test"]
+    assert after["status"] == "stalled" and after["lastActivity"] == before["lastActivity"]   # nothing HAPPENED to it: still stalled, same last activity
 
 
 def test_the_cards_add_up_the_clients(env):

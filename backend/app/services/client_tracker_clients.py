@@ -8,8 +8,8 @@ The placement sheet (`client_tracker`) answers "who is where". This answers "how
   interested is left out, as on the placement sheet).
 * Placed: placements that travelled (status deployed).
 * Fill rate: placed over the openings the orders asked for (an order that was closed with nobody placed is not counted against the client).
-* Last activity: the newest change to the client's orders or to any placement on them (a candidate moved, closed or placed; an order
-  added or edited).
+* Last activity: the newest event on the client's orders or on any placement on them (a candidate mapped, a stage completed, closed or placed;
+  an order added or edited), by the time of the event itself, never a row's last update (a bulk edit or an import touches those).
 * Status: "active" when there is something open (openings left or candidates in process), "stalled" when it is active and nothing
   has changed for STALLED_DAYS days, "idle" when nothing is open.
 
@@ -25,7 +25,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
-    Application, ApplicationStatus, Candidate, CandidateStatus, Company, Designation, Order, User,
+    Application, ApplicationStage, ApplicationStatus, Candidate, CandidateStatus, Company, Designation, Order, User,
 )
 from app.services.client_tracker import STAGE_WORDS, _text
 from app.services.parallel_reads import parallel_reads
@@ -62,7 +62,13 @@ def _read(db: Session, user: User, now: datetime) -> dict:
                   .select_from(Application).join(Candidate, Candidate.id == Application.candidate_id)
                   .where(or_(Application.status == ApplicationStatus.deployed,
                              (Application.status == ApplicationStatus.active) & (Candidate.status != CandidateStatus.not_interested))))
-    moved = select(Application.order_id, func.max(Application.updated_at)).group_by(Application.order_id)
+    # A placement "moved" when something HAPPENED to it: it was mapped, a stage was completed, or it was closed. Never its `updated_at`: a bulk edit or an
+    # import touches that column of every row, and made a client nobody had worked for weeks read "last activity today" and never "stalled".
+    last_stage = (select(func.max(ApplicationStage.completed_at))
+                  .where(ApplicationStage.application_id == Application.id, or_(ApplicationStage.reopened_reason.is_(None), ApplicationStage.reopened_reason == ""))
+                  .correlate(Application).scalar_subquery())
+    event = func.greatest(Application.created_at, func.coalesce(last_stage, Application.created_at), func.coalesce(Application.closed_at, Application.created_at))
+    moved = select(Application.order_id, func.max(event)).group_by(Application.order_id)
     if staff:
         orders = orders.where(Order.id.in_(own))
         placements = placements.where(Application.owner_id == user.id)

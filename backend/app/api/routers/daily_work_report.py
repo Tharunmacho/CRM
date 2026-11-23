@@ -50,7 +50,9 @@ previousUntil are null, period.partial false, period.allTime true), series by we
 (2) GET /api/reports/daily-work/drilldown?metric=<key>&from=&to=&staff=&client=&page=0&page_size=25   (page_size 1-100)
     metric also accepts leadsAssigned, tasksDone, tasksPending, tasksOverdue and stage:<0-12> (candidates now at that stage), and done:<1-13|all> / lost:<1-13|all>
     (the stage records COMPLETED in the period, or the ones that ended the placement: the cells of the Task report's "Work done" table, newest first,
-    as many rows as the number clicked; report.taskInsight.workDone = {perStaff: [{id, completed, stopped, total, lost}], totals: {...}} has those numbers).
+    as many rows as the number clicked. A candidate who said no or was REJECTED at the initial call ends their prescreening without a stage record, so
+    that call (its audit entry, at the call's own time, credited to whoever recorded it, once per candidate and answer) is counted as Prescreening
+    completed and stopped, in the cards, the matrix, the exit reasons and these lists; report.taskInsight.workDone = {perStaff: [{id, completed, stopped, total, lost}], totals: {...}} has those numbers).
     {"metric","label","total","page","pageSize","rows": [{"at": ISO, "staffName", "kind": "candidate"|"lead", "candidateId"|null,
       "leadId"|null, "careId"|null, "name", "client"|null, "job"|null, "detail"}]}   newest first; never a phone/passport/ID number.
 

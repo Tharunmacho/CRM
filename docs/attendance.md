@@ -41,6 +41,19 @@ Open **View record** for the employee's daily sessions and allowances, or their 
 
 The clock's current state is labelled separately from the selected day's totals. Sessions & presence clips an overnight shift to its overlap with each agency day. The monthly policy instead attributes the whole overnight shift to its check-in date. `AGENCY_TIMEZONE` defaults to `Asia/Kolkata`; database timestamps are UTC.
 
+### Reports > Attendance: one reading of a day (real time, no invented figures)
+
+| Situation | Live board (one calendar day) | Month grid and Excel (policy) |
+| --- | --- | --- |
+| **Today** | Only today's sessions and presence: hours are the minutes logged in inside today, an open shift runs to now ("Still logged in"). | The same day, read by the policy. |
+| **A shift crossing midnight** (23:50 to 00:20) | Split at the agency's midnight: 10 minutes on the first day, 20 on the next; the two add up to the whole shift. A time that is not on the day shown is written with its date ("20 Nov 23:50"), and a shift carried in from the day before is never that day's arrival, so it is never "late". | The whole shift belongs to the day it started (login and logout on that day's row). |
+| **A shift never checked out, once its day is over** | A missed check-out: no last logout, **no hours** and no online/idle time. | The same: a half-punched day has no worked minutes (provisional until the shift end plus two days, then unpaid). |
+| **A shift never checked out, on today** | "Still logged in", hours run to now. | Provisional. |
+| **Yesterday / another day** | Exactly that day's sessions. The person's current clock state (shown separately as "Now") never turns another day into "still logged in". | Exactly that day. |
+| **Online / idle / away** | Online or idle only while the last heartbeat is at most **90 seconds** old, judged by the server at every read and again by the page every 10 seconds, so a closed tab stops showing as online within about 10 seconds of the 90-second rule. | Not used. |
+
+Hours on the board are time logged in on that day; the month grid shows the policy's covered minutes (flexible window, less the break), so the two can differ by design. A person who is not checked in shows a dash, never "0h 00m / 0h 00m". On the day shown "Today", the first summary card reads **Not in yet** (it becomes **Absent** once the day is over). The board and month are read again the moment attendance, leave, timing or calendar data changes (the `attendance` live topic; every table above pushes it) and at least every 20 seconds as a safety net; at midnight a board that was on "today" moves to the new day by itself and shows "Loading" rather than yesterday's numbers.
+
 ## Activity rules
 
 - The browser sends a heartbeat every 30 seconds while a Recruiter account is signed in. A visible, focused page is online after a genuine pointer, key, touch or scroll interaction.

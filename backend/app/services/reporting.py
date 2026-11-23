@@ -84,7 +84,7 @@ def read_reporting_data(db, filters: Filters | None = None, zone=None):
         "designations": (m.Designation, "id title"),
         "orders": (m.Order, "id ref company_id designation_id openings status created_at"),
         "candidates": (m.Candidate, "id ref name owner_id intake_owner_id created_at source source_detail"),
-        "applications": (m.Application, "id candidate_id order_id owner_id current_stage status closure_reason created_at updated_at"),
+        "applications": (m.Application, "id candidate_id order_id owner_id current_stage status closure_reason created_at updated_at closed_at"),
         "stages": (m.ApplicationStage, "id application_id stage attempt data outcome amount amount_currency owner_id completed_by completed_at reopened_reason"),
         "tasks": (m.Task, "id title candidate_id application_id stage owner_id created_at completed_at cancelled_at due_at sla_started_at escalated escalated_at"),
         "events": (m.TaskEvent, "id task_id candidate_id owner_id kind occurred_at"),
@@ -491,7 +491,8 @@ def report_data(data, user, filters: Filters, zone=None, now=None):
         records = effective.get(app["id"], {})
         terminal = records.get(app["current_stage"])
         if value(app["status"]) == "closed" and staff_matches((terminal or {}).get("owner_id") or app_owner(app)):
-            closed_at = terminal["completed_at"] if terminal else app["updated_at"]
+            # The closing event: `closed_at`; a row closed before that column existed falls back on its closing stage record, then its last update.
+            closed_at = app.get("closed_at") or (terminal["completed_at"] if terminal else app["updated_at"])
             if inside(closed_at):
                 rejection_counts[(app["current_stage"], value(app.get("closure_reason")) or "unknown")] += 1
         record = records.get(ADVANCE_STAGE)

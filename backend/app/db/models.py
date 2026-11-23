@@ -605,6 +605,9 @@ class Application(Base, PkMixin, TimestampMixin):
     closure_reason: Mapped[ClosureReason | None] = mapped_column(
         pg_enum(ClosureReason, "closure_reason")
     )
+    # When the placement was closed (the event itself, never `updated_at`, which any bulk edit or import touches); cleared when it is reopened.
+    # Reports and the Declined / Rejected lists date a closure by this; an older row without it falls back on its last update.
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="When the placement was closed; cleared on reopening.")
     # The stage being worked. Saved by an explicit Save, not as you type, and cleared
     # when the stage is completed. Files are uploaded immediately and the draft holds
     # the object key, so a lost connection cannot take an attachment with it.

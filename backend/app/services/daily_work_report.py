@@ -317,6 +317,29 @@ def read_stages(session, p: Period, zone: str, staff_id: str | None, client_id: 
     return session.execute(union_all(per_person, per_client)).all()
 
 
+# A candidate who says no at the initial call (declined) or is rejected there ends their prescreening without any stage record (they may not even be on
+# a job yet), so the audit entry of that call is the event the reports count: what was done, by whom, when. Counted as the Prescreening stage completed and
+# stopped, for the person who recorded the call, once per candidate and answer in the period.
+CALL_STOP_ACTION = "Recorded initial call"
+CALL_STOP_LABELS = {"no": "Not interested at the initial call", "rejected": "Rejected at the initial call"}
+
+
+def _call_stop_conditions(p: Period, start, staff_id: str | None) -> list:
+    AE = m.AuditEntry
+    conditions = [AE.action == CALL_STOP_ACTION, AE.entity_type == "candidate", AE.entity_id.is_not(None), AE.actor_id.is_not(None),
+                  AE.meta["called"].as_string() == "true", AE.meta["on_order"].as_string() == "false",
+                  AE.meta["interested"].as_string().in_(sorted(CALL_STOP_LABELS)), AE.at >= start, AE.at < p.end]
+    if start < p.start and p.prev_until < p.start:   # a running period: the previous one only up to the same elapsed time
+        conditions.append(or_(AE.at < p.prev_until, AE.at >= p.start))
+    if staff_id:
+        conditions.append(AE.actor_id == staff_id)
+    return conditions
+
+
+def _call_stop_label():
+    return case((m.AuditEntry.meta["interested"].as_string() == "rejected", literal(CALL_STOP_LABELS["rejected"])), else_=literal(CALL_STOP_LABELS["no"]))
+
+
 def read_stage_flow(session, p: Period, staff_id: str | None, client_id: str | None) -> list:
     """(stage, credited person, stop outcome or None, in the period?, records) per stage, person and kind: the stage records completed in the period
     and in the previous one (never reopened, with a person to credit, filtered like the figures), the stopping ones carrying their outcome (the stage's own
@@ -334,7 +357,15 @@ def read_stage_flow(session, p: Period, staff_id: str | None, client_id: str | N
             select(m.Application.id).join(m.Order, m.Order.id == m.Application.order_id).where(m.Order.company_id == client_id)))
     stopped = case(*[(and_(AS.stage == no, AS.outcome.in_(sorted(outcomes))), AS.outcome) for no, outcomes in STOPPED_OUTCOMES.items() if outcomes])
     cur = AS.completed_at >= p.start
-    return session.execute(select(AS.stage, who, stopped, cur, func.count()).where(*conditions).group_by(AS.stage, who, stopped, cur)).all()
+    stage_part = select(AS.stage, who, stopped, cur, func.count()).where(*conditions).group_by(AS.stage, who, stopped, cur)
+    if client_id:   # a call has no client: a client filter leaves the call stops out
+        return session.execute(stage_part).all()
+    AE = m.AuditEntry
+    call_label = _call_stop_label()
+    call_cur = AE.at >= p.start
+    call_part = (select(literal(1), AE.actor_id, call_label, call_cur, func.count(func.distinct(AE.entity_id)))
+                 .where(*_call_stop_conditions(p, p.prev_start, staff_id)).group_by(AE.actor_id, call_label, call_cur))
+    return session.execute(union_all(stage_part, call_part)).all()
 
 
 _ACTIVITY = f"""
@@ -1282,7 +1313,7 @@ def _stage_now_rows(session, number, staff_id, offset, limit, zone: str | None =
     no row to belong to), so this list has the same people, and the number of rows always equals the number on screen."""
     A, C, O = m.Application, m.Candidate, m.Order
     if number == 0:
-        closed = (select(func.max(A.updated_at)).where(A.candidate_id == C.id, A.status == m.ApplicationStatus.closed).correlate(C).scalar_subquery())
+        closed = (select(func.max(func.coalesce(A.closed_at, A.updated_at))).where(A.candidate_id == C.id, A.status == m.ApplicationStatus.closed).correlate(C).scalar_subquery())
         since = func.coalesce(closed, C.created_at)   # not on an order since: the last placement ended, else since they were added
         query = (select(since, m.User.name, C.id, C.name, C.care_id, cast(None, String).label("client"),
                         cast(None, String).label("job"), func.count().over())
@@ -1308,11 +1339,12 @@ def _stage_now_rows(session, number, staff_id, offset, limit, zone: str | None =
 
 
 def _flow_rows(session, kind: str, which: str, p: Period, staff_id, client_id, offset, limit):
-    """The stage records behind a 'work done' cell: one row per record completed in the period (newest first), by whom and when. The very conditions of
-    `read_stage_flow` (completed in the period, never reopened, a person to credit, not 'Unfit: reapplying', the client filter) over the people the report
-    counts (the Administrator account is no row, so its records are no cell either), so the number of rows always equals the number clicked.
+    """The records behind a 'work done' cell: one row per stage record completed in the period (newest first), by whom and when, and, for Prescreening, one per
+    candidate who said no or was rejected at the initial call (their audit entry). The very conditions of `read_stage_flow` (completed in the period, never
+    reopened, a person to credit, not 'Unfit: reapplying', the client filter) over the people the report counts (the Administrator account is no row, so its
+    records are no cell either), so the number of rows always equals the number clicked.
     `kind` is 'done' (every record) or 'lost' (the ones that ended the placement); `which` is a stage number or 'all'."""
-    AS, A, C, O = m.ApplicationStage, m.Application, m.Candidate, m.Order
+    AS, A, C, O, AE = m.ApplicationStage, m.Application, m.Candidate, m.Order, m.AuditEntry
     who = func.coalesce(AS.completed_by, AS.owner_id)
     hidden = select(m.User.id).where(m.User.role.in_(sorted(HIDDEN_ROLES)))
     conditions = [AS.completed_at >= p.start, AS.completed_at < p.end, _clean(AS), who.is_not(None), AS.outcome != "Unfit: reapplying",
@@ -1327,16 +1359,26 @@ def _flow_rows(session, kind: str, which: str, p: Period, staff_id, client_id, o
         conditions.append(who == staff_id)
     if client_id:
         conditions.append(AS.application_id.in_(select(A.id).join(O, O.id == A.order_id).where(O.company_id == client_id)))
-    rows = session.execute(
-        select(AS.completed_at, m.User.name, C.id, C.name, C.care_id, m.Company.name, m.Designation.title, AS.stage, AS.outcome, func.count().over())
-        .select_from(AS).outerjoin(A, A.id == AS.application_id).outerjoin(C, C.id == A.candidate_id).outerjoin(O, O.id == A.order_id)
-        .outerjoin(m.Company, m.Company.id == O.company_id).outerjoin(m.Designation, m.Designation.id == O.designation_id)
-        .outerjoin(m.User, m.User.id == who).where(*conditions)
-        .order_by(AS.completed_at.desc(), AS.id).offset(offset).limit(limit)).all()
+    stage_part = (select(AS.completed_at.label("at"), m.User.name.label("who"), C.id.label("cid"), C.name.label("cname"), C.care_id.label("care"),
+                         m.Company.name.label("client"), m.Designation.title.label("job"), AS.stage.label("stage"), AS.outcome.label("outcome"),
+                         cast(AS.id, String).label("rid"))
+                  .select_from(AS).outerjoin(A, A.id == AS.application_id).outerjoin(C, C.id == A.candidate_id).outerjoin(O, O.id == A.order_id)
+                  .outerjoin(m.Company, m.Company.id == O.company_id).outerjoin(m.Designation, m.Designation.id == O.designation_id)
+                  .outerjoin(m.User, m.User.id == who).where(*conditions))
+    parts = [stage_part]
+    if not client_id and which in ("all", "1"):
+        label = _call_stop_label()
+        latest = (select(AE.at.label("at"), AE.actor_id.label("actor"), AE.entity_id.label("entity"), label.label("outcome"), cast(AE.id, String).label("rid"))
+                  .where(*_call_stop_conditions(p, p.start, staff_id), AE.actor_id.not_in(hidden))
+                  .distinct(AE.actor_id, AE.entity_id, label).order_by(AE.actor_id, AE.entity_id, label, AE.at.desc(), AE.id).subquery("call_stops"))
+        parts.append(select(latest.c.at, m.User.name, C.id, C.name, C.care_id, cast(None, String), cast(None, String), literal(1), latest.c.outcome, latest.c.rid)
+                     .select_from(latest).outerjoin(C, C.id == latest.c.entity).outerjoin(m.User, m.User.id == latest.c.actor))
+    joined = union_all(*parts).subquery("flow")
+    rows = session.execute(select(*joined.c, func.count().over()).order_by(joined.c.at.desc(), joined.c.rid).offset(offset).limit(limit)).all()
     verb = "Stopped" if kind == "lost" else "Completed"
     return [{"at": r[0].isoformat(), "staffName": r[1] or "Unknown user", "kind": "candidate", "candidateId": r[2], "leadId": None, "careId": r[4],
              "name": r[3] or "No name", "client": r[5], "job": r[6],
-             "detail": f"{verb} stage {r[7]}: {STAGE_NOW_KEYS[r[7]][1]}" + (f" · {r[8]}" if r[8] else "")} for r in rows], (int(rows[0][9]) if rows else 0)
+             "detail": f"{verb} stage {r[7]}: {STAGE_NOW_KEYS[r[7]][1]}" + (f" · {r[8]}" if r[8] else "")} for r in rows], (int(rows[0][10]) if rows else 0)
 
 
 def _stuck_rows(session, number, staff_id, now, offset, limit):

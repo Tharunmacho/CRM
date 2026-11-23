@@ -14,6 +14,8 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from app.api.routers import applications, auth, candidates, data, files, ocr, inbox, users, reports, workflow, whatsapp, document_jobs, attendance, staff_directory
+from app.api.routers import application_reopen
+from app.api.routers import prescreening as prescreening_router
 from app.api.routers import leads as leads_router, lead_campaigns as lead_campaigns_router
 from app.api.routers import lead_bulk as lead_bulk_router
 from app.api.routers import candidate_import as candidate_import_router
@@ -148,6 +150,8 @@ def on_startup() -> None:
 
 app.include_router(auth.router)
 app.include_router(applications.router)
+app.include_router(application_reopen.router)
+app.include_router(prescreening_router.router)
 app.include_router(candidates.router)
 app.include_router(candidate_import_router.router)
 app.include_router(candidate_import_router.candidate_reading_router)

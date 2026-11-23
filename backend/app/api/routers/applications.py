@@ -336,6 +336,7 @@ def perform_map(db: Session, user: User, candidate_id: str, order_id: str, *, re
             if previous.current_stage != 1:
                 raise HTTPException(409, PAST_PRESCREENING)
             previous.status, previous.closure_reason = ApplicationStatus.closed, ClosureReason.changed_job
+            previous.closed_at = at
             previous.lock_version += 1
             for task in _open_tasks(db, previous):
                 task.cancelled_at = at
@@ -380,6 +381,7 @@ def perform_unmap(db: Session, user: User, application_id: str, lock_version: in
         _check_version(app, lock_version)
     at = datetime.now(timezone.utc)
     app.status, app.closure_reason = ApplicationStatus.closed, ClosureReason.unmapped
+    app.closed_at = at
     app.lock_version += 1
     for task in _open_tasks(db, app):
         task.cancelled_at = at
@@ -514,6 +516,7 @@ def complete_stage(application_id: str, body: CompleteIn,
         app.draft = {}
         if result.closes:
             app.status, app.closure_reason = ApplicationStatus.closed, ClosureReason(result.closes)
+            app.closed_at = at
             # The candidate said no (declined at any stage, declined the offer, not interested, not travelling): they go back to the
             # Data Bank marked "Not interested", so nobody reads them as a fresh "New" candidate to call again; they can still be
             # mapped to another job. A rejection by the client or the authorities (rejected, not paid, visa refused ...) is not
@@ -598,6 +601,7 @@ def reopen_stage(application_id: str, body: ReopenIn, db: Session = Depends(get_
         for task in _open_tasks(db, app):
             task.cancelled_at = at
         app.status, app.closure_reason, app.current_stage = ApplicationStatus.active, None, body.stage
+        app.closed_at = None
         app.draft_saved_at, app.draft_saved_by = at, user.id
         app.lock_version += 1
         candidate.status = CandidateStatus.in_process

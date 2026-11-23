@@ -47,6 +47,7 @@ def apply_call(db, user: User, c: Candidate, *, called: bool, interested: str, r
         said_no = interested == "no"
         for placement in prescreening:
             placement.status = ApplicationStatus.closed
+            placement.closed_at = closed_at
             placement.closure_reason = ClosureReason.not_interested if said_no else ClosureReason.prescreen_failed
             placement.lock_version += 1
             for open_task in _open_tasks(db, placement):
@@ -88,7 +89,7 @@ def apply_call(db, user: User, c: Candidate, *, called: bool, interested: str, r
     if source:
         meta["source"] = source
     db.add(AuditEntry(actor_id=user.id, action="Recorded initial call after matching" if on_order else "Recorded initial call",
-                      entity_type="candidate", entity_id=c.id, target=c.name, meta=meta))
+                      entity_type="candidate", entity_id=c.id, target=c.name, meta=meta, at=now))   # the call's own time: the reports date it by this
     notice = None
     if on_order and called and negative:
         notice = "Saved. This candidate is still on an order, so nothing on the order was changed. Unmap them or record the result in their stage if they should leave it."

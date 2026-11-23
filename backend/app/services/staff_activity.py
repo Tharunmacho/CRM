@@ -100,7 +100,15 @@ def presence_end(row, at):
 def staff_summary(user, attendance, presence, start, end, at):
     tracked = user.role == Role.staff
     cutoff = min(end, at)
-    shifts = merged((max(start, row.checked_in_at), min(cutoff, row.checked_out_at or at)) for row in attendance)
+    # A shift that never got its check-out counts for nothing once its day is over: half a day's punches prove nothing about how long the person
+    # stayed, and the monthly policy (attendance_policy.calculate_day) gives that day no worked minutes either, so the board and the month agree.
+    # While the day is still running (it contains `at`) an open shift counts up to now, which is what "still logged in" means.
+    finished = end <= at
+
+    def stop(row):
+        return row.checked_out_at or (None if finished else at)
+
+    shifts = merged((max(start, row.checked_in_at), min(cutoff, stop(row))) for row in attendance if stop(row) is not None)
     active = merged((max(start, row.started_at), min(cutoff, presence_end(row, at))) for row in presence if row.state == "online")
     idle = merged((max(start, row.started_at), min(cutoff, presence_end(row, at))) for row in presence if row.state == "idle")
     active_seconds = seconds(intersections(shifts, active))
@@ -118,7 +126,9 @@ def staff_summary(user, attendance, presence, start, end, at):
             "lastCheckedOutAt": max((row.checked_out_at for row in attendance if row.checked_out_at), default=None),
             "totalSeconds": total,
             "sessions": [{"id": row.id, "checkedInAt": row.checked_in_at, "checkedOutAt": row.checked_out_at,
-                "durationSeconds": seconds([(max(start, row.checked_in_at), min(cutoff, row.checked_out_at or at))]),
+                "durationSeconds": seconds([(max(start, row.checked_in_at), min(cutoff, stop(row)))]) if stop(row) is not None else 0,
+                # True for a shift that was never checked out and whose day is over (a missed check-out): it has no hours.
+                "unclosed": row.checked_out_at is None and finished,
                 "correctionReason": row.correction_reason, "correctedBy": row.corrected_by}
                 for row in sorted(attendance, key=lambda item: item.checked_in_at) if row.checked_in_at < end and (row.checked_out_at or at) >= start]},
         "presence": {"status": state, "tracked": tracked,

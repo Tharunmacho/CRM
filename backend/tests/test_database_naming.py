@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.security import SESSION_COOKIE, hash_password, verify_password
 from app.db.models import Base, Role, Session as SessionRow, User
+import template_db
 
 
 PREVIOUS = "0005_candidate_ocr_data"
@@ -138,7 +139,12 @@ def schema_database():
         engine.dispose()
 
 
-def _migrate(engine, revision, *, downgrade=False, connection=None):
+def _migrate(engine, revision, *, downgrade=False, connection=None, fresh=False):
+    """Run alembic. `upgrade head` on an EMPTY database is answered by cloning a once-migrated template (tests/template_db.py,
+    CRM_TEST_NO_TEMPLATE=1 turns that off); every other call, and any call with fresh=True, runs the real migrations."""
+    if revision == "head" and not downgrade and connection is None and not fresh:
+        if template_db.clone_head(engine, _migrate, _guard_test_url):
+            return
     config = Config(str(BACKEND / "alembic.ini"))
     if connection is not None:
         config.attributes["connection"] = connection
@@ -578,7 +584,7 @@ def test_supplied_transaction_can_validate_then_rollback_without_committing(sche
 
 def test_head_schema_matches_models_and_new_revisions_round_trip(schema_database):
     engine = schema_database
-    _migrate(engine, "head")
+    _migrate(engine, "head", fresh=True)  # this test exists to prove the real migrations, so it never uses the template clone
     catalog = inspect(engine)
     assert set(catalog.get_table_names(schema="public")) == {*Base.metadata.tables, "alembic_version"}
     for name, table in Base.metadata.tables.items():

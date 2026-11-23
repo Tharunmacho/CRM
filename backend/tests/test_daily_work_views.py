@@ -438,13 +438,14 @@ def test_the_date_of_commencement_is_saved_on_an_ended_placement_without_moving_
     desk.app.include_router(form_router.router)
     as_user(desk, "asha")
     with desk.sessions() as db:
-        closed_at = db.scalar(text("SELECT updated_at FROM crm_applications WHERE id = :a"), {"a": apps["c1"]})
+        closed_at = db.scalar(text("SELECT closed_at FROM crm_applications WHERE id = :a"), {"a": apps["c1"]})
+    assert closed_at is not None   # the closure carries its own time (never read from updated_at)
     saved = desk.client.put(f"/api/candidates/c1/application-form?applicationId={apps['c1']}", json={"application": {"commencementDate": "2026-12-20"}})
     assert saved.status_code == 200, saved.text
     row = view(desk, "asha", "rejected")["items"][0]
     assert row["commencementDate"] == "2026-12-20"
     with desk.sessions() as db:
-        assert db.scalar(text("SELECT updated_at FROM crm_applications WHERE id = :a"), {"a": apps["c1"]}) == closed_at
+        assert db.scalar(text("SELECT closed_at FROM crm_applications WHERE id = :a"), {"a": apps["c1"]}) == closed_at
         assert db.scalar(text("SELECT status FROM crm_applications WHERE id = :a"), {"a": apps["c1"]}) == "closed"
     # a candidate whose yes call is older than the closure is therefore still parked (the DOC edit did not make the closure newer)
     with desk.sessions() as db:
