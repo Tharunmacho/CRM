@@ -23,7 +23,7 @@ const statusKey = (candidate: Arrival) => {
   return STATUSES.some(item => item.key === status) ? status : 'new'
 }
 
-const SIZE = 240, STROKE = 26, RADIUS = (SIZE - STROKE) / 2 - 6, CIRCUMFERENCE = 2 * Math.PI * RADIUS
+const SIZE = 240, STROKE = 20, RADIUS = (SIZE - STROKE) / 2 - 6, CIRCUMFERENCE = 2 * Math.PI * RADIUS
 
 /** A round chart of the shares. Each arc is a slice; the centre shows the total, or the slice under the pointer. */
 function Donut({ title, unit, slices, visible, hover, onHover }: { title: string; unit: [string, string]; slices: Slice[]; visible: string[]; hover: string | null; onHover: (key: string | null) => void }) {
@@ -75,22 +75,26 @@ function RoundCard({ title, subtitle, icon: Icon, tone, unit, slices, empty, ope
       <span className="sg-chip"><Icon size={18} strokeWidth={1.9} /></span>
       <div><h2>{title}</h2><p>{subtitle}</p></div>
     </header>
-    <Donut title={title} unit={unit} slices={slices} visible={visible} hover={hover} onHover={setHover} />
-    <ul className="sg-list" aria-label={`Show or hide a slice of ${title}`}>{slices.map(slice => {
-      const on = visible.includes(slice.key)
-      return <li key={slice.key}>
-        <button type="button" aria-pressed={on} style={{ '--slice': slice.color } as CSSProperties} className={`sg-row${on ? '' : ' is-off'}${slice.value === 0 ? ' is-zero' : ''}${hover === slice.key ? ' is-hot' : ''}`} title={on ? `Hide ${slice.label}` : `Show ${slice.label}`}
-          onClick={() => toggle(slice.key)} onMouseEnter={() => on && setHover(slice.key)} onMouseLeave={() => setHover(null)}>
-          <i aria-hidden="true" />
-          <span className="sg-name">{slice.label}</span>
-          <b>{number(slice.value)}</b>
-          <em>{percent(slice.value, all)}%</em>
-          <span className="sg-bar" aria-hidden="true"><s style={{ width: `${percent(slice.value, all)}%` }} /></span>
-        </button>
-      </li>
-    })}</ul>
-    <p className="sg-insight">{all === 0 ? empty : <><b>{top.label}</b> is the largest: {number(top.value)} ({percent(top.value, all)}%).{shown < all ? ` Showing ${number(shown)} of ${number(all)}.` : ''}</>}</p>
-    <button type="button" className="sg-open" onClick={onOpen}>{openLabel}<ArrowRight size={15} /></button>
+    <div className="sg-body">
+      <Donut title={title} unit={unit} slices={slices} visible={visible} hover={hover} onHover={setHover} />
+      <ul className="sg-list" aria-label={`Show or hide a slice of ${title}`}>{slices.map(slice => {
+        const on = visible.includes(slice.key)
+        return <li key={slice.key}>
+          <button type="button" aria-pressed={on} style={{ '--slice': slice.color } as CSSProperties} className={`sg-row${on ? '' : ' is-off'}${slice.value === 0 ? ' is-zero' : ''}${hover === slice.key ? ' is-hot' : ''}`} title={on ? `Hide ${slice.label}` : `Show ${slice.label}`}
+            onClick={() => toggle(slice.key)} onMouseEnter={() => on && setHover(slice.key)} onMouseLeave={() => setHover(null)}>
+            <i aria-hidden="true" />
+            <span className="sg-name">{slice.label}</span>
+            <b>{number(slice.value)}</b>
+            <em>{percent(slice.value, all)}%</em>
+            <span className="sg-bar" aria-hidden="true"><s style={{ width: `${percent(slice.value, all)}%` }} /></span>
+          </button>
+        </li>
+      })}</ul>
+    </div>
+    <footer className="sg-foot">
+      <p className="sg-insight">{all === 0 ? empty : <><b>{top.label}</b> is the largest: {number(top.value)} ({percent(top.value, all)}%).{shown < all ? ` Showing ${number(shown)} of ${number(all)}.` : ''}</>}</p>
+      <button type="button" className="sg-open" onClick={onOpen}>{openLabel}<ArrowRight size={15} /></button>
+    </footer>
   </section>
 }
 

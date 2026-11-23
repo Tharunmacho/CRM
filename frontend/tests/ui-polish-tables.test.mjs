@@ -41,12 +41,12 @@ test('the currencies list is a table from 1024px with no inner scroll box and sh
   assert.match(card, /aria-label="None">—</)
 })
 
-test('dashboard cards are the shared SummaryCards (the Travelled look) on the 8 / 12 / 16 / 20 / 24 spacing scale, five across in two rows', async () => {
+test('dashboard cards are the shared SummaryCards (the Travelled look) on the 8 / 12 / 16 / 20 / 24 spacing scale, two rows (5 + 4) on a 20-column grid', async () => {
   const dash = await css('dashboard-simple.css')
-  assert.match(dash, /\.dashsimple \.ds-summary \.workspace-summary \{[^}]*grid-template-columns: repeat\(5, minmax\(0, 1fr\)\); gap: 16px;/)
+  assert.match(dash, /\.dashsimple \.ds-summary \.workspace-summary \{[^}]*grid-template-columns: repeat\(20, minmax\(0, 1fr\)\); gap: 16px;/)
   assert.match(dash, /\.dashsimple \{[^}]*gap: 24px;/)
   assert.doesNotMatch(dash, /\.ds-card/, 'the old compact card rules are gone')
-  assert.match(dash, /\.sg-card \{[^}]*padding: 20px;[^}]*border-radius: 16px;/)
+  assert.match(dash, /\.sg-card \{[^}]*padding: 20px;[^}]*border-radius: 12px;/)
   const tracker = await css('dashboard-tracker.css')
   assert.match(tracker, /\.dt-card \{[^}]*padding: 20px;[^}]*border-radius: 16px;/)
   assert.match(tracker, /\.dt-chip \{[^}]*min-height: 32px;[^}]*line-height: 20px;/)

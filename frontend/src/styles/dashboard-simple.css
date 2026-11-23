@@ -29,120 +29,132 @@
 .ds-error { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--error-edge); border-radius: 10px; background: var(--error-fill); color: var(--error-ink); font-size: 13px; }
 .ds-error button { margin-left: auto; border: 1px solid var(--error-edge); border-radius: 6px; background: var(--bg-card); padding: 4px 10px; color: var(--error-ink); font-size: 12px; cursor: pointer; }
 
-/* ---------- Number cards: the SAME cards as the Travelled totals (shared SummaryCards: icon chip and label on top, the big figure under them),
-   nine of them in exactly two rows on a desktop (a 5-column grid of equal widths: five cards, then four flush-left on the same columns),
-   three across when the five no longer fit, two on a tablet, one on a phone; the whole card is a link. ---------- */
+/* ---------- Number tiles: the SAME SummaryCards component as the Travelled totals, restyled ONLY here (the global stat-cards.css paints every card with a coloured wash
+   and a halo; the selectors below carry `html:root:root:root` + the dashboard scope so that nothing else in the CRM changes).
+   Enterprise KPI tiles: a plain white surface, a 1 px hairline, a very light shadow; the tone is used only for the small icon chip and the hover/focus accent.
+   Grid: nine tiles in exactly two rows without an empty slot: a 20-column grid, row one = five tiles spanning 4, row two = four tiles spanning 5, so both rows end
+   flush at the right edge with the same 16 px gaps. Under 930 px of dashboard width: 3 across (3 x 3), under 560 px: 2 across with the ninth tile full width. ---------- */
 .ds-summary { min-width: 0; }
-.dashsimple .ds-summary .workspace-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; margin-bottom: 0; align-items: stretch; }
-.dashsimple .ds-summary .summary-card { min-height: clamp(150px, 15cqw, 230px); }   /* a squarish tile that grows with the dashboard width (never shorter than a Travelled total card, 150 px; an aspect-ratio would make the tile refuse to shrink below 225 px wide) */
-/* Every tile is ONE centred column on the card's centre axis: the icon on top, the label under it, the big figure below. The label block always has room for two lines, so the
-   figures sit at the same height in every tile of a row. (Only the Dashboard: the shared card keeps its own alignment everywhere else, Travelled included.) */
-:root:root:root .dashsimple .ds-summary .summary-card { align-items: center; justify-content: center; gap: 10px; text-align: center; }
-:root:root:root .dashsimple .ds-summary .summary-card-top { flex-direction: column-reverse; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; min-height: 84px; text-align: center; }
-:root:root:root .dashsimple .ds-summary .summary-card-top > :not(.summary-icon) { flex: 0 0 auto; max-width: 100%; }
-:root:root:root .dashsimple .ds-summary .summary-value { margin-top: 0; text-align: center; }
-.dashsimple .ds-summary .summary-card.is-link { color: inherit; text-decoration: none; cursor: pointer; }
-.dashsimple .ds-summary .summary-card.is-link:hover { border-color: var(--border-hover); }
-.dashsimple .ds-summary .summary-card.is-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.dashsimple .ds-summary .summary-card-top > span:first-child { min-width: 0; overflow-wrap: break-word; word-break: normal; hyphens: none; }
-.dashsimple .ds-summary .summary-value.is-danger { color: var(--error-ink); }
+html:root:root:root .dashsimple .ds-summary .workspace-summary { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 16px; margin: 0; align-items: stretch; }
+html:root:root:root .dashsimple .ds-summary .workspace-summary > .summary-card { grid-column: span 4; }
+html:root:root:root .dashsimple .ds-summary .workspace-summary > .summary-card:nth-child(n + 6) { grid-column: span 5; }
+html:root:root:root .dashsimple .ds-summary .summary-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  min-height: clamp(128px, 12.5cqw, 150px); padding: 16px 12px; text-align: center;
+  border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); box-shadow: var(--shadow-card);
+  color: inherit; text-decoration: none; cursor: pointer; overflow: hidden;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+html:root:root:root .dashsimple .ds-summary .summary-card::before { content: none; display: none; }
+/* icon on top, label under it, the figure last: one centred column on the card's own axis */
+html:root:root:root .dashsimple .ds-summary .summary-card-top { flex-direction: column-reverse; align-items: center; justify-content: flex-end; gap: 10px; width: 100%; min-height: 0; font-size: 13px; font-weight: 500; line-height: 1.35; color: var(--text-muted); text-align: center; }
+html:root:root:root .dashsimple .ds-summary .summary-card-top > :not(.summary-icon) { flex: 0 0 auto; max-width: 100%; min-width: 0; overflow-wrap: normal; word-break: normal; hyphens: none; text-wrap: balance; }
+html:root:root:root .dashsimple .ds-summary .summary-icon { width: 36px; height: 36px; border-radius: 10px; box-shadow: none; transition: none; background: color-mix(in srgb, var(--tone) 11%, var(--bg-card)); color: color-mix(in srgb, var(--tone) 90%, var(--text-main)); }
+html:root:root:root .dashsimple .ds-summary .summary-value { margin: 0; font-size: 32px; font-weight: 650; line-height: 1.1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; color: var(--text-main); text-align: center; }
+html:root:root:root .dashsimple .ds-summary .summary-value.is-danger { color: var(--error-ink); }
+html:root:root:root .dashsimple .ds-summary .summary-card:has(.summary-value.is-danger) { border-color: color-mix(in srgb, var(--error-ink) 34%, var(--border-main)); }
+/* restrained interaction: a tinted hairline, a soft shadow and a 1 px lift; a clear ring for the keyboard */
+html:root:root:root .dashsimple .ds-summary .summary-card.is-link:hover { border-color: color-mix(in srgb, var(--tone) 42%, var(--border-main)); box-shadow: 0 4px 14px color-mix(in srgb, var(--tone) 12%, transparent); transform: translateY(-1px); }
+html:root:root:root .dashsimple .ds-summary .summary-card.is-link:hover .summary-icon { transform: none; box-shadow: none; }
+html:root:root:root .dashsimple .ds-summary .summary-card.is-link:active { transform: none; }
+html:root:root:root .dashsimple .ds-summary .summary-card.is-link:focus-visible { outline: 2px solid var(--tone); outline-offset: 2px; }
 
-/* ---------- The round graphs ---------- */
+/* ---------- Overview: the same visual language as the tiles (12 px curve, hairline, light shadow, one type scale) ---------- */
 .sg-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .sg-section > * { min-width: 0; }   /* the 7 days / 30 days / ... switch scrolls inside its own box instead of widening the page at 390px */
 .sg-bar-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; }
-.sg-bar-top h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.025em; }
-.sg-seg { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 6%, transparent); }
-.sg-seg button { height: 34px; padding: 0 16px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 13.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .16s, color .16s, box-shadow .16s; }
+.sg-bar-top h2 { margin: 0; font-size: 18px; font-weight: 600; line-height: 24px; letter-spacing: -.02em; }
+.sg-seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); }
+.sg-seg button { height: 30px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .15s, color .15s; }
 .sg-seg button:hover:not(.is-active) { background: var(--tint-1); color: var(--text-main); }
-.sg-seg button.is-active { background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 78%, #7c5cd6)); color: var(--on-primary); box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 34%, transparent); }
+.sg-seg button.is-active { background: var(--primary); color: var(--on-primary); font-weight: 600; }
 .sg-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
 
 .sg-blue { --tone: var(--ds-blue); } .sg-violet { --tone: var(--ds-violet); }
-.sg-card { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 20px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--tone) 14%, var(--border-main)); border-radius: 16px; background: radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--tone) 8%, var(--bg-card)) 0%, var(--bg-card) 70%); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 5%, transparent); transition: box-shadow .2s, border-color .2s; }
-.sg-card:hover { border-color: color-mix(in srgb, var(--tone) 38%, var(--border-main)); box-shadow: 0 14px 34px color-mix(in srgb, var(--tone) 13%, transparent); }
+.sg-card { position: relative; display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 20px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); box-shadow: var(--shadow-card); transition: border-color .15s; }
+.sg-card:hover { border-color: color-mix(in srgb, var(--tone) 30%, var(--border-main)); }
 .sg-head { display: flex; align-items: center; gap: 12px; }
-.sg-chip { display: grid; flex: none; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: color-mix(in srgb, var(--tone) 15%, var(--bg-card)); color: var(--tone); }
-.sg-head h2 { margin: 0; font-size: 16.5px; font-weight: 600; letter-spacing: -.02em; }
-.sg-head p { margin: 2px 0 0; font-size: 12.5px; color: var(--text-muted); }
+.sg-chip { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: color-mix(in srgb, var(--tone) 11%, var(--bg-card)); color: var(--tone); }
+.sg-head h2 { margin: 0; font-size: 15px; font-weight: 600; line-height: 20px; letter-spacing: -.01em; }
+.sg-head p { margin: 1px 0 0; font-size: 13px; line-height: 18px; color: var(--text-muted); }
+/* the chart and its legend side by side on a wide card, stacked on a narrow one */
+.sg-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: center; flex: 1 1 auto; }
 
-.sg-donut { position: relative; width: 220px; height: 220px; margin: 14px auto 12px; }
-.sg-donut svg { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 8px 14px color-mix(in srgb, var(--tone) 12%, transparent)); }
-.sg-ring { fill: none; stroke: color-mix(in srgb, var(--tone) 9%, var(--tint-2)); }
-.sg-disc { fill: var(--bg-card); stroke: color-mix(in srgb, var(--tone) 10%, var(--border-faint)); stroke-width: 1; }
-.sg-arc { cursor: pointer; transition: stroke-width .2s, opacity .2s, filter .2s; animation: sg-draw .95s cubic-bezier(.22, 1, .36, 1) both; }
-.sg-arc.is-hot { filter: drop-shadow(0 3px 8px color-mix(in srgb, var(--glow) 55%, transparent)); }
+.sg-donut { position: relative; width: 192px; height: 192px; margin: 0 auto; }
+.sg-donut svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.sg-ring { fill: none; stroke: var(--tint-2); }
+.sg-disc { fill: var(--bg-card); stroke: var(--border-faint); stroke-width: 1; }
+.sg-arc { cursor: pointer; transition: stroke-width .2s, opacity .2s; animation: sg-draw .8s cubic-bezier(.22, 1, .36, 1) both; }
 .sg-arc.is-dim { opacity: .3; }
 @keyframes sg-draw { from { stroke-dasharray: 0 var(--c); } }
-.sg-centre { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0 44px; pointer-events: none; text-align: center; }
-.sg-centre b { font-size: 40px; font-weight: 650; line-height: 1; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
+.sg-centre { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0 40px; pointer-events: none; text-align: center; }
+.sg-centre b { font-size: 30px; font-weight: 650; line-height: 1.1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .sg-centre span { font-size: 12.5px; line-height: 1.25; color: var(--text-muted); }
 
-.sg-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.sg-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; align-items: center; gap: 5px 10px; width: 100%; padding: 9px 11px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--text-main); text-align: left; cursor: pointer; transition: background-color .16s, border-color .16s, transform .16s; }
-.sg-row:hover, .sg-row.is-hot { border-color: color-mix(in srgb, var(--slice) 30%, var(--border-main)); background: color-mix(in srgb, var(--slice) 8%, var(--bg-card)); }
-.sg-row:active { transform: scale(.992); }
-.sg-row i { width: 12px; height: 12px; border-radius: 4px; background: var(--slice); box-shadow: 0 0 0 3px color-mix(in srgb, var(--slice) 18%, transparent); }
-.sg-name { overflow: hidden; font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.sg-row b { font-size: 15.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.sg-row em { min-width: 42px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--slice) 13%, var(--bg-card)); font-size: 12px; font-style: normal; font-weight: 600; text-align: center; color: var(--text-main); font-variant-numeric: tabular-nums; }
-.sg-bar { grid-column: 2 / -1; height: 5px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--slice) 10%, var(--tint-2)); }
+.sg-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.sg-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; align-items: center; gap: 4px 10px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-main); text-align: left; cursor: pointer; transition: background-color .15s, border-color .15s; }
+.sg-row:hover, .sg-row.is-hot { background: color-mix(in srgb, var(--slice) 7%, var(--bg-card)); border-color: color-mix(in srgb, var(--slice) 24%, var(--border-main)); }
+.sg-row i { width: 10px; height: 10px; border-radius: 3px; background: var(--slice); }
+.sg-name { overflow: hidden; font-size: 13.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.sg-row b { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sg-row em { min-width: 40px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--slice) 12%, var(--bg-card)); font-size: 12px; font-style: normal; font-weight: 600; text-align: center; color: var(--text-main); font-variant-numeric: tabular-nums; }
+.sg-bar { grid-column: 2 / -1; height: 4px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--slice) 10%, var(--tint-2)); }
 .sg-bar s { display: block; height: 100%; border-radius: 999px; background: var(--slice); transition: width .35s; }
 .sg-row.is-zero { color: var(--text-light); }
 .sg-row.is-zero b, .sg-row.is-zero em { color: var(--text-light); }
-.sg-row.is-zero i { box-shadow: none; opacity: .5; }
+.sg-row.is-zero i { opacity: .5; }
 .sg-row.is-off { opacity: .5; }
 .sg-row.is-off .sg-name { text-decoration: line-through; }
-.sg-insight { margin: 8px 2px 4px; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
-.sg-insight b { color: var(--text-main); }
-.sg-open { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 42px; margin-top: auto; border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--border-main)); border-radius: 12px; background: color-mix(in srgb, var(--tone) 9%, var(--bg-card)); color: var(--tone); font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color .16s, color .16s, box-shadow .16s, transform .16s; }
-.sg-open svg { transition: transform .18s; }
-.sg-open:hover { background: var(--tone); color: var(--on-primary); box-shadow: 0 8px 18px color-mix(in srgb, var(--tone) 30%, transparent); }
-.sg-open:hover svg { transform: translateX(3px); }
-.sg-open:active { transform: scale(.99); }
+/* the footer: what is largest on the left, the link to the Data Bank on the right, a hairline above */
+.sg-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding-top: 14px; border-top: 1px solid var(--border-faint); }
+.sg-insight { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text-muted); }
+.sg-insight b { color: var(--text-main); font-weight: 600; }
+.sg-open { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px solid var(--border-main); border-radius: 8px; background: transparent; color: var(--tone); font-size: 13px; font-weight: 600; cursor: pointer; transition: background-color .15s, border-color .15s; }
+.sg-open svg { transition: transform .15s; }
+.sg-open:hover { background: color-mix(in srgb, var(--tone) 8%, var(--bg-card)); border-color: color-mix(in srgb, var(--tone) 35%, var(--border-main)); }
+.sg-open:hover svg { transform: translateX(2px); }
 
-/* Five equal columns hold the icon, a two-line "Job / requirements" and the figure from a dashboard width of about 930 px (a 1280 px window with the sidebar open leaves
-   ~950 px, five cards of ~178 px): below 1100 px the cards get a tighter padding, gap and icon so the label box is ~110 px and no word is ever split. The skin sets the
-   card padding, gap and icon with `:root:root`, so these rules carry the same prefix. Under 930 px: three across. */
+/* ---------- Responsive, by the dashboard's own width (the sidebar eats ~250 px, so a window width means little) ---------- */
+@container dash (min-width: 700px) {
+  .sg-body { grid-template-columns: 192px minmax(0, 1fr); gap: 28px; }
+}
 @container dash (max-width: 1100px) {
-  :root:root .dashsimple .ds-summary .summary-card { padding: 14px 12px 14px; }
-  :root:root .dashsimple .ds-summary .summary-icon { width: 36px; height: 36px; }
+  html:root:root:root .dashsimple .ds-summary .summary-card { padding: 14px 10px; gap: 8px; }
+  html:root:root:root .dashsimple .ds-summary .summary-card-top { gap: 8px; font-size: 12.5px; }
+  html:root:root:root .dashsimple .ds-summary .summary-icon { width: 34px; height: 34px; }
+  html:root:root:root .dashsimple .ds-summary .summary-value { font-size: 28px; }
 }
 @container dash (max-width: 929px) {
-  :root:root .dashsimple .ds-summary .summary-card { padding: 18px 20px 20px; }
-  :root:root .dashsimple .ds-summary .summary-icon { width: 40px; height: 40px; }
-  .dashsimple .ds-summary .workspace-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .dashsimple .ds-summary .workspace-summary > :last-child:nth-child(odd):not(:only-child) { grid-column: auto; }   /* the shared tablet rule would stretch the ninth card over three columns */
+  html:root:root:root .dashsimple .ds-summary .workspace-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  html:root:root:root .dashsimple .ds-summary .workspace-summary > .summary-card, html:root:root:root .dashsimple .ds-summary .workspace-summary > .summary-card:nth-child(n + 6) { grid-column: auto; }
+  html:root:root:root .dashsimple .ds-summary .summary-card { min-height: 128px; padding: 16px 12px; }
+  .sg-grid { grid-template-columns: minmax(0, 1fr); }
 }
-@container dash (max-width: 700px) {
-  .dashsimple .ds-summary .summary-card { min-height: 150px; }   /* two across are wide: keep the 150 px minimum height, no tall slabs */
-  .dashsimple .ds-summary .workspace-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .dashsimple .ds-summary .workspace-summary > :last-child:nth-child(odd):not(:only-child) { grid-column: 1 / -1; }
+@container dash (max-width: 560px) {
+  html:root:root:root .dashsimple .ds-summary .workspace-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  html:root:root:root .dashsimple .ds-summary .workspace-summary > .summary-card:last-child { grid-column: 1 / -1; }   /* nine tiles: the last one fills the row */
+  html:root:root:root .dashsimple .ds-summary .summary-card { min-height: 112px; padding: 14px 10px; }
+  html:root:root:root .dashsimple .ds-summary .summary-value { font-size: 26px; }
+  .sg-card { padding: 16px; }
+  .sg-bar-top .sg-seg { width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .sg-bar-top .sg-seg::-webkit-scrollbar { display: none; }
+  .sg-seg { gap: 0; }
+  .sg-seg button { flex: 1 1 auto; padding: 0 6px; font-size: 12.5px; }
+  .sg-foot { flex-direction: column; align-items: stretch; }
+  .sg-open { width: 100%; }
 }
-@media (max-width: 760px) { .sg-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 760px) {
   .ds-head h1 { font-size: 24px; line-height: 30px; padding-bottom: 12px; }
-  .dashsimple .ds-summary .workspace-summary { gap: 12px; }
-  .sg-card { padding: 16px; }
-  .sg-bar-top .sg-seg { width: 100%; overflow-x: auto; }
-  .sg-seg button { flex: 1 0 auto; padding: 0 12px; }
 }
-@media (prefers-reduced-motion: reduce) { .sg-arc, .sg-bar s, .sg-open, .sg-row, .sg-seg button { transition: none; animation: none; } }
-/* Phones and tablets: body text reads at 14 px and every card, tab and button is at least 44 px. */
+@media (prefers-reduced-motion: reduce) {
+  html:root:root:root .dashsimple .ds-summary .summary-card, .sg-arc, .sg-bar s, .sg-open, .sg-row, .sg-seg button { transition: none; animation: none; }
+  html:root:root:root .dashsimple .ds-summary .summary-card.is-link:hover { transform: none; }
+}
+/* Phones and tablets: body text reads at 14 px and every tile, tab and button is at least 44 px. */
 @media (max-width: 1023px), (pointer: coarse) {
   .sg-head p, .sg-insight, .sg-name { font-size: 14px; }
   .sg-seg button { height: 44px; }
   .sg-row { min-height: 44px; }
   .sg-open { height: 44px; }
   .ds-error button { min-height: 44px; padding: 0 16px; font-size: 14px; }
-}
-@media (max-width: 760px) {
-  .sg-seg { gap: 2px; scrollbar-width: none; }
-  .sg-seg::-webkit-scrollbar { display: none; }
-  .sg-seg button { padding: 0 10px; }
-}
-/* A phone: one card per row, so a label such as "Job requirements" is never cut off. */
-@media (max-width: 520px) {
-  .dashsimple .ds-summary .summary-card { min-height: 150px; }
-  .dashsimple .ds-summary .workspace-summary { grid-template-columns: minmax(0, 1fr); gap: 10px; }
 }
