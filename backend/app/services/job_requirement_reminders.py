@@ -1,6 +1,6 @@
 """Deadline reminders for the Job requirements sheet, one small idempotent pass beside the day-end report.
 
-* An ACTIVE requirement whose ``details.deadline`` is today or earlier notifies its owner once per requirement per (agency) day.
+* An ACTIVE requirement whose ``details.deadline`` is today or earlier notifies EVERY owner (``owner_ids``) once per requirement per (agency) day.
 * The first day it is overdue (deadline before today) every Admin / MD is told once for that deadline (a new deadline can be told again).
 * Every notice leaves a marker row in the audit log (entity ``job_requirement_reminder``), so a rerun, a restart or a second worker never
   repeats it. The caller commits.
@@ -25,9 +25,20 @@ LOCK_KEY = 724681930121   # next to the day-end report lock, never the same
 DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
 
 
+def _owners(row: JobRequirement) -> list[str]:
+    ids = [value for value in (row.owner_ids if isinstance(row.owner_ids, list) else []) if isinstance(value, str) and value]
+    return list(dict.fromkeys(ids)) or ([row.owner_id] if row.owner_id else [])
+
+
+def _position_names(row: JobRequirement) -> str:
+    """The first three position titles of the form, or the old single 'position' of a requirement entered before the form had positions."""
+    titles = [str(item.get("title") or "").strip() for item in (row.positions if isinstance(row.positions, list) else []) if isinstance(item, dict)]
+    titles = [title for title in titles if title]
+    return ", ".join(titles[:3]) if titles else str((row.details or {}).get("position") or "").strip()
+
+
 def _label(row: JobRequirement) -> str:
-    parts = [row.client_name or "A client", (row.details or {}).get("position") or ""]
-    return " · ".join(part for part in (parts[0], parts[1], row.country or "") if part)
+    return " · ".join(part for part in (row.client_name or "A client", _position_names(row), row.country or "") if part)
 
 
 def deliver_job_requirement_reminders(db, *, now: datetime | None = None, agency_timezone: str | None = None) -> dict:
@@ -45,19 +56,22 @@ def deliver_job_requirement_reminders(db, *, now: datetime | None = None, agency
     for entity_id, action, target in db.execute(select(AuditEntry.entity_id, AuditEntry.action, AuditEntry.target).where(
             AuditEntry.entity_type == MARKER_ENTITY, AuditEntry.entity_id.in_(ids))):
         markers.add((entity_id, action, target))
-    owner_ids = {row.owner_id for row in due if row.owner_id}
+    owner_ids = {value for row in due for value in _owners(row)}
     owners = {user.id for user in db.scalars(select(User).where(User.id.in_(owner_ids), User.active.is_(True)))} if owner_ids else set()
     admins = list(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_(ADMIN_LEVEL_ROLES)).order_by(User.id)))
     for row in due:
         when = row.details["deadline"]
         days = (today - date.fromisoformat(when)).days
         label = _label(row)
-        if row.owner_id in owners and (row.id, OWNER_ACTION, today.isoformat()) not in markers:
-            title = "Job requirement deadline is today" if days == 0 else f"Job requirement is {days} day{'s' if days != 1 else ''} overdue"
-            db.add(Notification(user_id=row.owner_id, kind=KIND, title=title, detail=f"{label} · deadline {when}", link_to=LINK))
-            db.add(AuditEntry(actor_id=None, action=OWNER_ACTION, target=today.isoformat(), entity_type=MARKER_ENTITY, entity_id=row.id,
-                              meta={"owner": row.owner_id, "deadline": when}, at=now))
-            result["owners"] += 1
+        title = "Job requirement deadline is today" if days == 0 else f"Job requirement is {days} day{'s' if days != 1 else ''} overdue"
+        for position, owner_id in enumerate(_owners(row)):
+            # one notice per owner per day; the first owner's marker keeps the original key, the others carry their id
+            marker = today.isoformat() if position == 0 else f"{today.isoformat()}:{owner_id}"
+            if owner_id in owners and (row.id, OWNER_ACTION, marker) not in markers:
+                db.add(Notification(user_id=owner_id, kind=KIND, title=title, detail=f"{label} · deadline {when}", link_to=LINK))
+                db.add(AuditEntry(actor_id=None, action=OWNER_ACTION, target=marker, entity_type=MARKER_ENTITY, entity_id=row.id,
+                                  meta={"owner": owner_id, "deadline": when}, at=now))
+                result["owners"] += 1
         if days > 0 and admins and (row.id, ADMIN_ACTION, when) not in markers:
             for admin_id in admins:
                 db.add(Notification(user_id=admin_id, kind=KIND, title="Job requirement is overdue", link_to=LINK,

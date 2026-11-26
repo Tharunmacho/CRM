@@ -1985,13 +1985,16 @@ class JobRequirement(Base, PkMixin, TimestampMixin):
     client_name: Mapped[str] = mapped_column(String(200), nullable=False, server_default=text("''"))
     country: Mapped[str] = mapped_column(String(100), nullable=False, server_default=text("''"))
     details: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), comment="The requirement form: the 16 sheet items (position, vacancies, placeOfWork, contractPeriod, qualification, agePreference, additionalSkills, basicSalary, workingHours, overtime, otCalculation, food, accommodation, insurance, transport, remarks) and deadline.")
+    positions: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), comment="The client's job positions: [{id, title, vacancies, salary, requirements: [{id, field, details}]}]; vacancies and salary may be text.")
+    general: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), comment="General employment details: [{id, label, details, remarks}] (working hours, contract period, place of work, food, accommodation, visa ...).")
     status: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'active'"), comment="active or closed.")
     custom: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), comment="Values of the recruiter-added columns, {field id: value}.")
     ad_object_key: Mapped[str | None] = mapped_column(String(500), comment="Storage key of the uploaded ad image or PDF.")
     ad_file_name: Mapped[str | None] = mapped_column(String(255))
     ad_content_type: Mapped[str | None] = mapped_column(String(100))
     ad_size_kb: Mapped[int | None] = mapped_column(Integer)
-    owner_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), comment="The recruiter or MD this requirement is assigned to; the creator by default.")
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), comment="The first recruiter or MD this requirement is assigned to (owner_ids[0]); the creator by default.")
+    owner_ids: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), comment="Every recruiter or MD the requirement is assigned to, in order: a list of user ids. owner_id mirrors the first one.")
     closed_reason: Mapped[str | None] = mapped_column(String(20), comment="Why it was closed: filled, client_cancelled, expired or other; empty while active or when skipped.")
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="When the status last became closed; cleared on reopening.")
     created_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
@@ -2002,6 +2005,23 @@ class JobRequirement(Base, PkMixin, TimestampMixin):
         CheckConstraint("status IN ('active','closed')", name="ck_crm_job_requirements_status"),
         CheckConstraint("closed_reason IS NULL OR closed_reason IN ('filled','client_cancelled','expired','other')", name="ck_crm_job_requirements_closed_reason"),
         {"comment": "Job requirements recruiters keep by hand: client, country, requirement form, ad flyer, status and recruiter-added columns."},
+    )
+
+
+class JobRequirementOption(Base, PkMixin):
+    """A name staff added to the Job Requirement Form pickers: a requirement field (Qualification, Maximum Age ...) or a general particular (Working Hours ...)."""
+
+    __tablename__ = "crm_job_requirement_options"
+    kind: Mapped[str] = mapped_column(String(12), nullable=False, comment="requirement (a field under a job position) or particular (a general employment detail).")
+    label: Mapped[str] = mapped_column(String(100), nullable=False, comment="The name shown in the picker; saved rows keep their own copy of the text.")
+    standard: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"), comment="Only for particulars: shown as a default row on every new form.")
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"), comment="Order within its kind, lowest first.")
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        Index("uq_crm_job_requirement_options_kind_label", "kind", text("lower(label)"), unique=True),
+        CheckConstraint("kind IN ('requirement','particular')", name="ck_crm_job_requirement_options_kind"),
+        {"comment": "Names staff created for the Job Requirement Form pickers (requirement fields and general particulars), with the ones shown by default."},
     )
 
 

@@ -284,6 +284,13 @@ BEGIN
       END;
     END IF;
   END LOOP;
+  -- Job requirements keep a list of owner ids (no foreign key): the list follows owner_id and moves to "Former user" too.
+  UPDATE crm_job_requirements SET owner_ids = (
+      SELECT COALESCE(jsonb_agg(v ORDER BY first_at), '[]'::jsonb) FROM (
+        SELECT v, min(ord) AS first_at FROM (
+          SELECT CASE WHEN e = old_id THEN fid ELSE e END AS v, ord FROM jsonb_array_elements_text(owner_ids) WITH ORDINALITY AS t(e, ord)
+        ) s GROUP BY v) d)
+    WHERE owner_ids @> jsonb_build_array(old_id);
 END
 $block$"""
 

@@ -18,12 +18,15 @@ from app.core.config import get_settings
 
 # Cell styles (cellXfs indexes in styles.xml below).
 DEFAULT, HEADER, DATE, DATETIME, TEXT, WRAP, BOLD, GRID = 0, 1, 2, 3, 4, 5, 6, 7
+# Form-style sheets (see `cell_styles` below): a big centred title, a shaded section line, a shaded bordered table heading, a centred bordered cell.
+TITLE, SECTION, GRID_HEAD, GRID_CENTER = 8, 9, 10, 11
 
 NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 STYLES = (
     f'<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="{NS}">'
     '<numFmts count="2"><numFmt numFmtId="164" formatCode="dd\\ mmm\\ yyyy"/><numFmt numFmtId="165" formatCode="dd\\ mmm\\ yyyy\\ hh:mm"/></numFmts>'
-    '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+    '<fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font>'
+    '<font><b/><sz val="14"/><name val="Calibri"/></font></fonts>'
     '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
     '<fill><patternFill patternType="solid"><fgColor rgb="FFDCE6F2"/><bgColor indexed="64"/></patternFill></fill></fills>'
     '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border>'
@@ -31,7 +34,7 @@ STYLES = (
     '<border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right>'
     '<top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border></borders>'
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-    '<cellXfs count="8">'
+    '<cellXfs count="12">'
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
     '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
     '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="left"/></xf>'
@@ -40,6 +43,10 @@ STYLES = (
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>'
     '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>'
+    '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>'
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top" wrapText="1"/></xf>'
     '</cellXfs></styleSheet>'
 )
 
@@ -96,16 +103,23 @@ def cell_xml(ref: str, value, style: int | None = None) -> str:
 
 
 def sheet_xml(rows: list[list], widths: list[float] | None, header: bool, freeze: bool, filtered: bool, bold_first: bool,
-              grid: bool = False) -> str:
-    """`grid`: every body cell gets a thin border and wrapped, top-aligned text, and rows are left to Excel to size (nothing is cut off)."""
+              grid: bool = False, cell_styles: dict[tuple[int, int], int] | None = None, merges: list[str] | None = None,
+              heights: dict[int, float] | None = None) -> str:
+    """`grid`: every body cell gets a thin border and wrapped, top-aligned text, and rows are left to Excel to size (nothing is cut off).
+    `cell_styles`: {(row, column): style} (both 0-based) overriding the style of single cells; `merges`: ranges like "A1:D1";
+    `heights`: {row number (1-based): points} for rows Excel cannot size itself (merged cells)."""
     width = max((len(r) for r in rows), default=1)
     out = []
     for r, row in enumerate(rows, 1):
         cells = []
         for c, value in enumerate(row):
             style = HEADER if header and r == 1 else (GRID if grid else BOLD if bold_first and c == 0 else None)
+            if cell_styles and (r - 1, c) in cell_styles:
+                style = cell_styles[(r - 1, c)]
             cells.append(cell_xml(f"{column_name(c)}{r}", value, style))
         height = ' ht="30" customHeight="1"' if header and r == 1 else ""
+        if heights and r in heights:
+            height = f' ht="{heights[r]}" customHeight="1"'
         if not height and not grid:
             lines = max((len(value.splitlines()) for value in row if isinstance(value, str)), default=1)
             if lines > 1:
@@ -117,7 +131,8 @@ def sheet_xml(rows: list[list], widths: list[float] | None, header: bool, freeze
     pane = ('<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
             '<selection pane="bottomLeft"/></sheetView></sheetViews>') if freeze else '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
     auto = f'<autoFilter ref="A1:{column_name(width - 1)}{max(1, len(rows))}"/>' if filtered and rows else ""
-    return f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="{NS}">{pane}{cols}<sheetData>{"".join(out)}</sheetData>{auto}</worksheet>'
+    merged = f'<mergeCells count="{len(merges)}">' + "".join(f'<mergeCell ref="{ref}"/>' for ref in merges) + "</mergeCells>" if merges else ""
+    return f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="{NS}">{pane}{cols}<sheetData>{"".join(out)}</sheetData>{auto}{merged}</worksheet>'
 
 
 def safe_sheet_name(name: str, taken: set[str]) -> str:
@@ -131,7 +146,8 @@ def safe_sheet_name(name: str, taken: set[str]) -> str:
 
 
 def build_workbook(sheets: list[dict]) -> bytes:
-    """`sheets`: dicts with `name`, `rows` (first row is the header when `header`), optional `widths`, `header`, `freeze`, `filter`, `bold_first`, `grid`."""
+    """`sheets`: dicts with `name`, `rows` (first row is the header when `header`), optional `widths`, `header`, `freeze`, `filter`, `bold_first`, `grid`,
+    `cell_styles`, `merges`, `heights` (see sheet_xml)."""
     out = BytesIO()
     taken: set[str] = set()
     names = [safe_sheet_name(s["name"], taken) for s in sheets]
@@ -152,7 +168,8 @@ def build_workbook(sheets: list[dict]) -> bytes:
         archive.writestr("xl/styles.xml", STYLES)
         for i, sheet in enumerate(sheets, 1):
             archive.writestr(f"xl/worksheets/sheet{i}.xml", sheet_xml(sheet["rows"], sheet.get("widths"), sheet.get("header", True), sheet.get("freeze", True),
-                                                                    sheet.get("filter", True), sheet.get("bold_first", False), sheet.get("grid", False)))
+                                                                    sheet.get("filter", True), sheet.get("bold_first", False), sheet.get("grid", False),
+                                                                    sheet.get("cell_styles"), sheet.get("merges"), sheet.get("heights")))
     return out.getvalue()
 
 

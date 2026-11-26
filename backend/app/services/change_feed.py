@@ -75,6 +75,7 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "crm_job_designations": ("designations",),
     "crm_job_requirements": ("job_requirements",),  # the Job requirements sheet and its dashboard card
     "crm_job_requirement_fields": ("job_requirements",),
+    "crm_job_requirement_options": ("job_requirements",),
     "system_notifications": ("notifications",),
     "personal_todos": ("todos",),
     "auth_users": ("users",),
