@@ -1,20 +1,19 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { AlertCircle, Copy, Plus, Settings2, Trash2 } from 'lucide-react'
+import { AlertCircle, Copy, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { Button, Field, IconButton, Input, Textarea } from '@/shared/ui/primitives'
 import { DatePicker } from '@/shared/ui/date-picker'
 import { Dialog } from '@/shared/ui/overlay'
 import { SuggestInput } from '@/shared/ui/suggest-input'
 import {
-  GENERAL_DEFAULTS, GENERAL_SUGGESTIONS, LIMITS, QUICK_REQUIREMENT_FIELDS, REQUIREMENT_FIELD_SUGGESTIONS, TO_BE_CONFIRMED,
-  blankGeneral, blankPosition, blankRequirement, buildPatch, copyFieldsToOthers, fillToBeConfirmed, formFor, formProblems, isEmptyPatch, mergeSuggestions, unusedNames,
+  GENERAL_DEFAULTS, GENERAL_SUGGESTIONS, LIMITS, REQUIREMENT_FIELD_SUGGESTIONS,
+  blankGeneral, blankPosition, blankRequirement, buildPatch, copyFieldsToOthers, formFor, formProblems, isEmptyPatch, mergeSuggestions,
   type GeneralRow, type OptionKind, type Position, type PositionRequirement, type RequirementForm, type RequirementItem, type RequirementOption, type RequirementPatch,
 } from '@/features/job-requirements/job-requirements-model'
 import '@/styles/job-requirement-form.css'
 
 const BUILT_IN_PARTICULARS = [...GENERAL_DEFAULTS, ...GENERAL_SUGGESTIONS]
 const createLabel = (kind: OptionKind) => (typed: string) => `+ Create "${typed}" ${kind === 'requirement' ? 'requirement field' : 'particular'}`
-const CONFIRM_OPTIONS = [TO_BE_CONFIRMED]
 
 /** A numbered band that starts a section of the form (the same primary-blue band as the table header). */
 function Band({ no, id, title }: { no: number; id: string; title: string }) {
@@ -34,13 +33,13 @@ const RowError = ({ message }: { message?: string }) => (message ? <p className=
  * confirmation. It is a div, not a form: Enter moves to the next box and never saves or closes. The baseline is frozen when the form opens, so Save sends only
  * what THIS person changed (whole positions / general lists, the deadline, the confirmation), never somebody else's newer value written back from a stale copy.
  */
-export function JobRequirementForm({ item, options = [], gone = false, onClose, onSave, onCreateOption, onManage }: {
+export function JobRequirementForm({ item, options = [], gone = false, onClose, onSave, onCreateOption }: {
   item: RequirementItem
   /** The field names staff added (suggested after the built-in ones). */
   options?: readonly RequirementOption[]
   /** Creates a field name for everybody right away; throws with the server's message when it cannot (a duplicate, no connection). */
   onCreateOption?: (kind: OptionKind, label: string) => Promise<unknown>
-  /** Opens the "Manage fields" dialog (the form and what was typed stay open under it). */
+  /** Accepted for the screen's call, which also keeps the page-header manager; the form itself has no button for it. */
   onManage?: () => void
   /** The row was deleted by someone else while this form was open: what was typed stays, saving is off. */
   gone?: boolean
@@ -89,16 +88,16 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
 
   const addPosition = () => { const created = blankPosition(); focusKey.current = `${created.id}-title`; setPositions((list) => [...list, created]) }
   const removePosition = (id: string) => { focusKey.current = 'add-position'; setPositions((list) => { const rest = list.filter((entry) => entry.id !== id); return rest.length ? rest : [blankPosition()] }) }
-  const addRequirement = (positionId: string, field = '') => {
-    const created = blankRequirement(field)
-    focusKey.current = `${created.id}-${field ? 'details' : 'field'}`
+  const addRequirement = (positionId: string) => {
+    const created = blankRequirement('')
+    focusKey.current = `${created.id}-field`
     setPositions((list) => list.map((entry) => (entry.id === positionId && entry.requirements.length < LIMITS.requirements ? { ...entry, requirements: [...entry.requirements, created] } : entry)))
   }
   const removeRequirement = (positionId: string, id: string) => {
     focusKey.current = `add-requirement-${positionId}`
     setPositions((list) => list.map((entry) => (entry.id === positionId ? { ...entry, requirements: entry.requirements.filter((row) => row.id !== id) } : entry)))
   }
-  const addGeneral = (label = '') => { const created = blankGeneral(label); focusKey.current = `${created.id}-${label ? 'details' : 'label'}`; setGeneral((list) => (list.length < LIMITS.general ? [...list, created] : list)) }
+  const addGeneral = () => { const created = blankGeneral(''); focusKey.current = `${created.id}-label`; setGeneral((list) => (list.length < LIMITS.general ? [...list, created] : list)) }
   const removeGeneral = (id: string) => { focusKey.current = 'add-general'; setGeneral((list) => list.filter((row) => row.id !== id)) }
 
   const requestClose = () => { if (saving) return; if (dirty) setAsking((current) => !current); else onClose() }
@@ -130,11 +129,9 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
 
   const named = form.positions.map((position, index) => ({ position, index, name: position.title.trim() || `Position ${index + 1}` }))
   const cards = named.filter(({ position }) => position.title.trim() || position.requirements.length > 0)
-  const usedGeneral = form.general.map((row) => row.label)
-  const moreGeneral = unusedNames(particularNames, usedGeneral).slice(0, 8)
 
   return (
-    <Dialog open onClose={requestClose} width="xl" title={`Requirements: ${item.clientName.trim() || 'new requirement'}`}
+    <Dialog open onClose={requestClose} width="xl" title="Job requirements"
       footer={asking ? <>
         <span className="jrf-foot-note is-warn" role="alert">Discard what you changed?</span>
         <Button variant="secondary" onClick={onClose}>Discard changes</Button>
@@ -148,11 +145,6 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
         <Button variant="primary" onClick={() => void submit()} disabled={saving || gone}>{saving ? 'Saving...' : 'Save'}</Button>
       </>}>
       <div className="jrf" ref={root} onKeyDown={enterMoves}>
-        {onManage && (
-          <div className="jrf-top">
-            <Button size="sm" icon={<Settings2 />} onClick={onManage}>Manage fields</Button>
-          </div>
-        )}
         {gone && <p role="alert" className="jr-gone">This requirement was deleted by someone else. What you typed is still here, but it can no longer be saved.</p>}
 
         {/* 1 ------------------------------------------------------------ job positions */}
@@ -172,13 +164,13 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
                   </div>
                   <div className="jrf-cell" data-area="vac">
                     <span className="jrf-m" aria-hidden="true">No. of vacancies</span>
-                    <SuggestInput value={position.vacancies} options={CONFIRM_OPTIONS} maxLength={LIMITS.vacancies} placeholder="e.g. 5" aria-label={`No. of vacancies of position ${index + 1}`}
-                      onChange={(value) => editPosition(position.id, { vacancies: value })} />
+                    <Input value={position.vacancies} maxLength={LIMITS.vacancies} placeholder="e.g. 5" autoComplete="off" aria-label={`No. of vacancies of position ${index + 1}`}
+                      onChange={(event) => editPosition(position.id, { vacancies: event.target.value })} />
                   </div>
                   <div className="jrf-cell" data-area="sal">
                     <span className="jrf-m" aria-hidden="true">Salary</span>
-                    <SuggestInput value={position.salary} options={CONFIRM_OPTIONS} maxLength={LIMITS.salary} placeholder="e.g. AED 1,500" aria-label={`Salary of position ${index + 1}`}
-                      onChange={(value) => editPosition(position.id, { salary: value })} />
+                    <Input value={position.salary} maxLength={LIMITS.salary} placeholder="e.g. AED 1,500" autoComplete="off" aria-label={`Salary of position ${index + 1}`}
+                      onChange={(event) => editPosition(position.id, { salary: event.target.value })} />
                   </div>
                   <IconButton label={`Remove position ${index + 1}`} className="jrf-rm" onClick={() => removePosition(position.id)}><Trash2 className="h-4 w-4" /></IconButton>
                   <RowError message={error} />
@@ -186,8 +178,7 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
               )
             })}
             <div className="jrf-actions">
-              <Button size="sm" icon={<Plus />} data-fk="add-position" onClick={addPosition} disabled={form.positions.length >= LIMITS.positions}>Add position</Button>
-              <Button size="sm" variant="ghost" onClick={() => edit((current) => ({ ...current, positions: fillToBeConfirmed(current.positions) }))}>Fill empty vacancies and salary with &ldquo;{TO_BE_CONFIRMED}&rdquo;</Button>
+              <Button size="sm" className="jrf-add" icon={<Plus />} data-fk="add-position" onClick={addPosition} disabled={form.positions.length >= LIMITS.positions}>Add position</Button>
             </div>
           </div>
         </section>
@@ -198,7 +189,6 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
           <div className="jrf-box is-flush">
             {cards.length === 0 && <p className="jrf-empty">No job positions yet</p>}
             {cards.map(({ position, index, name }) => {
-              const spare = unusedNames(QUICK_REQUIREMENT_FIELDS, position.requirements.map((row) => row.field))
               const full = position.requirements.length >= LIMITS.requirements
               return (
                 <div key={position.id} className="jrf-pcard" role="group" aria-label={`Requirements of ${name}`}>
@@ -227,10 +217,9 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
                     )
                   })}
                   <div className="jrf-actions">
-                    <Button size="sm" icon={<Plus />} data-fk={`add-requirement-${position.id}`} disabled={full} onClick={() => addRequirement(position.id)}>Add requirement</Button>
-                    {!full && spare.map((field) => <button key={field} type="button" className="jrf-chip" onClick={() => addRequirement(position.id, field)}><Plus size={12} aria-hidden="true" />{field}</button>)}
+                    <Button size="sm" className="jrf-add" icon={<Plus />} data-fk={`add-requirement-${position.id}`} disabled={full} onClick={() => addRequirement(position.id)}>Add requirement</Button>
                     {position.requirements.length > 0 && cards.length > 1 && (
-                      <Button size="sm" variant="ghost" icon={<Copy />} onClick={() => edit((current) => ({ ...current, positions: copyFieldsToOthers(current.positions, position.id) }))}>Use these fields for the other positions</Button>
+                      <Button size="sm" variant="ghost" className="jrf-add" icon={<Copy />} onClick={() => edit((current) => ({ ...current, positions: copyFieldsToOthers(current.positions, position.id) }))}>Use these fields for the other positions</Button>
                     )}
                   </div>
                 </div>
@@ -270,8 +259,7 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
               )
             })}
             <div className="jrf-actions">
-              <Button size="sm" icon={<Plus />} data-fk="add-general" disabled={form.general.length >= LIMITS.general} onClick={() => addGeneral()}>Add particular</Button>
-              {moreGeneral.map((name) => <button key={name} type="button" className="jrf-chip" disabled={form.general.length >= LIMITS.general} onClick={() => addGeneral(name)}><Plus size={12} aria-hidden="true" />{name}</button>)}
+              <Button size="sm" className="jrf-add" icon={<Plus />} data-fk="add-general" disabled={form.general.length >= LIMITS.general} onClick={addGeneral}>Add particular</Button>
             </div>
           </div>
         </section>
