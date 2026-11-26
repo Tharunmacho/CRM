@@ -314,3 +314,9 @@ html:root:root .jr .jr-table tbody td.is-left { padding-left: 10px; }
 .jr .jro-trigger { justify-content: center; }
 .jr .jro-names { flex: 0 1 auto; }
 .jr .jr-foot { justify-content: center; }
+
+/* the "Add field" header cell reads like the other headings: same type, centred, the whole cell is the button */
+.jr .jr-table thead th.jr-th-add { padding: 0; }
+.jr .jr-addfield { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; min-height: 44px; padding: 0 6px; border: 0; border-radius: 0; background: transparent; color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.jr .jr-addfield:hover { background: color-mix(in srgb, var(--on-primary) 14%, transparent); }
+.jr .jr-addfield:focus-visible { outline: 2px solid var(--on-primary); outline-offset: -3px; }

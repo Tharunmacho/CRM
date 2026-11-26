@@ -742,11 +742,11 @@ export const summaryCounts = (summary: RequirementSummary): Record<StatusFilter,
 /* ------------------------------------------------------------------ the column widths */
 
 /** The columns that never change width (px): S.No, DOC (box and calendar button on one line), Country, Assigned to, Ad (a fixed thumbnail slot and its two buttons), Status (the switch), the row actions. */
-export const FIXED_WIDTHS = { serial: 46, doc: 122, country: 104, owner: 164, ad: 84, status: 90, actions: 96 } as const
+export const FIXED_WIDTHS = { serial: 46, doc: 118, country: 104, owner: 164, ad: 84, status: 90, actions: 112 } as const
 export const FIXED_TOTAL = Object.values(FIXED_WIDTHS).reduce((sum, width) => sum + width, 0)
 export const CUSTOM_WIDTH = 150
 /** Client name and Requirements details together never get less than this; below it the box scrolls sideways. */
-export const FLEX_MIN = 340
+export const FLEX_MIN = 330
 
 export interface ColumnWidths { client: number; details: number; country: number; owner: number; total: number }
 /** The longest text typed in each growing column (characters). */
@@ -774,7 +774,7 @@ export function columnWidths(avail: number, fieldCount: number, texts: ColumnTex
   const flex = Math.max(FLEX_MIN, Math.floor(avail) - FIXED_TOTAL - countryExtra - ownerExtra - custom)
   const wantClient = Math.min(44, Math.max(14, texts.client))
   const wantDetails = Math.min(42, Math.max(32, texts.details * 0.5))
-  const client = Math.min(flex - 180, Math.max(160, Math.round((flex * wantClient) / (wantClient + wantDetails))))
+  const client = Math.min(flex - 180, Math.max(150, Math.round((flex * wantClient) / (wantClient + wantDetails))))
   return { client, details: flex - client, country, owner, total: FIXED_TOTAL + countryExtra + ownerExtra + flex + custom }
 }
 

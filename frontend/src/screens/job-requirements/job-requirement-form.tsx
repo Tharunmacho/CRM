@@ -271,7 +271,7 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
               <DatePicker value={/^\d{4}-\d{2}-\d{2}/.test(form.deadline) ? form.deadline.slice(0, 10) : ''} onChange={(iso) => edit((current) => ({ ...current, deadline: iso }))} aria-label="Deadline" placeholder="Select date" />
             </Field>
             <Field label="Client confirmation / special conditions">
-              <Textarea data-multiline="true" rows={3} minRows={3} maxRows={10} value={form.remarks} maxLength={LIMITS.special} placeholder="e.g. Vacancies and salary details are pending confirmation."
+              <Textarea data-multiline="true" rows={1} minRows={1} maxRows={10} value={form.remarks} maxLength={LIMITS.special}
                 onChange={(event) => edit((current) => ({ ...current, remarks: event.target.value }))} />
             </Field>
           </div>

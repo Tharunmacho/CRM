@@ -106,3 +106,7 @@
 /* the "+ Create ..." choice at the end of a field picker */
 .suggest-popup:has(.suggest-create) { min-width: min(340px, calc(100vw - 24px)); }
 .suggest-popup .suggest-create { border-top: 1px solid var(--border-main); color: var(--primary); font-weight: 700; }
+
+/* section 4: both boxes are 40px tall on one line, labels on the same baseline; the note grows only when it has more to say */
+.jrf-last { align-items: start; }
+.jrf-last textarea { min-height: 40px; padding: 9px 12px; line-height: 1.4; text-align: center; resize: none; }
