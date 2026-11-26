@@ -28,7 +28,6 @@ export function FieldDialog({ field, fields, onClose, onSave }: {
   }
   return (
     <Dialog open onClose={onClose} width="sm" title={field ? 'Rename column' : 'Add a column'}
-      description={field ? undefined : 'A new column appears at the right of Status for everyone.'}
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
         <Button variant="primary" onClick={() => void submit()} disabled={saving}>{saving ? 'Saving...' : field ? 'Rename' : 'Add column'}</Button>

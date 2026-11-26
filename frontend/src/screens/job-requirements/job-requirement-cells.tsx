@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertCircle, Check, ExternalLink, FileText, Loader2, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { AlertCircle, Check, ExternalLink, FileText, Loader2, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { AutoTextarea, Button, Select } from '@/shared/ui/primitives'
 import { DatePicker } from '@/shared/ui/date-picker'
@@ -173,22 +173,28 @@ export function DetailsButton({ item, today, onOpen }: { item: RequirementItem; 
   const info = positionsInfo(item)
   const summary = positionsSummary(item)
   const chip = deadlineChip(item, today)
-  const shown = info.titles.slice(0, 3)
-  const more = info.titles.length - shown.length
-  const facts = [info.count > 1 ? `${info.count} positions` : '', info.vacancies !== null ? `${info.vacancies} ${info.vacancies === 1 ? 'vacancy' : 'vacancies'}` : ''].filter(Boolean).join(' · ')
+  // A row from before the multi-position form only has the flat keys: show its one position the same way.
+  const old = info.count === 0 ? item.details : null
+  const oldTitle = (old?.position ?? '').trim()
+  const titles = info.count > 0 ? info.titles : oldTitle ? [oldTitle] : []
+  const shown = titles.slice(0, 3)
+  const more = titles.length - shown.length
+  const facts = info.count > 0
+    ? [info.count > 1 ? `${info.count} positions` : '', info.vacancies !== null ? `${info.vacancies} ${info.vacancies === 1 ? 'vacancy' : 'vacancies'}` : ''].filter(Boolean).join(' · ')
+    : [old?.vacancies, old?.placeOfWork, old?.basicSalary].map((value) => (value ?? '').trim()).filter(Boolean).join(' · ')
+  const filled = hasDetails(item)
   return (
     <span className="jr-details-box">
-      <button type="button" className={cn('jr-details', summary && 'is-filled')} onClick={onOpen} aria-label={`Job positions of ${item.clientName || 'this requirement'}: ${summary || 'empty'}. Open the form`}
+      <button type="button" className={cn('jr-details', filled && 'is-filled')} onClick={onOpen} aria-label={`Job positions of ${item.clientName || 'this requirement'}: ${summary || 'empty'}. Open the form`}
         title={summary ? `${summary} (open the form)` : 'Open the requirement form'}>
-        {hasDetails(item)
-          ? <><Check size={14} aria-hidden="true" />
-            <span className="jr-details-text">
-              {shown.length > 0
-                ? <span className="jr-pos-chips">{shown.map((title, index) => <span key={`${title}-${index}`} className="jr-pos-chip">{title}</span>)}{more > 0 && <span className="jr-pos-chip is-more">+{more}</span>}</span>
-                : <span className="jr-details-sum">{summary || 'Details added'}</span>}
-              <span className="jr-details-open">{facts || 'Open the form'}</span>
-            </span></>
-          : <><FileText size={14} aria-hidden="true" /><span>Click to open the form</span></>}
+        {filled
+          ? <span className="jr-details-text">
+            {shown.length > 0
+              ? <span className="jr-pos-chips">{shown.map((title, index) => <span key={`${title}-${index}`} className="jr-pos-chip" title={title}>{title}</span>)}{more > 0 && <span className="jr-pos-chip is-more">+{more}</span>}</span>
+              : <span className="jr-pos-facts">{summary || 'Details added'}</span>}
+            <span className="jr-pos-facts" title={facts || undefined}>{facts || 'Open the form'}</span>
+          </span>
+          : <><Plus size={14} aria-hidden="true" /><span>Add positions</span></>}
       </button>
       {chip && <span className={cn('jr-chip', `is-${chip.tone}`)} title={`Deadline ${isoToText(item.details.deadline)}`}>{chip.text}</span>}
     </span>

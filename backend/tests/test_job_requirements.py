@@ -841,7 +841,7 @@ def test_form_download_is_the_client_layout(env):
     cells, merges = read_xlsx(response.content)
     rows = sheet_rows(cells)
     assert rows[0][0] == "JOB REQUIREMENT FORM" and rows[1][0] == "Client / Restaurant: Al Noor / Zed     Country: Abu Dhabi, UAE"
-    assert rows[3] == ["1. JOB POSITIONS", "", "", ""] and rows[4] == ["S.No", "Job Title", "No. of Vacancies", "Monthly Salary"]
+    assert rows[3] == ["1. JOB POSITIONS", "", "", ""] and rows[4] == ["S.No", "Job Title", "No. of Vacancies", "Salary"]
     assert rows[5:8] == [["1", "Paratha Master", "3", "AED 1500"], ["2", "Captain", "To be confirmed", "To be confirmed"], ["3", "Waiter", "", ""]]   # empty cells stay empty
     assert rows[9] == ["2. JOB REQUIREMENTS DETAILS", "", "", ""] and rows[10] == ["S.No", "Job Title", "Requirement Field", "Details"]
     assert rows[11:16] == [["1", "Paratha Master", "Practical Skill / Video", "Working video required for dosa and paratha preparation."],
@@ -1163,18 +1163,18 @@ def test_option_delete_is_admin_level_and_saved_rows_keep_their_text(env):
 def test_remember_new_fields_adds_only_unknown_names(env):
     add_option(env, "requirement", "Qualification")
     add_option(env, "particular", "Working Hours")
-    body = {"positions": [{"title": "Captain", "requirements": [{"field": "qualification", "details": "x"}, {"field": "Maximum Age", "details": "30"},
-                                                                {"field": "MAXIMUM AGE", "details": "again"}, {"field": "", "details": "no name"}]},
-                          {"title": "Waiter", "requirements": [{"field": "Experience"}]}],
-            "general": [{"label": "WORKING HOURS", "details": "12"}, {"label": "Weekly Off"}, {"label": "Food", "remarks": "r"}]}
+    body = {"positions": [{"title": "Captain", "requirements": [{"field": "qualification", "details": "x"}, {"field": "Shift Pattern", "details": "30"},
+                                                                {"field": "SHIFT PATTERN", "details": "again"}, {"field": "", "details": "no name"}]},
+                          {"title": "Waiter", "requirements": [{"field": "Height"}]}],
+            "general": [{"label": "WORKING HOURS", "details": "12"}, {"label": "Tea Break"}, {"label": "Laundry", "remarks": "r"}]}
     act_as(env, "rec")
     plain = env.client.post(API, json=body)                                                                    # no flag: the catalog stays as it is
     assert plain.status_code == 201 and len(env.client.get(API).json()["options"]) == 2
     flagged = env.client.post(API, json={**body, "rememberNewFields": True})
     assert flagged.status_code == 201 and "rememberNewFields" not in flagged.json()
     options = env.client.get(API).json()["options"]
-    assert [(o["kind"], o["label"], o["standard"]) for o in options] == [("particular", "Working Hours", False), ("particular", "Weekly Off", False), ("particular", "Food", False),
-                                                                          ("requirement", "Qualification", False), ("requirement", "Maximum Age", False), ("requirement", "Experience", False)]
+    assert [(o["kind"], o["label"], o["standard"]) for o in options] == [("particular", "Working Hours", False), ("particular", "Tea Break", False), ("particular", "Laundry", False),
+                                                                          ("requirement", "Qualification", False), ("requirement", "Shift Pattern", False), ("requirement", "Height", False)]
     assert [o["sort"] for o in options] == [0, 1, 2, 0, 1, 2]
     again = env.client.post(API, json={**body, "rememberNewFields": True})                                     # nothing new the second time
     assert again.status_code == 201 and len(env.client.get(API).json()["options"]) == 6
@@ -1182,15 +1182,17 @@ def test_remember_new_fields_adds_only_unknown_names(env):
         row = db.get(JobRequirement, flagged.json()["id"])
         assert row.positions[0]["requirements"][0]["field"] == "qualification" and not hasattr(row, "rememberNewFields")
     item = flagged.json()
-    patched = env.client.patch(f"{API}/{item['id']}", json={"rememberNewFields": True, "positions": [{"title": "Cook", "requirements": [{"field": "Practical Skill"}]}],
-                                                            "general": [{"label": "Visa Type"}]})
+    patched = env.client.patch(f"{API}/{item['id']}", json={"rememberNewFields": True, "positions": [{"title": "Cook", "requirements": [{"field": "Tool Kit"}]}],
+                                                            "general": [{"label": "Bonus Plan"}]})
     assert patched.status_code == 200
     labels = {(o["kind"], o["label"]) for o in env.client.get(API).json()["options"]}
-    assert ("requirement", "Practical Skill") in labels and ("particular", "Visa Type") in labels
+    assert ("requirement", "Tool Kit") in labels and ("particular", "Bonus Plan") in labels
     before = len(env.client.get(API).json()["options"])
     env.client.patch(f"{API}/{item['id']}", json={"rememberNewFields": True, "clientName": "Only the name"})   # no lists sent: nothing to remember
     env.client.patch(f"{API}/{item['id']}", json={"positions": [{"title": "Cook", "requirements": [{"field": "Brand New"}]}]})   # no flag
     assert len(env.client.get(API).json()["options"]) == before
+    builtin = env.client.post(API, json={"rememberNewFields": True, "positions": [{"title": "Cook", "requirements": [{"field": "Language"}]}], "general": [{"label": "Overtime"}]})
+    assert builtin.status_code == 201 and len(env.client.get(API).json()["options"]) == before   # the form's own names are never copied into the catalog
     assert env.client.post(API, json={"rememberNewFields": "yes please"}).status_code == 422
     actions = [row.action for row in _option_audit(env)]
     assert actions.count("Added job requirement option") == 2 + 4 + 2                                          # the two typed by hand, then the ones remembered

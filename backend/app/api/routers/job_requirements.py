@@ -630,7 +630,7 @@ def _form_workbook(row: JobRequirement) -> bytes:
     line(["JOB REQUIREMENT FORM"], x.TITLE, merge=True, height=28)
     line([f"Client / Restaurant: {row.client_name or ''}     Country: {row.country or ''}"], x.BOLD, merge=True)
     line([], x.DEFAULT)
-    table("1. JOB POSITIONS", ["S.No", "Job Title", "No. of Vacancies", "Monthly Salary"],
+    table("1. JOB POSITIONS", ["S.No", "Job Title", "No. of Vacancies", "Salary"],
           [[number, p["title"], p["vacancies"], p["salary"]] for number, p in enumerate(positions, 1)])
     line([], x.DEFAULT)
     needs = []
@@ -681,6 +681,16 @@ def _requested_owners(body: RequirementIn) -> list[str] | None:
     return None
 
 
+# Names the form always offers itself (the client's own sheet wording): never copied into the team's catalog.
+BUILT_IN_NAMES = {
+    "requirement": {name.lower() for name in ("Qualification", "Maximum Age", "Minimum Age", "Experience", "Skills / Trade", "Practical Skill / Video", "Language",
+                                              "Gender", "Nationality", "Driving Licence", "Certificate", "Other")},
+    "particular": {name.lower() for name in ("Working Hours", "Contract Period", "Place of Work", "Restaurant Type", "Weekly Off", "Food", "Accommodation",
+                                             "Visa Type", "Overtime", "OT Calculation", "Insurance", "Transport", "Air Ticket", "Medical", "Uniform",
+                                             "Salary Payment", "Leave", "Joining Date")},
+}
+
+
 def _remember_fields(db: Session, user: User, positions: list[dict] | None, general: list[dict] | None) -> None:
     """Add the requirement fields / general labels of the saved lists that the picker catalog lacks (any letter case); a duplicate race is ignored."""
     wanted: dict[str, dict[str, str]] = {"requirement": {}, "particular": {}}
@@ -694,7 +704,7 @@ def _remember_fields(db: Session, user: User, positions: list[dict] | None, gene
     for kind, names in wanted.items():
         if not names:
             continue
-        known = {label.lower() for label in db.scalars(select(JobRequirementOption.label).where(JobRequirementOption.kind == kind))}
+        known = {label.lower() for label in db.scalars(select(JobRequirementOption.label).where(JobRequirementOption.kind == kind))} | BUILT_IN_NAMES[kind]
         last = db.scalar(select(func.max(JobRequirementOption.sort)).where(JobRequirementOption.kind == kind))
         number = (last + 1) if last is not None else 0
         for key, label in names.items():

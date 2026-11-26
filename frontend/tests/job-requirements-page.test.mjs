@@ -99,7 +99,7 @@ test('the table column is Job positions, shows the titles as chips, and the row 
 
 test('the form has the client\'s four sections, labelled boxes on every row, and keeps the Save and Cancel footer', () => {
   for (const heading of ['Job positions', 'Job requirement details', 'General employment details', 'Deadline and client confirmation']) assert.ok(form.includes(`title="${heading}"`), heading)
-  for (const label of ['Job title of position ${index + 1}', 'No. of vacancies of position ${index + 1}', 'Monthly salary of position ${index + 1}', 'Requirement field ${at + 1} of ${name}', 'Details of requirement ${at + 1} of ${name}', 'Remove position ${index + 1}']) assert.ok(form.includes(label), label)
+  for (const label of ['Job title of position ${index + 1}', 'No. of vacancies of position ${index + 1}', 'Salary of position ${index + 1}', 'Requirement field ${at + 1} of ${name}', 'Details of requirement ${at + 1} of ${name}', 'Remove position ${index + 1}']) assert.ok(form.includes(label), label)
   assert.match(form, /<Dialog open onClose=\{requestClose\} width="xl"/)
   assert.match(form, /Add position/)
   assert.match(form, /Add requirement/)

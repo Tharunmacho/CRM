@@ -35,7 +35,9 @@ export function FieldManagerDialog({ options, canDelete, onClose, onCreate, onUp
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [deleting, setDeleting] = useState<RequirementOption | null>(null)
   const meta = OPTION_KINDS.find((entry) => entry.kind === kind) ?? OPTION_KINDS[0]
-  const mine = optionsOf(options, kind)
+  // Saving a form remembers every name it uses; the built-in ones are already listed above, so they are not repeated as "added by your team" (unless set to show on every form).
+  const builtLower = new Set(meta.builtIn.map((label) => label.trim().toLowerCase()))
+  const mine = optionsOf(options, kind).filter((option) => option.standard || !builtLower.has(option.label.trim().toLowerCase()))
   const singular = kind === 'requirement' ? 'requirement field' : 'particular'
 
   const mark = (id: string, patch: { busy?: boolean; error?: string }) => {
@@ -73,20 +75,19 @@ export function FieldManagerDialog({ options, canDelete, onClose, onCreate, onUp
 
   return (
     <>
-      <Dialog open onClose={onClose} width="md" title="Manage fields" description="The names offered when you fill in a requirement form. Everyone sees a change at once; rows already saved keep their text."
+      <Dialog open onClose={onClose} width="md" title="Manage fields"
         footer={<Button variant="primary" onClick={onClose}>Done</Button>}>
         <div className="jrx">
           <Tabs variant="pill" active={kind} onChange={(key) => { setKind(key as OptionKind); setAddError('') }} tabs={OPTION_KINDS.map((entry) => ({ key: entry.kind, label: entry.label }))} />
 
           <section aria-label={`Built-in ${meta.label.toLowerCase()}`}>
             <h4 className="jrx-title">Built in</h4>
-            <p className="jrx-note">{kind === 'particular' ? 'The first eight are rows of every form.' : 'Always offered; they cannot be changed.'}</p>
             <ul className="jrx-chips">{meta.builtIn.map((label, index) => <li key={label} className={cn('jrx-chip', kind === 'particular' && index < 8 && 'is-standard')}>{label}</li>)}</ul>
           </section>
 
           <section aria-label={`Added by your team: ${meta.label.toLowerCase()}`}>
             <h4 className="jrx-title">Added by your team</h4>
-            {mine.length === 0 && <p className="jrx-note">Nothing added yet. Type a name below.</p>}
+            {mine.length === 0 && <p className="jrx-note">None yet</p>}
             <ul className="jrx-list">
               {mine.map((option) => (
                 <li key={option.id} className={cn('jrx-row', errors[option.id] && 'has-error')}>
@@ -97,12 +98,11 @@ export function FieldManagerDialog({ options, canDelete, onClose, onCreate, onUp
                   {kind === 'particular' && (
                     <label className="jrx-toggle"><CheckboxInput checked={option.standard} disabled={busy[option.id]} aria-label={`Show ${option.label} on every form`} onChange={(on) => void setStandardOf(option, on)} />Show on every form</label>
                   )}
-                  {canDelete && <IconButton label={`Delete ${option.label}`} tone="danger" disabled={busy[option.id]} onClick={() => setDeleting(option)}><Trash2 className="h-4 w-4" /></IconButton>}
+                  {canDelete && <IconButton label={`Delete ${option.label}`} className="jrx-rm" disabled={busy[option.id]} onClick={() => setDeleting(option)}><Trash2 className="h-4 w-4" /></IconButton>}
                   {errors[option.id] && <p className="jrx-error" role="alert">{errors[option.id]}</p>}
                 </li>
               ))}
             </ul>
-            {!canDelete && mine.length > 0 && <p className="jrx-note">Only an admin can delete a field.</p>}
           </section>
 
           <section className="jrx-add" aria-label={`Add a ${singular}`}>

@@ -146,11 +146,11 @@ export default function JobRequirementsPage() {
   const weekStart = daysBefore(today, 6)
 
   const cards = [
-    { label: 'Active requirements', value: summary.active, detail: 'open now', icon: ClipboardList, tone: 'blue' as const, active: view === 'active', onSelect: () => setView(view === 'active' ? 'all' : 'active') },
-    { label: 'Closed', value: summary.closed, detail: 'filled, cancelled or expired', icon: Lock, tone: 'violet' as const, active: view === 'closed', onSelect: () => setView(view === 'closed' ? 'all' : 'closed') },
-    { label: 'Added this week', value: summary.addedThisWeek, detail: `since ${isoToText(weekStart)}`, icon: CalendarPlus, tone: 'green' as const, active: filters.from === weekStart && !filters.to, onSelect: () => setFilters((current) => (current.from === weekStart && !current.to ? { ...current, from: '' } : { ...current, from: weekStart, to: '' })) },
-    { label: 'Due in 7 days', value: summary.dueSoon, detail: 'deadline within a week', icon: Clock3, tone: 'amber' as const, active: view === 'dueSoon', onSelect: () => setView(view === 'dueSoon' ? 'all' : 'dueSoon') },
-    { label: 'Overdue', value: summary.overdue, detail: 'deadline has passed', icon: AlertTriangle, tone: 'red' as const, active: view === 'overdue', onSelect: () => setView(view === 'overdue' ? 'all' : 'overdue') },
+    { label: 'Active requirements', value: summary.active, icon: ClipboardList, tone: 'blue' as const, active: view === 'active', onSelect: () => setView(view === 'active' ? 'all' : 'active') },
+    { label: 'Closed', value: summary.closed, icon: Lock, tone: 'violet' as const, active: view === 'closed', onSelect: () => setView(view === 'closed' ? 'all' : 'closed') },
+    { label: 'Added this week', value: summary.addedThisWeek, icon: CalendarPlus, tone: 'green' as const, active: filters.from === weekStart && !filters.to, onSelect: () => setFilters((current) => (current.from === weekStart && !current.to ? { ...current, from: '' } : { ...current, from: weekStart, to: '' })) },
+    { label: 'Due in 7 days', value: summary.dueSoon, icon: Clock3, tone: 'amber' as const, active: view === 'dueSoon', onSelect: () => setView(view === 'dueSoon' ? 'all' : 'dueSoon') },
+    { label: 'Overdue', value: summary.overdue, icon: AlertTriangle, tone: 'red' as const, active: view === 'overdue', onSelect: () => setView(view === 'overdue' ? 'all' : 'overdue') },
   ]
 
   const downloadForm = async (item: RequirementItem) => {
@@ -237,7 +237,7 @@ export default function JobRequirementsPage() {
                 <tr>
                   <th scope="col">S.No</th>
                   <th scope="col">DOC</th>
-                  <th scope="col" className="is-left">Client name</th>
+                  <th scope="col">Client name</th>
                   <th scope="col">Country</th>
                   <th scope="col">Assigned to</th>
                   <th scope="col">Job positions</th>
@@ -277,8 +277,8 @@ export default function JobRequirementsPage() {
                             <InlineCell saved={item.docDate ?? ''} show={isoToText} read={dateRead} shape={shapeDateText} picker placeholder="dd/mm/yyyy" inputMode="numeric" maxLength={10}
                               label={`DOC of ${name}, as dd/mm/yyyy`} onSave={(iso) => keep(item.id, { docDate: iso || null })} />
                           </td>
-                          <td data-label="Client name" className="is-left">
-                            <InlineCell multiline saved={item.clientName} show={identity} read={textRead} placeholder="Client name" maxLength={200} label={`Client name of ${name}`}
+                          <td data-label="Client name">
+                            <InlineCell multiline centered saved={item.clientName} show={identity} read={textRead} placeholder="Client name" maxLength={200} label={`Client name of ${name}`}
                               inputRef={(node) => { clientBoxes.current[item.id] = node }}
                               onSave={(value) => keep(item.id, { clientName: value })} />
                           </td>

@@ -79,7 +79,7 @@ export function OwnersCell({ item, choices, label, onSave }: { item: Requirement
 
   const toggle = (id: string, on: boolean) => setDraft((current) => (on ? (current.includes(id) || current.length >= OWNERS_MAX ? current : [...current, id]) : current.filter((entry) => entry !== id)))
   const full = ownersFull(owners)
-  const shown = owners.slice(0, 2)
+  const shown = owners.slice(0, 1)
 
   return (
     <div className="jro">

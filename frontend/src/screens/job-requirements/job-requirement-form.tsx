@@ -17,12 +17,11 @@ const createLabel = (kind: OptionKind) => (typed: string) => `+ Create "${typed}
 const CONFIRM_OPTIONS = [TO_BE_CONFIRMED]
 
 /** A numbered band that starts a section of the form (the same primary-blue band as the table header). */
-function Band({ no, id, title, note }: { no: number; id: string; title: string; note?: string }) {
+function Band({ no, id, title }: { no: number; id: string; title: string }) {
   return (
     <header className="jrf-band">
       <span className="jrf-band-no" aria-hidden="true">{no}</span>
       <h3 id={id}>{title}</h3>
-      {note && <span className="jrf-band-note">{note}</span>}
     </header>
   )
 }
@@ -30,7 +29,7 @@ function Band({ no, id, title, note }: { no: number; id: string; title: string; 
 const RowError = ({ message }: { message?: string }) => (message ? <p className="jrf-error" role="alert"><AlertCircle size={13} aria-hidden="true" />{message}</p> : null)
 
 /**
- * The requirement form of one client, laid out like the client's "Job Requirement Form": 1 Job positions (title, vacancies, monthly salary), 2 Job requirement
+ * The requirement form of one client, laid out like the client's "Job Requirement Form": 1 Job positions (title, vacancies, salary), 2 Job requirement
  * details (rows of field and details under each position), 3 General employment details (particulars, details, remarks), 4 the deadline and the client's
  * confirmation. It is a div, not a form: Enter moves to the next box and never saves or closes. The baseline is frozen when the form opens, so Save sends only
  * what THIS person changed (whole positions / general lists, the deadline, the confirmation), never somebody else's newer value written back from a stale copy.
@@ -135,7 +134,7 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
   const moreGeneral = unusedNames(particularNames, usedGeneral).slice(0, 8)
 
   return (
-    <Dialog open onClose={requestClose} width="xl" title={`Requirements: ${item.clientName.trim() || 'new requirement'}`} description={item.country ? `Country: ${item.country}` : undefined}
+    <Dialog open onClose={requestClose} width="xl" title={`Requirements: ${item.clientName.trim() || 'new requirement'}`}
       footer={asking ? <>
         <span className="jrf-foot-note is-warn" role="alert">Discard what you changed?</span>
         <Button variant="secondary" onClick={onClose}>Discard changes</Button>
@@ -144,14 +143,13 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
         {(tried && problems.length > 0)
           ? <span className="jrf-foot-note is-warn" role="alert">{problems.length === 1 ? 'One row needs a name before you can save.' : `${problems.length} rows need a name before you can save.`}</span>
           : failed ? <span className="jrf-foot-note is-warn" role="alert">It could not be saved. Check the connection and press Save again.</span>
-            : dirty && !gone ? <span className="jrf-foot-note">You have unsaved changes.</span> : null}
+            : null}
         <Button variant="secondary" onClick={requestClose} disabled={saving}>Cancel</Button>
         <Button variant="primary" onClick={() => void submit()} disabled={saving || gone}>{saving ? 'Saving...' : 'Save'}</Button>
       </>}>
       <div className="jrf" ref={root} onKeyDown={enterMoves}>
         {onManage && (
           <div className="jrf-top">
-            <p>Fill in the client&rsquo;s form. Type a new field name and choose &ldquo;Create&rdquo; to keep it for everyone.</p>
             <Button size="sm" icon={<Settings2 />} onClick={onManage}>Manage fields</Button>
           </div>
         )}
@@ -159,9 +157,9 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
 
         {/* 1 ------------------------------------------------------------ job positions */}
         <section className="jrf-section" aria-labelledby="jrf-h1">
-          <Band no={1} id="jrf-h1" title="Job positions" note="Every job this client wants to fill" />
+          <Band no={1} id="jrf-h1" title="Job positions" />
           <div className="jrf-box">
-            <div className="jrf-head jrf-pos" aria-hidden="true"><span>S.No</span><span>Job title</span><span>No. of vacancies</span><span>Monthly salary</span><span /></div>
+            <div className="jrf-head jrf-pos" aria-hidden="true"><span>S.No</span><span>Job title</span><span>No. of vacancies</span><span>Salary</span><span /></div>
             {form.positions.map((position, index) => {
               const error = problemOf(position.id)
               return (
@@ -174,15 +172,15 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
                   </div>
                   <div className="jrf-cell" data-area="vac">
                     <span className="jrf-m" aria-hidden="true">No. of vacancies</span>
-                    <SuggestInput value={position.vacancies} options={CONFIRM_OPTIONS} maxLength={LIMITS.vacancies} aria-label={`No. of vacancies of position ${index + 1}`}
+                    <SuggestInput value={position.vacancies} options={CONFIRM_OPTIONS} maxLength={LIMITS.vacancies} placeholder="e.g. 5" aria-label={`No. of vacancies of position ${index + 1}`}
                       onChange={(value) => editPosition(position.id, { vacancies: value })} />
                   </div>
                   <div className="jrf-cell" data-area="sal">
-                    <span className="jrf-m" aria-hidden="true">Monthly salary</span>
-                    <SuggestInput value={position.salary} options={CONFIRM_OPTIONS} maxLength={LIMITS.salary} aria-label={`Monthly salary of position ${index + 1}`}
+                    <span className="jrf-m" aria-hidden="true">Salary</span>
+                    <SuggestInput value={position.salary} options={CONFIRM_OPTIONS} maxLength={LIMITS.salary} placeholder="e.g. AED 1,500" aria-label={`Salary of position ${index + 1}`}
                       onChange={(value) => editPosition(position.id, { salary: value })} />
                   </div>
-                  <IconButton label={`Remove position ${index + 1}`} tone="danger" className="jrf-rm" onClick={() => removePosition(position.id)}><Trash2 className="h-4 w-4" /></IconButton>
+                  <IconButton label={`Remove position ${index + 1}`} className="jrf-rm" onClick={() => removePosition(position.id)}><Trash2 className="h-4 w-4" /></IconButton>
                   <RowError message={error} />
                 </div>
               )
@@ -196,9 +194,9 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
 
         {/* 2 ------------------------------------------------------------ job requirement details */}
         <section className="jrf-section" aria-labelledby="jrf-h2">
-          <Band no={2} id="jrf-h2" title="Job requirement details" note="What each position needs: qualification, age, experience ..." />
+          <Band no={2} id="jrf-h2" title="Job requirement details" />
           <div className="jrf-box is-flush">
-            {cards.length === 0 && <p className="jrf-empty">Type a job title in section 1 and its requirements appear here.</p>}
+            {cards.length === 0 && <p className="jrf-empty">No job positions yet</p>}
             {cards.map(({ position, index, name }) => {
               const spare = unusedNames(QUICK_REQUIREMENT_FIELDS, position.requirements.map((row) => row.field))
               const full = position.requirements.length >= LIMITS.requirements
@@ -207,7 +205,6 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
                   <div className="jrf-pcard-head">
                     <span className="jrf-pcard-no" aria-hidden="true">{index + 1}</span>
                     <h4>{name}</h4>
-                    <span className="jrf-muted">{position.requirements.length === 1 ? '1 requirement' : `${position.requirements.length} requirements`}</span>
                   </div>
                   {position.requirements.length > 0 && <div className="jrf-head jrf-req" aria-hidden="true"><span>Requirement field</span><span>Details</span><span /></div>}
                   {position.requirements.map((row, at) => {
@@ -224,7 +221,7 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
                           <Textarea rows={1} minRows={1} maxRows={6} value={row.details} maxLength={LIMITS.details} placeholder="e.g. Hotel management qualification." data-fk={`${row.id}-details`}
                             aria-label={`Details of requirement ${at + 1} of ${name}`} onChange={(event) => editRequirement(position.id, row.id, { details: event.target.value })} />
                         </div>
-                        <IconButton label={`Remove requirement ${at + 1} of ${name}`} tone="danger" className="jrf-rm" onClick={() => removeRequirement(position.id, row.id)}><Trash2 className="h-4 w-4" /></IconButton>
+                        <IconButton label={`Remove requirement ${at + 1} of ${name}`} className="jrf-rm" onClick={() => removeRequirement(position.id, row.id)}><Trash2 className="h-4 w-4" /></IconButton>
                         <RowError message={error} />
                       </div>
                     )
@@ -244,7 +241,7 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
 
         {/* 3 ------------------------------------------------------------ general employment details */}
         <section className="jrf-section" aria-labelledby="jrf-h3">
-          <Band no={3} id="jrf-h3" title="General employment details" note="The same for every position" />
+          <Band no={3} id="jrf-h3" title="General employment details" />
           <div className="jrf-box">
             <div className="jrf-head jrf-gen" aria-hidden="true"><span>S.No</span><span>Particulars</span><span>Details</span><span>Remarks</span><span /></div>
             {form.general.map((row, index) => {
@@ -267,7 +264,7 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
                     <Textarea rows={1} minRows={1} maxRows={6} value={row.remarks} maxLength={LIMITS.remarks}
                       aria-label={`Remarks of ${row.label.trim() || `particular ${index + 1}`}`} onChange={(event) => editGeneral(row.id, { remarks: event.target.value })} />
                   </div>
-                  <IconButton label={`Remove ${row.label.trim() || `particular ${index + 1}`}`} tone="danger" className="jrf-rm" onClick={() => removeGeneral(row.id)}><Trash2 className="h-4 w-4" /></IconButton>
+                  <IconButton label={`Remove ${row.label.trim() || `particular ${index + 1}`}`} className="jrf-rm" onClick={() => removeGeneral(row.id)}><Trash2 className="h-4 w-4" /></IconButton>
                   <RowError message={error} />
                 </div>
               )
@@ -283,7 +280,7 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
         <section className="jrf-section" aria-labelledby="jrf-h4">
           <Band no={4} id="jrf-h4" title="Deadline and client confirmation" />
           <div className="jrf-box jrf-last">
-            <Field label="Deadline" hint="Used for the due-date reminders">
+            <Field label="Deadline">
               <DatePicker value={/^\d{4}-\d{2}-\d{2}/.test(form.deadline) ? form.deadline.slice(0, 10) : ''} onChange={(iso) => edit((current) => ({ ...current, deadline: iso }))} aria-label="Deadline" placeholder="Select date" />
             </Field>
             <Field label="Client confirmation / special conditions">
