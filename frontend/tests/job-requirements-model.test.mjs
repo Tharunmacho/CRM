@@ -190,15 +190,7 @@ test('"To be confirmed" fills only the empty vacancies and salary boxes of posit
   assert.deepEqual([filled[1].vacancies, filled[1].salary], ['', ''], 'an unused blank row stays blank')
 })
 
-test('"use these fields for the other positions" adds the missing field names, no details, and never duplicates', () => {
-  const waiter = { id: 'p3', title: 'Waiter', vacancies: '', salary: '', requirements: [{ id: 'r9', field: 'qualification', details: 'Diploma' }] }
-  const untitled = { ...m.blankPosition(), requirements: [] }
-  const out = m.copyFieldsToOthers([paratha, captain, waiter, untitled], 'p2')
-  assert.deepEqual(out[0].requirements.map((r) => r.field), ['Practical Skill / Video', 'Qualification', 'Maximum Age', 'Experience'])
-  assert.deepEqual(out[0].requirements.slice(1).map((r) => r.details), ['', '', ''])
-  assert.deepEqual(out[1], captain, 'the source is unchanged')
-  assert.deepEqual(out[2].requirements.map((r) => [r.field, r.details]), [['qualification', 'Diploma'], ['Maximum Age', ''], ['Experience', '']])
-  assert.deepEqual(out[3].requirements, [], 'a position with no title is left alone')
+test('suggestions already used in a list are not offered again', () => {
   assert.deepEqual(m.unusedNames(m.QUICK_REQUIREMENT_FIELDS, ['qualification', 'Experience']), ['Maximum Age', 'Skills / Trade'])
 })
 

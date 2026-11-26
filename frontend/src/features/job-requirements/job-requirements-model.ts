@@ -532,18 +532,6 @@ export function fillToBeConfirmed(positions: readonly Position[]): Position[] {
     : position)
 }
 
-/** The requirement names of one position added (without details) to every other position that does not have them yet. */
-export function copyFieldsToOthers(positions: readonly Position[], fromId: string): Position[] {
-  const source = positions.find((position) => position.id === fromId)
-  if (!source) return [...positions]
-  const names = source.requirements.map((row) => text(row.field)).filter(Boolean)
-  return positions.map((position) => {
-    if (position.id === fromId || !text(position.title) || position.requirements.length >= LIMITS.requirements) return position
-    const missing = names.filter((name) => !position.requirements.some((row) => same(row.field, name)))
-    return missing.length ? { ...position, requirements: [...position.requirements, ...missing.map((name) => blankRequirement(name))].slice(0, LIMITS.requirements) } : position
-  })
-}
-
 /** The suggestions not used yet in a list (case-insensitive). */
 export const unusedNames = (suggestions: readonly string[], used: readonly string[]): string[] => suggestions.filter((name) => !used.some((entry) => same(entry, name)))
 

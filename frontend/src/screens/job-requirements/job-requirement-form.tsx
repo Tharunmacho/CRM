@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { AlertCircle, Copy, Plus, Trash2 } from 'lucide-react'
+import { AlertCircle, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { Button, Field, IconButton, Input, Textarea } from '@/shared/ui/primitives'
 import { DatePicker } from '@/shared/ui/date-picker'
@@ -7,7 +7,7 @@ import { Dialog } from '@/shared/ui/overlay'
 import { SuggestInput } from '@/shared/ui/suggest-input'
 import {
   GENERAL_DEFAULTS, GENERAL_SUGGESTIONS, LIMITS, REQUIREMENT_FIELD_SUGGESTIONS,
-  blankGeneral, blankPosition, blankRequirement, buildPatch, copyFieldsToOthers, formFor, formProblems, isEmptyPatch, mergeSuggestions,
+  blankGeneral, blankPosition, blankRequirement, buildPatch, formFor, formProblems, isEmptyPatch, mergeSuggestions,
   type GeneralRow, type OptionKind, type Position, type PositionRequirement, type RequirementForm, type RequirementItem, type RequirementOption, type RequirementPatch,
 } from '@/features/job-requirements/job-requirements-model'
 import '@/styles/job-requirement-form.css'
@@ -217,9 +217,6 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
                   })}
                   <div className="jrf-actions">
                     <Button size="sm" className="jrf-add" icon={<Plus />} data-fk={`add-requirement-${position.id}`} disabled={full} onClick={() => addRequirement(position.id)}>Add requirement</Button>
-                    {position.requirements.length > 0 && cards.length > 1 && (
-                      <Button size="sm" variant="ghost" className="jrf-add" icon={<Copy />} onClick={() => edit((current) => ({ ...current, positions: copyFieldsToOthers(current.positions, position.id) }))}>Use these fields for the other positions</Button>
-                    )}
                   </div>
                 </div>
               )
