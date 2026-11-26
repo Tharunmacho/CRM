@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CalendarPlus, ClipboardList, Clock3, Copy, FileSpreadsheet, History, Loader2, Lock, Pencil, Plus, RefreshCw, Settings2, Trash2, X } from 'lucide-react'
+import { AlertTriangle, CalendarPlus, ClipboardList, Clock3, Copy, FileSpreadsheet, History, Loader2, Lock, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { isAdminLevel } from '@/shared/model/role-labels'
 import { COUNTRY_NAMES } from '@/shared/lib/country-flag'
@@ -19,7 +19,6 @@ import { useJobRequirements } from '@/features/job-requirements/use-job-requirem
 import { AdCell, ColumnHead, CustomCell, DetailsButton, InlineCell, SaveMark, StatusToggle, dateRead, identity, textRead } from './job-requirement-cells'
 import { CloseDialog, ConfirmDialog, FieldDialog, HistoryDrawer } from './job-requirement-dialogs'
 import { JobRequirementForm } from './job-requirement-form'
-import { FieldManagerDialog } from './job-requirement-fields'
 import { OwnersCell } from './job-requirement-owners'
 import '@/styles/job-requirements.css'
 
@@ -69,7 +68,6 @@ export default function JobRequirementsPage() {
   const sent = useMemo<ListFilters>(() => ({ ...filters, due: view === 'dueSoon' ? 'soon' : view === 'overdue' ? 'overdue' : '' }), [filters, view])
   const people = useMemo(() => ownerChoices(store.users), [store.users])
   const data = useJobRequirements(sent, people)
-  const [managing, setManaging] = useState(false)
   const { items, fields, loading, error } = data
   const today = useAgencyToday(store.settings.timezone || store.agencyTimezone || 'Asia/Kolkata')   // due-soon / overdue follow the new day at midnight
 
@@ -166,7 +164,6 @@ export default function JobRequirementsPage() {
   ]
 
   const actions = <>
-    <Button variant="secondary" icon={<Settings2 size={16} />} onClick={() => setManaging(true)} disabled={Boolean(error && items.length === 0)}>Manage fields</Button>
     <Button variant="secondary" icon={exporting ? <Loader2 size={16} className="jr-spin" /> : <FileSpreadsheet size={16} />} onClick={() => void exportFile()} disabled={exporting || Boolean(error && items.length === 0)}>Export Excel</Button>
     <Button variant="primary" icon={<Plus size={16} />} onClick={() => void addRow()} disabled={creating || loading || Boolean(error)}>New requirement</Button>
   </>
@@ -324,11 +321,7 @@ export default function JobRequirementsPage() {
       </section>
 
       {dialog?.kind === 'details' && (dialogItem ?? lastDialogItem.current) && (
-        <JobRequirementForm item={(dialogItem ?? lastDialogItem.current) as RequirementItem} options={data.options} onCreateOption={(kind, label) => data.createOption(kind, label)} onManage={() => setManaging(true)} gone={detailsGone} onClose={() => setDialog(null)} onSave={(patch) => data.save((dialogItem ?? lastDialogItem.current as RequirementItem).id, patch)} />
-      )}
-      {managing && (
-        <FieldManagerDialog options={data.options} canDelete={admin} onClose={() => setManaging(false)}
-          onCreate={(kind, label, standard) => data.createOption(kind, label, standard)} onUpdate={(id, body) => data.updateOption(id, body)} onDelete={(id) => data.deleteOption(id)} />
+        <JobRequirementForm item={(dialogItem ?? lastDialogItem.current) as RequirementItem} options={data.options} onCreateOption={(kind, label) => data.createOption(kind, label)} gone={detailsGone} onClose={() => setDialog(null)} onSave={(patch) => data.save((dialogItem ?? lastDialogItem.current as RequirementItem).id, patch)} />
       )}
       {dialog?.kind === 'close' && dialogItem && (
         <CloseDialog item={dialogItem} onClose={() => setDialog(null)} onPick={(reason) => close(dialogItem.id, reason)} />

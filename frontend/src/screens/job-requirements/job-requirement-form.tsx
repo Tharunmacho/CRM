@@ -40,7 +40,6 @@ export function JobRequirementForm({ item, options = [], gone = false, onClose, 
   /** Creates a field name for everybody right away; throws with the server's message when it cannot (a duplicate, no connection). */
   onCreateOption?: (kind: OptionKind, label: string) => Promise<unknown>
   /** Accepted for the screen's call, which also keeps the page-header manager; the form itself has no button for it. */
-  onManage?: () => void
   /** The row was deleted by someone else while this form was open: what was typed stays, saving is off. */
   gone?: boolean
   onClose: () => void
