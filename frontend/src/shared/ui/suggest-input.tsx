@@ -41,6 +41,8 @@ interface SuggestOptions {
   options: readonly string[]
   query: string
   onPick: (value: string) => void
+  /** An extra last choice such as `+ Create "Visa type"`: picked with a click or Enter like a suggestion, it runs its own action instead of filling the box. */
+  extra?: { label: string; onPick: () => void } | null
 }
 
 /**
@@ -48,7 +50,7 @@ interface SuggestOptions {
  * by the browser, looks different everywhere, and for address-like fields (Country, City) Chrome
  * shows the person's saved addresses instead, which hides the list.
  */
-export function useSuggestions({ anchor, options, query, onPick }: SuggestOptions) {
+export function useSuggestions({ anchor, options, query, onPick, extra }: SuggestOptions) {
   const listId = useId()
   const popupRef = useRef<HTMLDivElement>(null)
   const optionRefs = useRef<Record<number, HTMLButtonElement | null>>({})
@@ -56,7 +58,8 @@ export function useSuggestions({ anchor, options, query, onPick }: SuggestOption
   const [active, setActive] = useState(-1)
   const [position, setPosition] = useState({ top: 0, left: 0, width: 220, maxHeight: 260 })
   const items = useMemo(() => matchSuggestions(options, query), [options, query])
-  const visible = open && items.length > 0
+  const rows = items.length + (extra ? 1 : 0)
+  const visible = open && rows > 0
 
   useEffect(() => { setActive(-1) }, [query, open])
   useEffect(() => {
@@ -87,23 +90,24 @@ export function useSuggestions({ anchor, options, query, onPick }: SuggestOption
       window.removeEventListener('resize', place)
       window.removeEventListener('scroll', place, true)
     }
-  }, [visible, anchor, items.length])
+  }, [visible, anchor, rows])
   useEffect(() => {
     if (visible && active >= 0) optionRefs.current[active]?.scrollIntoView({ block: 'nearest' })
   }, [active, visible])
 
   const pick = (value: string) => { setOpen(false); onPick(value) }
+  const pickRow = (index: number) => { if (index < items.length) pick(items[index]); else if (extra) { setOpen(false); extra.onPick() } }
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      if (!items.length) return
+      if (!rows) return
       event.preventDefault()
       if (!open) { setOpen(true); return }
       const step = event.key === 'ArrowDown' ? 1 : -1
-      setActive((current) => (current < 0 ? (step > 0 ? 0 : items.length - 1) : (current + step + items.length) % items.length))
+      setActive((current) => (current < 0 ? (step > 0 ? 0 : rows - 1) : (current + step + rows) % rows))
     } else if (event.key === 'Enter' && visible && active >= 0) {
       event.preventDefault()
       event.stopPropagation()
-      pick(items[active])
+      pickRow(active)
     } else if (event.key === 'Escape' && visible) {
       event.preventDefault()
       event.stopPropagation()
@@ -137,6 +141,21 @@ export function useSuggestions({ anchor, options, query, onPick }: SuggestOption
                 <span>{item}</span>
               </button>
             ))}
+            {extra && (
+              <button
+                ref={(element) => { optionRefs.current[items.length] = element }}
+                id={`${listId}-${items.length}`}
+                type="button"
+                role="option"
+                aria-selected={items.length === active}
+                tabIndex={-1}
+                className={cn('custom-select-option suggest-create', items.length === active && 'is-active')}
+                onMouseMove={() => setActive(items.length)}
+                onClick={() => pickRow(items.length)}
+              >
+                <span>{extra.label}</span>
+              </button>
+            )}
           </div>
         </div>,
         document.body,
@@ -170,16 +189,23 @@ type SuggestInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | '
   /** Names to suggest. People can still type anything else. */
   options: readonly string[]
   wrapperClassName?: string
+  /** Offers `createLabel(typed)` as a last choice whenever the typed name is not one of the options; picking it calls onCreate(typed). */
+  onCreate?: (typed: string) => void
+  createLabel?: (typed: string) => string
 }
 
 /** A text box with our own suggestion list: click or focus it to see every suggestion, type to narrow them. */
 export const SuggestInput = forwardRef<HTMLInputElement, SuggestInputProps>(function SuggestInput(
-  { value, onChange, options, className, wrapperClassName, onFocus, onBlur, onClick, onKeyDown, name, ...rest },
+  { value, onChange, options, className, wrapperClassName, onFocus, onBlur, onClick, onKeyDown, name, onCreate, createLabel, ...rest },
   forwardedRef,
 ) {
   const wrapper = useRef<HTMLSpanElement>(null)
   const fallbackName = useId()
-  const { popup, setOpen, inputProps } = useSuggestions({ anchor: wrapper, options, query: value, onPick: onChange })
+  const typed = value.replace(/\s+/g, ' ').trim()
+  const extra = onCreate && typed && !options.some((option) => option.trim().toLowerCase() === typed.toLowerCase())
+    ? { label: createLabel ? createLabel(typed) : `+ Create "${typed}"`, onPick: () => onCreate(typed) }
+    : null
+  const { popup, setOpen, inputProps } = useSuggestions({ anchor: wrapper, options, query: value, onPick: onChange, extra })
   const hasOptions = options.length > 0
   return (
     <span ref={wrapper} className={cn('relative block w-full', wrapperClassName)}>

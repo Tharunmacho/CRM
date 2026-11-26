@@ -61,15 +61,17 @@ test('every closure reason names the same Tasks tab the server puts the candidat
 const jr = await load('features/job-requirements/job-requirements-model.ts')
 const item = (id, patch = {}) => ({ id, clientName: id, details: {}, custom: {}, status: 'active', ...patch })
 
-test('the details form diffs against the baseline it opened with, so another persons newer value is never written back', async () => {
-  const opened = jr.detailsFor({ details: { deadline: '2026-12-01', remarks: 'a' } })
+test('the requirement form diffs against the baseline it opened with, so another persons newer value is never written back', async () => {
+  const opened = jr.formFor({ details: { deadline: '2026-12-01', remarks: 'a' } })
   const form = { ...opened, remarks: 'mine' }
-  assert.deepEqual(jr.detailsChanges(opened, form), { remarks: 'mine' })
-  const live = jr.detailsFor({ details: { deadline: '2026-12-15', remarks: 'a' } })
-  assert.notDeepEqual(jr.detailsChanges(live, form), { remarks: 'mine' }, 'against the live row the stale deadline WOULD have been sent back (the bug)')
-  const text = await read('screens/job-requirements/job-requirement-dialogs.tsx')
-  assert.match(text, /const \[start\] = useState\(\(\) => detailsFor\(item\)\)/)
-  assert.match(text, /gone \? null|disabled=\{saving \|\| gone\}/)
+  assert.deepEqual(jr.buildPatch(opened, form), { details: { remarks: 'mine' } })
+  const live = jr.formFor({ details: { deadline: '2026-12-15', remarks: 'a' } })
+  assert.notDeepEqual(jr.buildPatch(live, form), { details: { remarks: 'mine' } }, 'against the live row the stale deadline WOULD have been sent back (the bug)')
+  const text = await read('screens/job-requirements/job-requirement-form.tsx')
+  assert.match(text, /const \[start\] = useState\(\(\) => formFor\(item, options\)\)/)
+  assert.match(text, /disabled=\{saving \|\| gone\}/)
+  assert.match(text, /<div className="jrf" ref=\{root\} onKeyDown=\{enterMoves\}>/, 'a div, not a form: Enter can never submit and close the dialog')
+  assert.doesNotMatch(text, /<form[\s>]/)
 })
 
 test('a silent read waits for a save or create, and a row created a moment ago survives a read that started before it existed', () => {

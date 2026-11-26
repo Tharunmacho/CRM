@@ -3,8 +3,8 @@ import { ApiError } from '@/shared/api/client'
 import { liveInterval } from '@/shared/state/live'
 import { jobRequirementsApi } from './job-requirements-api'
 import {
-  PAGE_LIMIT, applyPatch, listQuery, mergePatches, mergeRead, mergeSaved, readBlocked, sortedFields, upsert,
-  type FieldType, type ListFilters, type RequirementSummary, type RequirementField, type RequirementItem, type RequirementPatch,
+  PAGE_LIMIT, applyPatch, listQuery, mergePatches, mergeRead, mergeSaved, readBlocked, sortedFields, upsert, upsertOption,
+  type FieldType, type ListFilters, type OptionKind, type OwnerChoice, type RequirementOption, type RequirementSummary, type RequirementField, type RequirementItem, type RequirementPatch,
 } from './job-requirements-model'
 
 export interface RowSave { state: 'saving' | 'saved' | 'error'; message?: string }
@@ -16,10 +16,11 @@ const messageOf = (error: unknown, fallback: string) => (error instanceof Error 
  * screen, marks the row ("Not saved", with Retry) and holds the unsaved change; the list is not re-read from the server while anything is unsaved,
  * so a refresh can never wipe a typed value. The list is read again when the window regains focus.
  */
-export function useJobRequirements(filters: ListFilters) {
+export function useJobRequirements(filters: ListFilters, people: readonly OwnerChoice[] = []) {
   const filterKey = JSON.stringify(filters)
   const [items, setItems] = useState<RequirementItem[]>([])
   const [fields, setFields] = useState<RequirementField[]>([])
+  const [options, setOptions] = useState<RequirementOption[]>([])
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<RequirementSummary | null>(null)
   const [loading, setLoading] = useState(true)
@@ -37,6 +38,9 @@ export function useJobRequirements(filters: ListFilters) {
   const readNo = useRef(0)
   const itemsRef = useRef(items)
   itemsRef.current = items
+  /** Names of the people a requirement can be given to: an optimistic owner change shows their names at once. */
+  const peopleRef = useRef(people)
+  peopleRef.current = people
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; Object.values(timers.current).forEach((timer) => window.clearTimeout(timer)) } }, [])
 
@@ -65,8 +69,9 @@ export function useJobRequirements(filters: ListFilters) {
       const held = unsaved.current
       const ids = new Set(page.items.map((item) => item.id))
       justCreated.current.forEach((id) => { if (ids.has(id)) justCreated.current.delete(id) })
-      setItems((current) => mergeRead(page.items, held, current, justCreated.current))
+      setItems((current) => mergeRead(page.items, held, current, justCreated.current, peopleRef.current))
       setFields(sortedFields(page.fields))
+      if (page.options) setOptions(page.options)
       setTotal(page.total)
       if (page.summary) setSummary(page.summary)
       setError('')
@@ -124,13 +129,14 @@ export function useJobRequirements(filters: ListFilters) {
   /** Send a change. Resolves true when saved; false when it failed (the typed value stays and the row says so). */
   const save = useCallback(async (id: string, patch: RequirementPatch): Promise<boolean> => {
     const outgoing = unsaved.current[id] ? mergePatches(unsaved.current[id], patch) : patch
-    setItems((current) => current.map((item) => (item.id === id ? applyPatch(item, patch) : item)))
+    setItems((current) => current.map((item) => (item.id === id ? applyPatch(item, patch, peopleRef.current) : item)))
     inFlight.current += 1
     mark(id, { state: 'saving' })
     try {
       const saved = await jobRequirementsApi.patch(id, outgoing)
       delete unsaved.current[id]
       if (alive.current) { setItems((current) => current.map((item) => (item.id === id ? mergeSaved(item, saved) : item))); mark(id, { state: 'saved' }) }
+      if (outgoing.rememberNewFields) rerun.current = true   // the server may have added field names to the catalog: read it again once nothing is being sent
       return true
     } catch (failure) {
       unsaved.current[id] = outgoing
@@ -197,5 +203,22 @@ export function useJobRequirements(filters: ListFilters) {
     }
   }, [])
 
-  return { items, fields, total, summary, loading, loadingMore, error, rowSave, reload: read, loadMore, save, retry, create, remove, uploadAd, removeAd, addField, renameField, deleteField }
+  const createOption = useCallback(async (kind: OptionKind, label: string, standard = false) => {
+    const option = await jobRequirementsApi.createOption(kind, label, standard)
+    if (alive.current) setOptions((current) => upsertOption(current, option))
+    return option
+  }, [])
+
+  const updateOption = useCallback(async (id: string, body: { label?: string; standard?: boolean }) => {
+    const option = await jobRequirementsApi.updateOption(id, body)
+    if (alive.current) setOptions((current) => upsertOption(current, option))
+    return option
+  }, [])
+
+  const deleteOption = useCallback(async (id: string) => {
+    await jobRequirementsApi.deleteOption(id)
+    if (alive.current) setOptions((current) => current.filter((option) => option.id !== id))
+  }, [])
+
+  return { items, fields, options, total, summary, loading, loadingMore, error, rowSave, reload: read, loadMore, save, retry, create, remove, uploadAd, removeAd, addField, renameField, deleteField, createOption, updateOption, deleteOption }
 }

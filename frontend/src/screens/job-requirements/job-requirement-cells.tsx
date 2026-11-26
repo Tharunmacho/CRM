@@ -7,7 +7,7 @@ import { Dialog } from '@/shared/ui/overlay'
 import { SuggestInput, useSuggestions } from '@/shared/ui/suggest-input'
 import { fileHref } from '@/shared/api/client'
 import {
-  adFileError, adKind, adSrc, closedReasonLabel, closedTitle, deadlineChip, detailsSummary, fieldDisplay, flipStatus, hasDetails, isoToText, readFieldInput, readTypedDate, shapeDateText, statusLabel,
+  adFileError, adKind, adSrc, closedReasonLabel, closedTitle, deadlineChip, fieldDisplay, flipStatus, hasDetails, isoToText, positionsInfo, positionsSummary, readFieldInput, readTypedDate, shapeDateText, statusLabel,
   type RequirementField, type RequirementItem,
 } from '@/features/job-requirements/job-requirements-model'
 import type { RowSave } from '@/features/job-requirements/use-job-requirements'
@@ -165,16 +165,29 @@ export function StatusToggle({ item, onFlip }: { item: RequirementItem; onFlip: 
   )
 }
 
-/** "Click to open the form", or a summary of what is filled in; an active requirement with a deadline carries a chip (amber within 7 days, red once overdue). */
+/**
+ * The Job positions cell: the job titles as small chips with the number of positions and the vacancies total, or (an old row with only flat details) their one-line
+ * summary; "Click to open the form" when empty. It opens the form; an active requirement with a deadline carries a chip (amber within 7 days, red once overdue).
+ */
 export function DetailsButton({ item, today, onOpen }: { item: RequirementItem; today: string; onOpen: () => void }) {
-  const summary = detailsSummary(item.details)
+  const info = positionsInfo(item)
+  const summary = positionsSummary(item)
   const chip = deadlineChip(item, today)
+  const shown = info.titles.slice(0, 3)
+  const more = info.titles.length - shown.length
+  const facts = [info.count > 1 ? `${info.count} positions` : '', info.vacancies !== null ? `${info.vacancies} ${info.vacancies === 1 ? 'vacancy' : 'vacancies'}` : ''].filter(Boolean).join(' · ')
   return (
     <span className="jr-details-box">
-      <button type="button" className={cn('jr-details', summary && 'is-filled')} onClick={onOpen} aria-label={`Requirements of ${item.clientName || 'this requirement'}: ${summary || 'empty'}. Open the form`}
-        title={summary ? `${summary} (open the form)` : 'Open the requirements form'}>
-        {hasDetails(item.details)
-          ? <><Check size={14} aria-hidden="true" /><span className="jr-details-text"><span className="jr-details-sum">{summary}</span><span className="jr-details-open">Open the form</span></span></>
+      <button type="button" className={cn('jr-details', summary && 'is-filled')} onClick={onOpen} aria-label={`Job positions of ${item.clientName || 'this requirement'}: ${summary || 'empty'}. Open the form`}
+        title={summary ? `${summary} (open the form)` : 'Open the requirement form'}>
+        {hasDetails(item)
+          ? <><Check size={14} aria-hidden="true" />
+            <span className="jr-details-text">
+              {shown.length > 0
+                ? <span className="jr-pos-chips">{shown.map((title, index) => <span key={`${title}-${index}`} className="jr-pos-chip">{title}</span>)}{more > 0 && <span className="jr-pos-chip is-more">+{more}</span>}</span>
+                : <span className="jr-details-sum">{summary || 'Details added'}</span>}
+              <span className="jr-details-open">{facts || 'Open the form'}</span>
+            </span></>
           : <><FileText size={14} aria-hidden="true" /><span>Click to open the form</span></>}
       </button>
       {chip && <span className={cn('jr-chip', `is-${chip.tone}`)} title={`Deadline ${isoToText(item.details.deadline)}`}>{chip.text}</span>}

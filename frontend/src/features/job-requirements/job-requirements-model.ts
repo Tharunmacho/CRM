@@ -22,17 +22,35 @@ export const DETAIL_KEYS = [
 export type DetailKey = typeof DETAIL_KEYS[number]
 export type Details = Partial<Record<DetailKey, string>>
 
+/** One requirement of a position ("Qualification" -> "Hotel management qualification."). */
+export interface PositionRequirement { id: string; field: string; details: string }
+/** One job of the client's form: title, how many are wanted and the monthly salary (both free text: "To be confirmed" is a valid answer). */
+export interface Position { id: string; title: string; vacancies: string; salary: string; requirements: PositionRequirement[] }
+/** One line of "General employment details": Particulars | Details | Remarks. */
+export interface GeneralRow { id: string; label: string; details: string; remarks: string }
+
+/** What is sent: the same rows, the id optional (the server gives a new row one). */
+export interface RequirementDraft { id?: string; field: string; details: string }
+export interface PositionDraft { id?: string; title: string; vacancies: string; salary: string; requirements: RequirementDraft[] }
+export interface GeneralDraft { id?: string; label: string; details: string; remarks: string }
+
 export interface RequirementItem {
   id: string
   docDate: string | null
   clientName: string
   country: string
   details: Details
+  /** The client's job positions with their requirements; absent (or empty) on a row that only has the old flat details. */
+  positions?: Position[]
+  general?: GeneralRow[]
   adUrl: string | null
   adName: string | null
   status: RequirementStatus
   custom: Record<string, string>
   /** Who handles it (a recruiter or the MD); the server defaults it to the creator. */
+  /** Everyone who handles it, in order (the server defaults it to the creator). `ownerId` / `ownerName` are the first of them. */
+  ownerIds?: string[]
+  owners?: OwnerChoice[]
   ownerId?: string | null
   ownerName?: string | null
   closedReason?: ClosedReason | null
@@ -60,22 +78,32 @@ export interface RequirementSummary {
   byOwner: { id: string; name: string; active: number }[]
 }
 
-export interface RequirementsPage { items: RequirementItem[]; fields: RequirementField[]; total: number; summary?: RequirementSummary }
+/** A field name the staff made (or the system suggests): a requirement field of a position, or a general particular. `standard` particulars are rows of every form. */
+export interface RequirementOption { id: string; kind: OptionKind; label: string; standard: boolean; sort: number }
+export type OptionKind = 'requirement' | 'particular'
+
+export interface RequirementsPage { items: RequirementItem[]; fields: RequirementField[]; total: number; summary?: RequirementSummary; options?: RequirementOption[] }
 
 export interface HistoryEntry { at: string; actorId: string | null; actorName: string | null; action: string; summary: string }
 
-/** What a PATCH may carry; details are merged by key and custom values by field id on the server. */
+/** What a PATCH may carry; details are merged by key and custom values by field id on the server. A positions or general list REPLACES the stored one. */
 export interface RequirementPatch {
   docDate?: string | null
   clientName?: string
   country?: string
   status?: RequirementStatus
-  ownerId?: string
+  /** Who handles it ([] unassigns, at most OWNERS_MAX). */
+  ownerIds?: string[]
   closedReason?: ClosedReason
   details?: Details
+  positions?: PositionDraft[]
+  general?: GeneralDraft[]
+  /** Never stored: the server adds new field names typed in the saved rows to the catalog. */
+  rememberNewFields?: boolean
   custom?: Record<string, string>
 }
 
+export const OWNERS_MAX = 15
 export const PAGE_LIMIT = 200
 export const AD_MAX_BYTES = 10 * 1024 * 1024
 export const FIELD_LABEL_MAX = 60
@@ -249,18 +277,44 @@ export function closedTitle(item: Pick<RequirementItem, 'status' | 'closedAt' | 
 
 export interface OwnerChoice { id: string; name: string }
 
-/** The people a requirement can be assigned to: active recruiters and the MD (never an Admin, nor a removed or inactive account); the current owner stays listed so an old value still reads. */
-export function ownerChoices(users: readonly { id: string; name: string; role: string; active: boolean; deleted?: boolean }[], current?: { ownerId?: string | null; ownerName?: string | null }): OwnerChoice[] {
+/** The people on a row, in order: the owners list, or (an older answer) the single owner. */
+export function itemOwners(item: Pick<RequirementItem, 'owners' | 'ownerIds' | 'ownerId' | 'ownerName'>): OwnerChoice[] {
+  if (item.owners && item.owners.length) return item.owners.map((owner) => ({ id: owner.id, name: owner.name }))
+  if (item.ownerIds && item.ownerIds.length) return item.ownerIds.map((id) => ({ id, name: '' }))
+  return item.ownerId ? [{ id: item.ownerId, name: item.ownerName || '' }] : []
+}
+
+/** "Asha Menon" for one person; first names for more: "Asha, Ravi" or "Asha +2"; "Unassigned" for nobody. */
+export function ownersLabel(owners: readonly OwnerChoice[]): string {
+  const names = owners.map((owner) => owner.name.trim() || 'Former user')
+  if (names.length === 0) return 'Unassigned'
+  if (names.length === 1) return names[0]
+  const first = names.map((name) => name.split(' ')[0])
+  return names.length === 2 ? first.join(', ') : `${first[0]} +${names.length - 1}`
+}
+/** Every name, for a tooltip or a screen reader. */
+export const ownersFull = (owners: readonly OwnerChoice[]): string => (owners.length ? owners.map((owner) => owner.name.trim() || 'Former user').join(', ') : 'nobody')
+
+export const sameIds = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean => {
+  const left = a ?? []
+  const right = b ?? []
+  return left.length === right.length && left.every((id, index) => id === right[index])
+}
+
+/** The people a requirement can be assigned to: active recruiters and the MD (never an Admin, nor a removed or inactive account); the people already on the row stay listed so an old value still reads. */
+export function ownerChoices(users: readonly { id: string; name: string; role: string; active: boolean; deleted?: boolean }[], current?: Pick<RequirementItem, 'owners' | 'ownerIds' | 'ownerId' | 'ownerName'>): OwnerChoice[] {
   const list = users.filter((user) => user.active && !user.deleted && (user.role === 'staff' || user.role === 'manager')).map((user) => ({ id: user.id, name: user.name }))
-  if (current?.ownerId && !list.some((entry) => entry.id === current.ownerId)) list.push({ id: current.ownerId, name: current.ownerName || 'Former user' })
+  for (const owner of current ? itemOwners(current) : []) if (!list.some((entry) => entry.id === owner.id)) list.push({ id: owner.id, name: owner.name || 'Former user' })
   return list.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** What a duplicate carries: client, country, details and the extra columns; not the ad, the DOC (today again), the status (active) or the history. */
+/** What a duplicate carries: client, country, positions with their requirements, general details, details and the extra columns (new rows get new ids); not the ad, the DOC (today again), the status (active) or the history. */
 export function duplicateBody(item: RequirementItem): RequirementPatch {
   const details: Details = {}
   for (const key of DETAIL_KEYS) { const value = (item.details?.[key] ?? '').trim(); if (value) details[key] = value }
-  return { clientName: item.clientName, country: item.country, details, custom: { ...item.custom } }
+  const positions = cleanPositions(item.positions ?? []).map(withoutIds)
+  const general = cleanGeneral(item.general ?? []).map(({ label, details: text, remarks }) => ({ label, details: text, remarks }))
+  return { clientName: item.clientName, country: item.country, details, ...(positions.length ? { positions } : {}), ...(general.length ? { general } : {}), custom: { ...item.custom } }
 }
 
 /** A line of the History drawer: "21 Nov 2026, 14:05". */
@@ -273,7 +327,9 @@ export function historyWhen(at: string): string {
 /* ------------------------------------------------------------------ editing */
 
 /** Apply a patch to a row the way the server will (details merge by key, custom values by field id): the optimistic copy. */
-export function applyPatch(item: RequirementItem, patch: RequirementPatch): RequirementItem {
+export function applyPatch(item: RequirementItem, patch: RequirementPatch, people: readonly OwnerChoice[] = []): RequirementItem {
+  const known = new Map<string, string>([...itemOwners(item), ...people].filter((owner) => owner.name).map((owner) => [owner.id, owner.name]))
+  const owners = patch.ownerIds ? patch.ownerIds.map((id) => ({ id, name: known.get(id) ?? '' })) : null
   return {
     ...item,
     ...(patch.docDate !== undefined ? { docDate: patch.docDate } : {}),
@@ -281,13 +337,15 @@ export function applyPatch(item: RequirementItem, patch: RequirementPatch): Requ
     ...(patch.country !== undefined ? { country: patch.country } : {}),
     ...(patch.status !== undefined ? { status: patch.status, ...(patch.status === 'active' ? { closedReason: '' as ClosedReason, closedAt: null } : {}) } : {}),
     ...(patch.closedReason !== undefined ? { closedReason: patch.closedReason } : {}),
-    ...(patch.ownerId !== undefined ? { ownerId: patch.ownerId } : {}),
+    ...(owners ? { ownerIds: owners.map((owner) => owner.id), owners, ownerId: owners[0]?.id ?? null, ownerName: owners[0]?.name || null } : {}),
+    ...(patch.positions ? { positions: patch.positions.map((position) => ({ ...position, id: position.id ?? makeId(), requirements: position.requirements.map((row) => ({ ...row, id: row.id ?? makeId() })) })) } : {}),
+    ...(patch.general ? { general: patch.general.map((row) => ({ ...row, id: row.id ?? makeId() })) } : {}),
     details: patch.details ? { ...item.details, ...patch.details } : item.details,
     custom: patch.custom ? { ...item.custom, ...patch.custom } : item.custom,
   }
 }
 
-/** Fold two patches for one row into one (what is retried after a failure includes everything that was not saved). */
+/** Fold two patches for one row into one (what is retried after a failure includes everything that was not saved). A positions or general list replaces the earlier one. */
 export function mergePatches(first: RequirementPatch, second: RequirementPatch): RequirementPatch {
   return {
     ...first, ...second,
@@ -301,7 +359,7 @@ export function mergeSaved(local: RequirementItem, saved: RequirementItem, withA
   return {
     ...local, updatedAt: saved.updatedAt, updatedBy: saved.updatedBy,
     ...(saved.closedAt !== undefined ? { closedAt: saved.closedAt } : {}),
-    ...(saved.ownerName !== undefined && saved.ownerId === local.ownerId ? { ownerName: saved.ownerName } : {}),
+    ...(saved.owners && sameIds(saved.ownerIds ?? saved.owners.map((owner) => owner.id), local.ownerIds ?? itemOwners(local).map((owner) => owner.id)) ? { owners: saved.owners, ownerId: saved.owners[0]?.id ?? null, ownerName: saved.owners[0]?.name ?? null } : saved.ownerName !== undefined && saved.ownerId === local.ownerId ? { ownerName: saved.ownerName } : {}),
     ...(local.docDate === null && saved.docDate ? { docDate: saved.docDate } : {}),
     ...(withAd ? { adUrl: saved.adUrl, adName: saved.adName } : {}),
   }
@@ -312,55 +370,260 @@ export function upsert(items: readonly RequirementItem[], item: RequirementItem)
   return items.some((entry) => entry.id === item.id) ? items.map((entry) => (entry.id === item.id ? item : entry)) : [item, ...items]
 }
 
-/* ------------------------------------------------------------------ the requirements form */
+/* ------------------------------------------------------------------ the requirement form (the client's "Job Requirement Form") */
 
-/** One line of the form: its number on the owner's sheet, his label, and the kind of box (a long text, or a date picker for the Deadline). */
-export interface DetailInput { key: DetailKey; no: number; label: string; kind: 'text' | 'area' | 'date'; hint?: string }
+/** The limits the server keeps (the inputs stop typing at them). */
+export const LIMITS = { positions: 30, requirements: 40, general: 50, title: 200, vacancies: 100, salary: 200, field: 100, details: 2000, label: 100, remarks: 2000, special: 10000 } as const
 
-/** Fixed texts of the owner's sheet: do not reword. */
-export const DETAIL_INPUTS: DetailInput[] = [
-  { key: 'position', no: 1, label: 'Name of the Position', kind: 'text' },
-  { key: 'vacancies', no: 2, label: 'No. of Requirements', kind: 'text' },
-  { key: 'placeOfWork', no: 3, label: 'Place of Work', kind: 'text' },
-  { key: 'contractPeriod', no: 4, label: 'Period of Contract', kind: 'text' },
-  { key: 'qualification', no: 5, label: 'Qualification', kind: 'text' },
-  { key: 'agePreference', no: 6, label: 'Age Preference', kind: 'text' },
-  { key: 'additionalSkills', no: 7, label: 'Additional Skills', kind: 'text' },
-  { key: 'basicSalary', no: 8, label: 'Basic Salary', kind: 'text' },
-  { key: 'workingHours', no: 9, label: 'Working Hours', kind: 'text' },
-  { key: 'overtime', no: 10, label: 'Overtime', kind: 'text' },
-  { key: 'otCalculation', no: 11, label: 'OT Calculation', kind: 'text' },
-  { key: 'food', no: 12, label: 'Food', kind: 'text' },
-  { key: 'accommodation', no: 13, label: 'Accommodation', kind: 'text' },
-  { key: 'insurance', no: 14, label: 'Insurance', kind: 'text' },
-  { key: 'transport', no: 15, label: 'Transport', kind: 'text' },
-  { key: 'remarks', no: 16, label: 'Remarks / Special Conditions', kind: 'area' },
-  { key: 'deadline', no: 17, label: 'Deadline', kind: 'date', hint: 'used for due-date reminders' },
+export const TO_BE_CONFIRMED = 'To be confirmed'
+
+/** Suggested names for a requirement of a position; any other text may be typed. */
+export const REQUIREMENT_FIELD_SUGGESTIONS: readonly string[] = [
+  'Qualification', 'Maximum Age', 'Minimum Age', 'Experience', 'Skills / Trade', 'Practical Skill / Video', 'Language', 'Gender', 'Nationality', 'Driving Licence', 'Certificate', 'Other',
 ]
+/** The fields offered as one-press chips under a position. */
+export const QUICK_REQUIREMENT_FIELDS: readonly string[] = ['Qualification', 'Maximum Age', 'Experience', 'Skills / Trade']
 
-export function emptyDetails(): Record<DetailKey, string> {
-  return Object.fromEntries(DETAIL_KEYS.map((key) => [key, ''])) as Record<DetailKey, string>
+/** The particulars every requirement starts with, in the client's order. */
+export const GENERAL_DEFAULTS: readonly string[] = ['Working Hours', 'Contract Period', 'Place of Work', 'Restaurant Type', 'Weekly Off', 'Food', 'Accommodation', 'Visa Type']
+/** More particulars that can be added with one press (or typed). */
+export const GENERAL_SUGGESTIONS: readonly string[] = ['Overtime', 'OT Calculation', 'Insurance', 'Transport', 'Air Ticket', 'Medical', 'Uniform', 'Salary Payment', 'Leave', 'Joining Date']
+
+let idCounter = 0
+/** A row id made on this screen; the server replaces it with its own when the row is saved (see CLIENT_ID). */
+export function makeId(): string {
+  idCounter += 1
+  return `c_${Date.now().toString(36)}${idCounter.toString(36)}${Math.random().toString(36).slice(2, 6)}`
 }
+const isClientId = (id: string | undefined): boolean => !id || id.startsWith('c_')
 
-export const detailsFor = (item: Pick<RequirementItem, 'details'>): Record<DetailKey, string> => ({ ...emptyDetails(), ...cleanDetails(item.details) })
+const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
+const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
 
-function cleanDetails(details: Details | null | undefined): Details {
-  const clean: Details = {}
-  for (const key of DETAIL_KEYS) { const value = details?.[key]; if (typeof value === 'string') clean[key] = value }
-  return clean
-}
+export const blankRequirement = (field = ''): PositionRequirement => ({ id: makeId(), field, details: '' })
+export const blankPosition = (): Position => ({ id: makeId(), title: '', vacancies: '', salary: '', requirements: [] })
+export const blankGeneral = (label = ''): GeneralRow => ({ id: makeId(), label, details: '', remarks: '' })
 
-/** Only the keys that changed, trimmed: what the form sends. */
-export function detailsChanges(before: Details, after: Details): Details {
-  const changes: Details = {}
-  for (const key of DETAIL_KEYS) {
-    const next = (after[key] ?? '').trim()
-    if (next !== (before[key] ?? '').trim()) changes[key] = next
+/** The old flat keys that are one position / the general details; an old row opens pre-filled from them. */
+const LEGACY_REQUIREMENT_KEYS: readonly [DetailKey, string][] = [['qualification', 'Qualification'], ['agePreference', 'Age Preference'], ['additionalSkills', 'Skills']]
+const LEGACY_GENERAL_KEYS: readonly [DetailKey, string][] = [
+  ['workingHours', 'Working Hours'], ['contractPeriod', 'Contract Period'], ['placeOfWork', 'Place of Work'], ['overtime', 'Overtime'], ['otCalculation', 'OT Calculation'],
+  ['food', 'Food'], ['accommodation', 'Accommodation'], ['insurance', 'Insurance'], ['transport', 'Transport'],
+]
+const LEGACY_POSITION_KEYS: readonly DetailKey[] = ['position', 'vacancies', 'basicSalary', 'qualification', 'agePreference', 'additionalSkills']
+
+function legacyPosition(details: Details | null | undefined): Position | null {
+  if (!LEGACY_POSITION_KEYS.some((key) => text(details?.[key]))) return null
+  return {
+    id: makeId(), title: text(details?.position), vacancies: text(details?.vacancies), salary: text(details?.basicSalary),
+    requirements: LEGACY_REQUIREMENT_KEYS.filter(([key]) => text(details?.[key])).map(([key, field]) => ({ id: makeId(), field, details: text(details?.[key]) })),
   }
-  return changes
+}
+const legacyGeneral = (details: Details | null | undefined): GeneralRow[] =>
+  LEGACY_GENERAL_KEYS.filter(([key]) => text(details?.[key])).map(([key, label]) => ({ id: makeId(), label, details: text(details?.[key]), remarks: '' }))
+
+/** The saved rows laid over the defaults: each default in the client's order (filled from a saved row of the same name, any case), then the other saved rows. */
+export function mergeGeneral(saved: readonly GeneralRow[], defaults: readonly string[] = GENERAL_DEFAULTS): GeneralRow[] {
+  const taken = new Set<number>()
+  const base = defaults.map((label) => {
+    const at = saved.findIndex((row, index) => !taken.has(index) && same(row.label, label))
+    if (at < 0) return blankGeneral(label)
+    taken.add(at)
+    return { ...saved[at] }
+  })
+  return [...base, ...saved.filter((_, index) => !taken.has(index)).map((row) => ({ ...row }))]
 }
 
-export const hasDetails = (details: Details | null | undefined): boolean => DETAIL_KEYS.some((key) => (details?.[key] ?? '').trim() !== '')
+/** What the form holds: the lists as typed, the deadline and the client's confirmation. `fromLegacy` says a list was read from the old flat keys, not from saved rows. */
+export interface RequirementForm {
+  positions: Position[]
+  general: GeneralRow[]
+  deadline: string
+  remarks: string
+  /** The particulars every form starts with (the built-in eight, then the catalog's standard ones): an empty one is not stored. */
+  defaults: string[]
+  fromLegacy: { positions: boolean; general: boolean }
+}
+
+const copyPosition = (position: Position): Position => ({ ...position, requirements: (position.requirements ?? []).map((row) => ({ ...row })) })
+
+/** The editable state of a row: its saved positions (or its old flat details read as position 1), at least one position, the general rows over the defaults. */
+export function formFor(item: Pick<RequirementItem, 'details' | 'positions' | 'general'>, options: readonly RequirementOption[] = []): RequirementForm {
+  const defaults = defaultParticulars(options)
+  const saved = (item.positions ?? []).map(copyPosition)
+  const old = saved.length ? null : legacyPosition(item.details)
+  const savedGeneral = (item.general ?? []).map((row) => ({ ...row }))
+  const oldGeneral = savedGeneral.length ? [] : legacyGeneral(item.details)
+  return {
+    positions: saved.length ? saved : old ? [old] : [blankPosition()],
+    general: mergeGeneral(savedGeneral.length ? savedGeneral : oldGeneral, defaults),
+    deadline: text(item.details?.deadline),
+    remarks: item.details?.remarks ?? '',
+    defaults,
+    fromLegacy: { positions: old !== null, general: oldGeneral.length > 0 },
+  }
+}
+
+/** Trimmed rows with the blank ones removed (a requirement or general row needs a word in some box; a position needs a title, a figure or a requirement). */
+export function cleanPositions(positions: readonly Position[]): Position[] {
+  return positions.map((position) => ({
+    id: position.id, title: text(position.title), vacancies: text(position.vacancies), salary: text(position.salary),
+    requirements: (position.requirements ?? []).map((row) => ({ id: row.id, field: text(row.field), details: text(row.details) })).filter((row) => row.field || row.details),
+  })).filter((position) => position.title || position.vacancies || position.salary || position.requirements.length > 0)
+}
+/** A particular is kept when it has details or remarks, or a name of the person's own; a default particular left empty is not stored. */
+export function cleanGeneral(rows: readonly GeneralRow[], defaults: readonly string[] = GENERAL_DEFAULTS): GeneralRow[] {
+  return rows.map((row) => ({ id: row.id, label: text(row.label), details: text(row.details), remarks: text(row.remarks) }))
+    .filter((row) => row.details || row.remarks || (row.label && !defaults.some((name) => same(name, row.label))))
+}
+
+/** The row as the server gets it: a client-made id is left out (the server gives the row its own). */
+const draftId = (id: string): { id?: string } => (isClientId(id) ? {} : { id })
+const withoutIds = (position: Position): PositionDraft => ({ title: position.title, vacancies: position.vacancies, salary: position.salary, requirements: position.requirements.map((row) => ({ field: row.field, details: row.details })) })
+const positionDraft = (position: Position): PositionDraft => ({ ...draftId(position.id), ...withoutIds(position), requirements: position.requirements.map((row) => ({ ...draftId(row.id), field: row.field, details: row.details })) })
+const generalDraft = (row: GeneralRow): GeneralDraft => ({ ...draftId(row.id), label: row.label, details: row.details, remarks: row.remarks })
+
+const positionsKey = (positions: readonly Position[]): string => JSON.stringify(cleanPositions(positions).map(withoutIds))
+const generalKey = (rows: readonly GeneralRow[], defaults: readonly string[]): string => JSON.stringify(cleanGeneral(rows, defaults).map(({ label, details, remarks }) => [label, details, remarks]))
+
+/**
+ * Only what changed since the form opened: a positions list and/or a general list (whole lists, blank rows removed, strings trimmed), details.deadline and
+ * details.remarks; an empty patch when nothing changed. A row read from the old flat keys that is emptied clears those keys too, or it would come back.
+ */
+export function buildPatch(start: RequirementForm, form: RequirementForm): RequirementPatch {
+  const patch: RequirementPatch = {}
+  const details: Details = {}
+  if (positionsKey(start.positions) !== positionsKey(form.positions)) {
+    const positions = cleanPositions(form.positions)
+    patch.positions = positions.map(positionDraft)
+    if (positions.length === 0 && start.fromLegacy.positions) for (const key of LEGACY_POSITION_KEYS) details[key] = ''
+  }
+  if (generalKey(start.general, start.defaults) !== generalKey(form.general, form.defaults)) {
+    const general = cleanGeneral(form.general, form.defaults)
+    patch.general = general.map(generalDraft)
+    if (general.length === 0 && start.fromLegacy.general) for (const [key] of LEGACY_GENERAL_KEYS) details[key] = ''
+  }
+  if (text(form.deadline) !== text(start.deadline)) details.deadline = text(form.deadline)
+  if (text(form.remarks) !== text(start.remarks)) details.remarks = text(form.remarks)
+  if (Object.keys(details).length) patch.details = details
+  return patch
+}
+
+export const isEmptyPatch = (patch: RequirementPatch): boolean => Object.keys(patch).length === 0
+
+export interface FormProblem { id: string; kind: 'position' | 'requirement' | 'general'; message: string }
+
+/** What stops a save: a position with figures or requirements but no title, a requirement or particular with a value but no name. Shown on the row, never dropped silently. */
+export function formProblems(form: Pick<RequirementForm, 'positions' | 'general'>): FormProblem[] {
+  const problems: FormProblem[] = []
+  for (const position of form.positions) {
+    const rows = position.requirements.filter((row) => text(row.field) || text(row.details))
+    if (!text(position.title) && (text(position.vacancies) || text(position.salary) || rows.length)) problems.push({ id: position.id, kind: 'position', message: 'Type the job title' })
+    for (const row of rows) if (!text(row.field)) problems.push({ id: row.id, kind: 'requirement', message: 'Type or choose the requirement field' })
+  }
+  for (const row of form.general) if (!text(row.label) && (text(row.details) || text(row.remarks))) problems.push({ id: row.id, kind: 'general', message: 'Type the particular (for example Food)' })
+  return problems
+}
+
+/** "To be confirmed" in every vacancies and salary box that is still empty. */
+export function fillToBeConfirmed(positions: readonly Position[]): Position[] {
+  return positions.map((position) => (text(position.title) || text(position.vacancies) || text(position.salary) || position.requirements.length)
+    ? { ...position, vacancies: text(position.vacancies) ? position.vacancies : TO_BE_CONFIRMED, salary: text(position.salary) ? position.salary : TO_BE_CONFIRMED }
+    : position)
+}
+
+/** The requirement names of one position added (without details) to every other position that does not have them yet. */
+export function copyFieldsToOthers(positions: readonly Position[], fromId: string): Position[] {
+  const source = positions.find((position) => position.id === fromId)
+  if (!source) return [...positions]
+  const names = source.requirements.map((row) => text(row.field)).filter(Boolean)
+  return positions.map((position) => {
+    if (position.id === fromId || !text(position.title) || position.requirements.length >= LIMITS.requirements) return position
+    const missing = names.filter((name) => !position.requirements.some((row) => same(row.field, name)))
+    return missing.length ? { ...position, requirements: [...position.requirements, ...missing.map((name) => blankRequirement(name))].slice(0, LIMITS.requirements) } : position
+  })
+}
+
+/** The suggestions not used yet in a list (case-insensitive). */
+export const unusedNames = (suggestions: readonly string[], used: readonly string[]): string[] => suggestions.filter((name) => !used.some((entry) => same(entry, name)))
+
+/* ------------------------------------------------------------------ the table cell */
+
+export interface PositionsInfo { titles: string[]; count: number; vacancies: number | null }
+
+/** The job titles of a row, how many positions it has and the total of the vacancies (only when every position has a plain number). */
+export function positionsInfo(item: Pick<RequirementItem, 'positions'>): PositionsInfo {
+  const positions = (item.positions ?? []).filter((position) => text(position.title) || text(position.vacancies) || text(position.salary) || (position.requirements ?? []).length > 0)
+  const numeric = positions.length > 0 && positions.every((position) => /^\d+$/.test(text(position.vacancies)))
+  return {
+    titles: positions.map((position) => text(position.title)).filter(Boolean), count: positions.length,
+    vacancies: numeric ? positions.reduce((sum, position) => sum + Number(text(position.vacancies)), 0) : null,
+  }
+}
+
+/** The table cell's text: "Paratha Master, Captain, Waiter · 3 positions · 12 vacancies"; a row with only the old flat details falls back to their summary. */
+export function positionsSummary(item: Pick<RequirementItem, 'positions' | 'details'>): string {
+  const info = positionsInfo(item)
+  if (info.count === 0) return detailsSummary(item.details)
+  const unit = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  return [info.titles.join(', '), info.count > 1 ? unit(info.count, 'position', 'positions') : '', info.vacancies !== null ? unit(info.vacancies, 'vacancy', 'vacancies') : ''].filter(Boolean).join(' · ')
+}
+
+/** The file name of one downloaded form: "Client-name-requirement-form.xlsx". */
+export function formFileName(clientName: string): string {
+  const base = clientName.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60)
+  return `${base || 'job'}-requirement-form.xlsx`
+}
+
+/* ------------------------------------------------------------------ the field catalog (names the staff add) */
+
+export const OPTION_LABEL_MAX = 100
+export const OPTION_KINDS: { kind: OptionKind; label: string; builtIn: readonly string[] }[] = [
+  { kind: 'requirement', label: 'Requirement fields', builtIn: REQUIREMENT_FIELD_SUGGESTIONS },
+  { kind: 'particular', label: 'Particulars', builtIn: [...GENERAL_DEFAULTS, ...GENERAL_SUGGESTIONS] },
+]
+export const builtInNames = (kind: OptionKind): readonly string[] => OPTION_KINDS.find((entry) => entry.kind === kind)?.builtIn ?? []
+
+const byOrder = (a: RequirementOption, b: RequirementOption) => a.sort - b.sort || a.label.localeCompare(b.label)
+/** The catalog entries of one kind, in the order the server keeps them. */
+export const optionsOf = (options: readonly RequirementOption[], kind: OptionKind): RequirementOption[] => options.filter((option) => option.kind === kind).sort(byOrder)
+
+/** What a field picker suggests: the built-in names first, then the catalog's, each name once (any case). */
+export function mergeSuggestions(builtIn: readonly string[], options: readonly RequirementOption[], kind: OptionKind): string[] {
+  const out: string[] = []
+  for (const name of [...builtIn, ...optionsOf(options, kind).map((option) => option.label)]) {
+    const label = name.trim()
+    if (label && !out.some((entry) => same(entry, label))) out.push(label)
+  }
+  return out
+}
+
+/** The particulars every form starts with: the built-in eight in the client's order, then the catalog's "show on every form" ones. */
+export function defaultParticulars(options: readonly RequirementOption[]): string[] {
+  const out = [...GENERAL_DEFAULTS]
+  for (const option of optionsOf(options, 'particular')) if (option.standard && option.label.trim() && !out.some((entry) => same(entry, option.label))) out.push(option.label.trim())
+  return out
+}
+
+/** "" when `label` may be a new or renamed catalog name: required, at most 100 characters, and not already in the list (built-in or made by staff, any case). */
+export function optionNameError(label: string, kind: OptionKind, options: readonly RequirementOption[], exceptId?: string): string {
+  const name = label.replace(/\s+/g, ' ').trim()
+  if (!name) return 'Type a name'
+  if (name.length > OPTION_LABEL_MAX) return `Keep the name to ${OPTION_LABEL_MAX} characters`
+  const own = exceptId ? options.find((option) => option.id === exceptId) : undefined
+  if (own && same(own.label, name)) return ''
+  if (builtInNames(kind).some((entry) => same(entry, name))) return 'This name is already in the list'
+  if (options.some((option) => option.kind === kind && option.id !== exceptId && same(option.label, name))) return 'This name is already in the list'
+  return ''
+}
+
+/** The catalog after a change made on this screen (the server's own copy arrives with the next read). */
+export const upsertOption = (options: readonly RequirementOption[], option: RequirementOption): RequirementOption[] =>
+  (options.some((entry) => entry.id === option.id) ? options.map((entry) => (entry.id === option.id ? option : entry)) : [...options, option]).sort(byOrder)
+
+/** True when the row has anything filled in: positions, general rows, or any of the flat details (deadline and remarks included). */
+export const hasDetails = (item: Pick<RequirementItem, 'details' | 'positions' | 'general'>): boolean =>
+  positionsInfo(item).count > 0 || (item.general ?? []).some((row) => text(row.label) || text(row.details) || text(row.remarks)) || DETAIL_KEYS.some((key) => text(item.details?.[key]) !== '')
 
 /** The one-line summary shown in the table: "Welder \u00B7 5 \u00B7 Kuwait \u00B7 1200 KWD" (position, number needed, place of work, basic salary); "" when nothing is filled in. */
 export function detailsSummary(details: Details | null | undefined): string {
@@ -368,7 +631,7 @@ export function detailsSummary(details: Details | null | undefined): string {
   if (line) return line
   const remarks = (details?.remarks ?? '').replace(/\s+/g, ' ').trim()
   if (remarks) return remarks.length > 36 ? `${remarks.slice(0, 35)}\u2026` : remarks
-  return hasDetails(details) ? 'Details added' : ''
+  return DETAIL_KEYS.some((key) => text(details?.[key]) !== '') ? 'Details added' : ''
 }
 
 /* ------------------------------------------------------------------ the extra columns */
@@ -456,10 +719,12 @@ export function localSummary(items: readonly RequirementItem[], today: string): 
   const weekStart = daysBefore(today, 6)
   const owners = new Map<string, { id: string; name: string; active: number }>()
   for (const item of items) {
-    if (item.status !== 'active' || !item.ownerId) continue
-    const entry = owners.get(item.ownerId) ?? { id: item.ownerId, name: item.ownerName || 'Unknown', active: 0 }
-    entry.active += 1
-    owners.set(item.ownerId, entry)
+    if (item.status !== 'active') continue
+    for (const owner of itemOwners(item)) {
+      const entry = owners.get(owner.id) ?? { id: owner.id, name: owner.name || 'Unknown', active: 0 }
+      entry.active += 1
+      owners.set(owner.id, entry)
+    }
   }
   const active = items.filter((item) => item.status === 'active').length
   return {
@@ -521,8 +786,8 @@ export const readBlocked = (inFlight: number, unsavedCount: number): boolean => 
  * a moment ago that the read (started before the create finished) does not have yet, kept at the top, so a new row never flickers away and
  * the Client-name box it was going to focus never disappears.
  */
-export function mergeRead(page: readonly RequirementItem[], held: Readonly<Record<string, RequirementPatch>>, current: readonly RequirementItem[], justCreated: ReadonlySet<string>): RequirementItem[] {
-  const merged = page.map((item) => (held[item.id] ? applyPatch(item, held[item.id]) : item))
+export function mergeRead(page: readonly RequirementItem[], held: Readonly<Record<string, RequirementPatch>>, current: readonly RequirementItem[], justCreated: ReadonlySet<string>, people: readonly OwnerChoice[] = []): RequirementItem[] {
+  const merged = page.map((item) => (held[item.id] ? applyPatch(item, held[item.id], people) : item))
   const have = new Set(merged.map((item) => item.id))
   const kept = current.filter((item) => justCreated.has(item.id) && !have.has(item.id))
   return kept.length ? [...kept, ...merged] : merged

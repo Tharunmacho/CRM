@@ -1,5 +1,5 @@
 import { api, fileHref } from '@/shared/api/client'
-import { exportQuery, type FieldType, type HistoryEntry, type ListFilters, type RequirementField, type RequirementItem, type RequirementPatch, type RequirementsPage } from './job-requirements-model'
+import { exportQuery, formFileName, type FieldType, type HistoryEntry, type OptionKind, type RequirementOption, type ListFilters, type RequirementField, type RequirementItem, type RequirementPatch, type RequirementsPage } from './job-requirements-model'
 
 /**
  * The Job requirements API (backend/app/api/routers/job_requirements.py). JSON is camelCase. A blank row is created by POSTing an empty body;
@@ -20,14 +20,18 @@ export const jobRequirementsApi = {
   createField: (label: string, type: FieldType) => api.post<RequirementField>('/job-requirement-fields', { label, type }),
   renameField: (id: string, label: string) => api.patch<RequirementField>(`/job-requirement-fields/${encodeURIComponent(id)}`, { label }),
   deleteField: (id: string) => api.del<void>(`/job-requirement-fields/${encodeURIComponent(id)}`),
+  /** The field names staff added to the form (a duplicate name answers 409). */
+  createOption: (kind: OptionKind, label: string, standard = false) => api.post<RequirementOption>('/job-requirement-options', { kind, label, standard }),
+  updateOption: (id: string, body: { label?: string; standard?: boolean }) => api.patch<RequirementOption>(`/job-requirement-options/${encodeURIComponent(id)}`, body),
+  deleteOption: (id: string) => api.del<void>(`/job-requirement-options/${encodeURIComponent(id)}`),
 }
 
-/** Download the list (with the filters of the screen) as an Excel or CSV file. */
-export async function downloadRequirements(filters: ListFilters, format: 'xlsx' | 'csv'): Promise<void> {
+/** Fetch a file the server builds (cookie auth) and hand it to the browser as a download; a failure carries the server's message. */
+async function downloadFile(path: string, fileName: string): Promise<void> {
   const controller = new AbortController()
   const deadline = window.setTimeout(() => controller.abort(), 90_000)
   try {
-    const response = await fetch(fileHref(`/api/job-requirements/export?${exportQuery(filters, format)}`), { credentials: 'include', signal: controller.signal })
+    const response = await fetch(fileHref(path), { credentials: 'include', signal: controller.signal })
     if (!response.ok) {
       const failure = await response.json().catch(() => null)
       throw new Error(typeof failure?.detail === 'string' ? failure.detail : 'The file could not be created. Please try again.')
@@ -35,7 +39,7 @@ export async function downloadRequirements(filters: ListFilters, format: 'xlsx' 
     const url = URL.createObjectURL(await response.blob())
     const link = document.createElement('a')
     link.href = url
-    link.download = `job-requirements.${format}`
+    link.download = fileName
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -47,3 +51,11 @@ export async function downloadRequirements(filters: ListFilters, format: 'xlsx' 
     window.clearTimeout(deadline)
   }
 }
+
+/** Download the list (with the filters of the screen) as an Excel or CSV file. */
+export const downloadRequirements = (filters: ListFilters, format: 'xlsx' | 'csv'): Promise<void> =>
+  downloadFile(`/api/job-requirements/export?${exportQuery(filters, format)}`, `job-requirements.${format}`)
+
+/** Download ONE requirement as an Excel file in the client's "Job Requirement Form" layout. */
+export const downloadRequirementForm = (id: string, clientName: string): Promise<void> =>
+  downloadFile(`/api/job-requirements/${encodeURIComponent(id)}/form`, formFileName(clientName))

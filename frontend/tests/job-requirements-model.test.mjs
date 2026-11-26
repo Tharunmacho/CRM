@@ -47,31 +47,180 @@ test('the details summary reads "Position \u00B7 No. \u00B7 Place \u00B7 Salary"
   assert.equal(m.detailsSummary({ food: 'Provided' }), 'Details added')
   assert.equal(m.detailsSummary({ deadline: '2026-12-01' }), 'Details added')
   assert.equal(m.detailsSummary({}), '')
-  assert.equal(m.hasDetails({ position: '  ' }), false)
-  assert.equal(m.hasDetails({ remarks: 'a' }), true)
+  assert.equal(m.hasDetails({ details: { position: '  ' } }), false)
+  assert.equal(m.hasDetails({ details: { remarks: 'a' } }), true)
 })
 
-test("the form is the owner's sheet: 16 numbered items in his order and labels, then the Deadline", () => {
-  assert.deepEqual(m.DETAIL_INPUTS.map((i) => [i.no, i.key, i.label]), [
-    [1, 'position', 'Name of the Position'], [2, 'vacancies', 'No. of Requirements'], [3, 'placeOfWork', 'Place of Work'], [4, 'contractPeriod', 'Period of Contract'],
-    [5, 'qualification', 'Qualification'], [6, 'agePreference', 'Age Preference'], [7, 'additionalSkills', 'Additional Skills'], [8, 'basicSalary', 'Basic Salary'],
-    [9, 'workingHours', 'Working Hours'], [10, 'overtime', 'Overtime'], [11, 'otCalculation', 'OT Calculation'], [12, 'food', 'Food'], [13, 'accommodation', 'Accommodation'],
-    [14, 'insurance', 'Insurance'], [15, 'transport', 'Transport'], [16, 'remarks', 'Remarks / Special Conditions'], [17, 'deadline', 'Deadline'],
-  ])
-  assert.equal(m.DETAIL_INPUTS.find((i) => i.key === 'remarks').kind, 'area')
-  assert.equal(m.DETAIL_INPUTS.find((i) => i.key === 'deadline').kind, 'date')
-  assert.match(m.DETAIL_INPUTS.find((i) => i.key === 'deadline').hint, /due-date reminders/)
-  assert.deepEqual([...m.DETAIL_KEYS], m.DETAIL_INPUTS.map((i) => i.key))
+/* ---- the client's "Job Requirement Form": positions, their requirements, general details ---- */
+
+const paratha = { id: 'p1', title: 'Paratha Master', vacancies: 'To be confirmed', salary: 'To be confirmed', requirements: [{ id: 'r1', field: 'Practical Skill / Video', details: 'Working video required.' }] }
+const captain = { id: 'p2', title: 'Captain', vacancies: '2', salary: '1500 AED', requirements: [
+  { id: 'r2', field: 'Qualification', details: 'Hotel management qualification.' }, { id: 'r3', field: 'Maximum Age', details: 'Up to 30 years.' }, { id: 'r4', field: 'Experience', details: 'Minimum 5 years.' },
+] }
+const saved = (over = {}) => item({ positions: [paratha, captain], general: [{ id: 'g1', label: 'Weekly off', details: '2 days per month', remarks: 'As provided by client' }, { id: 'g2', label: 'Air Ticket', details: 'Return', remarks: '' }], details: { deadline: '2026-12-01', remarks: 'Pending confirmation.' }, ...over })
+
+test('the suggestions and defaults are the client\'s: eight particulars in his order, requirement fields to pick from', () => {
+  assert.deepEqual([...m.GENERAL_DEFAULTS], ['Working Hours', 'Contract Period', 'Place of Work', 'Restaurant Type', 'Weekly Off', 'Food', 'Accommodation', 'Visa Type'])
+  for (const name of ['Qualification', 'Maximum Age', 'Minimum Age', 'Experience', 'Skills / Trade', 'Practical Skill / Video', 'Language', 'Gender', 'Nationality', 'Driving Licence', 'Certificate', 'Other']) assert.ok(m.REQUIREMENT_FIELD_SUGGESTIONS.includes(name), name)
+  for (const name of ['Overtime', 'OT Calculation', 'Insurance', 'Transport', 'Air Ticket', 'Medical']) assert.ok(m.GENERAL_SUGGESTIONS.includes(name), name)
+  assert.ok(m.QUICK_REQUIREMENT_FIELDS.every((name) => m.REQUIREMENT_FIELD_SUGGESTIONS.includes(name)))
+  assert.notEqual(m.makeId(), m.makeId())
+  assert.deepEqual([...m.DETAIL_KEYS].filter((key) => key === 'deadline' || key === 'remarks'), ['remarks', 'deadline'], 'the legacy keys are still the server\'s')
+  assert.equal(m.DETAIL_KEYS.length, 17)
   for (const old of ['salary', 'benefits', 'ageLimit', 'experience', 'gender', 'education', 'interviewDate', 'notes', 'text']) assert.ok(!m.DETAIL_KEYS.includes(old), old)
 })
 
-test('the form sends only the keys that changed, trimmed', () => {
-  const before = m.detailsFor({ details: { position: 'Welder', basicSalary: '1200' } })
-  assert.deepEqual(m.detailsChanges(before, { ...before, basicSalary: ' 1300 ', remarks: 'urgent' }), { basicSalary: '1300', remarks: 'urgent' })
-  assert.deepEqual(m.detailsChanges(before, { ...before, position: '' }), { position: '' })
-  assert.deepEqual(m.detailsChanges(before, before), {})
-  assert.equal(m.DETAIL_KEYS.length, 17)
-  assert.equal(m.detailsFor({ details: { salary: 'old', position: 'x' } }).salary, undefined, 'a key the server no longer has is never sent back')
+test('a new requirement opens with one blank position and the eight default particulars', () => {
+  const form = m.formFor(item())
+  assert.equal(form.positions.length, 1)
+  assert.deepEqual(form.positions[0].requirements, [])
+  assert.equal(form.positions[0].title, '')
+  assert.deepEqual(form.general.map((row) => row.label), [...m.GENERAL_DEFAULTS])
+  assert.equal(form.deadline, '')
+  assert.deepEqual(m.buildPatch(form, form), {}, 'nothing typed, nothing sent')
+  assert.deepEqual(m.buildPatch(form, m.formFor(item())), {}, 'a blank form read twice is still unchanged (new ids are not changes)')
+})
+
+test('saved positions and general rows open as saved; the general rows are merged by name over the defaults', () => {
+  const form = m.formFor(saved())
+  assert.deepEqual(form.positions.map((p) => p.title), ['Paratha Master', 'Captain'])
+  assert.deepEqual(form.positions[1].requirements.map((r) => r.field), ['Qualification', 'Maximum Age', 'Experience'])
+  assert.deepEqual(form.general.map((row) => row.label), ['Working Hours', 'Contract Period', 'Place of Work', 'Restaurant Type', 'Weekly off', 'Food', 'Accommodation', 'Visa Type', 'Air Ticket'])
+  assert.equal(form.general[4].details, '2 days per month', 'matched "Weekly off" to the default "Weekly Off" ignoring case, kept in its place')
+  assert.equal(form.general[8].details, 'Return', 'a particular that is not a default comes after them')
+  assert.equal(form.deadline, '2026-12-01')
+  assert.equal(form.remarks, 'Pending confirmation.')
+  assert.deepEqual(m.buildPatch(form, m.formFor(saved())), {}, 'opened and not touched: nothing to send')
+})
+
+test('an old row with only the flat keys opens pre-filled: position 1 with its requirements, and general rows', () => {
+  const old = item({ details: {
+    position: 'Welder', vacancies: '5', basicSalary: '1200 KWD', qualification: 'ITI', agePreference: '25-35', additionalSkills: 'Arc welding', placeOfWork: 'Kuwait',
+    contractPeriod: '2 years', workingHours: '8', overtime: 'Paid', otCalculation: '1.25x', food: 'Provided', accommodation: 'Provided', insurance: 'Yes', transport: 'Yes', remarks: 'r', deadline: '2026-12-05',
+  } })
+  const form = m.formFor(old)
+  assert.deepEqual(form.positions.map((p) => [p.title, p.vacancies, p.salary]), [['Welder', '5', '1200 KWD']])
+  assert.deepEqual(form.positions[0].requirements.map((r) => [r.field, r.details]), [['Qualification', 'ITI'], ['Age Preference', '25-35'], ['Skills', 'Arc welding']])
+  const byLabel = Object.fromEntries(form.general.map((row) => [row.label, row.details]))
+  assert.equal(byLabel['Working Hours'], '8')
+  assert.equal(byLabel['Contract Period'], '2 years')
+  assert.equal(byLabel['Place of Work'], 'Kuwait')
+  assert.equal(byLabel['Restaurant Type'], '')
+  assert.equal(byLabel['OT Calculation'], '1.25x')
+  assert.deepEqual(form.general.map((row) => row.label).slice(0, 8), [...m.GENERAL_DEFAULTS])
+  assert.deepEqual(form.general.slice(8).map((row) => row.label), ['Overtime', 'OT Calculation', 'Insurance', 'Transport'])
+  assert.deepEqual(form.fromLegacy, { positions: true, general: true })
+  assert.deepEqual(m.buildPatch(form, m.formFor(old)), {}, 'opening an old row and closing it changes nothing')
+  assert.equal(m.formFor(item({ details: { food: 'x' } })).positions[0].title, '', 'no position keys: one blank position')
+})
+
+test('the patch holds only what changed, trimmed, blank rows removed, and sends whole lists', () => {
+  const start = m.formFor(saved())
+  const typed = m.formFor(saved())
+  typed.positions[1].requirements[2].details = '  Minimum 6 years.  '
+  typed.positions.push({ ...m.blankPosition(), title: '  Waiter ', vacancies: ' 4', requirements: [m.blankRequirement('Qualification'), { ...m.blankRequirement(''), field: '  ', details: ' ' }] })
+  typed.positions.push(m.blankPosition())
+  const patch = m.buildPatch(start, typed)
+  assert.deepEqual(Object.keys(patch), ['positions'])
+  assert.equal(patch.positions.length, 3, 'the blank position and the blank requirement are removed')
+  assert.deepEqual(patch.positions[2], { title: 'Waiter', vacancies: '4', salary: '', requirements: [{ field: 'Qualification', details: '' }] }, 'new rows carry no client id')
+  assert.equal(patch.positions[1].requirements[2].details, 'Minimum 6 years.')
+  assert.equal(patch.positions[1].id, 'p2', 'saved rows keep their id')
+  assert.equal(patch.positions[1].requirements[0].id, 'r2')
+  assert.equal(patch.general, undefined, 'the general list was not touched')
+})
+
+test('general rows, the deadline and the confirmation are sent when they change, and cleared when emptied', () => {
+  const start = m.formFor(saved())
+  const typed = m.formFor(saved())
+  typed.general[0].details = ' 12 hours '
+  typed.general = typed.general.filter((row) => row.label !== 'Air Ticket')
+  typed.deadline = ''
+  typed.remarks = 'Vacancies and salary details are pending confirmation.'
+  const patch = m.buildPatch(start, typed)
+  assert.deepEqual(patch.general.map((row) => [row.label, row.details]), [['Working Hours', '12 hours'], ['Weekly off', '2 days per month']], 'only rows with something typed, whole list, in order')
+  assert.equal(patch.general[1].id, 'g1')
+  assert.deepEqual(patch.details, { deadline: '', remarks: 'Vacancies and salary details are pending confirmation.' })
+  assert.equal(patch.positions, undefined)
+  const emptied = m.formFor(saved())
+  emptied.positions = [m.blankPosition()]
+  assert.deepEqual(m.buildPatch(start, emptied).positions, [], 'removing every position sends the empty list (it clears)')
+  assert.equal(m.isEmptyPatch({}), true)
+  assert.equal(m.isEmptyPatch(patch), false)
+})
+
+test('emptying a list that was read from the old flat keys also clears those keys so it does not come back', () => {
+  const old = item({ details: { position: 'Welder', basicSalary: '9', food: 'Provided', deadline: '2026-12-01' } })
+  const start = m.formFor(old)
+  const typed = m.formFor(old)
+  typed.positions = [m.blankPosition()]
+  typed.general.forEach((row) => { row.details = '' })
+  const patch = m.buildPatch(start, typed)
+  assert.deepEqual(patch.positions, [])
+  assert.deepEqual(patch.general, [])
+  for (const key of ['position', 'vacancies', 'basicSalary', 'qualification', 'agePreference', 'additionalSkills', 'workingHours', 'contractPeriod', 'placeOfWork', 'overtime', 'otCalculation', 'food', 'accommodation', 'insurance', 'transport']) assert.equal(patch.details[key], '', key)
+  assert.equal(patch.details.deadline, undefined, 'the deadline is not touched')
+  const edited = m.formFor(old)
+  edited.positions[0].title = 'Fitter'
+  assert.equal(m.buildPatch(start, edited).details, undefined, 'a non-empty list leaves the old keys alone')
+})
+
+test('a row with something typed but no name is a problem on that row, never silently dropped', () => {
+  const form = m.formFor(item())
+  form.positions[0].vacancies = '3'
+  const noField = m.blankRequirement('')
+  noField.details = 'Up to 30'
+  form.positions.push({ ...m.blankPosition(), title: 'Captain', requirements: [noField] })
+  form.general[0].label = ''
+  form.general[0].details = '12 hours'
+  const problems = m.formProblems(form)
+  assert.deepEqual(problems.map((p) => p.kind), ['position', 'requirement', 'general'])
+  assert.equal(problems[0].id, form.positions[0].id)
+  assert.equal(problems[1].id, noField.id)
+  assert.deepEqual(m.formProblems(m.formFor(saved())), [])
+  assert.deepEqual(m.formProblems(m.formFor(item())), [], 'a blank form has no problem')
+  const blankRows = m.formFor(item())
+  blankRows.positions.push(m.blankPosition())
+  assert.deepEqual(m.formProblems(blankRows), [], 'untouched blank rows are fine')
+})
+
+test('"To be confirmed" fills only the empty vacancies and salary boxes of positions in use', () => {
+  const filled = m.fillToBeConfirmed([{ ...m.blankPosition(), title: 'Waiter', vacancies: '4' }, m.blankPosition()])
+  assert.deepEqual([filled[0].vacancies, filled[0].salary], ['4', 'To be confirmed'])
+  assert.deepEqual([filled[1].vacancies, filled[1].salary], ['', ''], 'an unused blank row stays blank')
+})
+
+test('"use these fields for the other positions" adds the missing field names, no details, and never duplicates', () => {
+  const waiter = { id: 'p3', title: 'Waiter', vacancies: '', salary: '', requirements: [{ id: 'r9', field: 'qualification', details: 'Diploma' }] }
+  const untitled = { ...m.blankPosition(), requirements: [] }
+  const out = m.copyFieldsToOthers([paratha, captain, waiter, untitled], 'p2')
+  assert.deepEqual(out[0].requirements.map((r) => r.field), ['Practical Skill / Video', 'Qualification', 'Maximum Age', 'Experience'])
+  assert.deepEqual(out[0].requirements.slice(1).map((r) => r.details), ['', '', ''])
+  assert.deepEqual(out[1], captain, 'the source is unchanged')
+  assert.deepEqual(out[2].requirements.map((r) => [r.field, r.details]), [['qualification', 'Diploma'], ['Maximum Age', ''], ['Experience', '']])
+  assert.deepEqual(out[3].requirements, [], 'a position with no title is left alone')
+  assert.deepEqual(m.unusedNames(m.QUICK_REQUIREMENT_FIELDS, ['qualification', 'Experience']), ['Maximum Age', 'Skills / Trade'])
+})
+
+test('the table cell: titles, number of positions, vacancies total only when every figure is a number; old rows fall back', () => {
+  assert.equal(m.positionsSummary(saved({ positions: [{ ...paratha, vacancies: '3' }, captain, { id: 'p3', title: 'Waiter', vacancies: '7', salary: '', requirements: [] }] })), 'Paratha Master, Captain, Waiter · 3 positions · 12 vacancies')
+  assert.equal(m.positionsSummary(saved()), 'Paratha Master, Captain · 2 positions', '"To be confirmed" is not a number: no total')
+  assert.equal(m.positionsSummary(item({ positions: [{ id: 'x', title: 'Welder', vacancies: '1', salary: '', requirements: [] }] })), 'Welder · 1 vacancy')
+  assert.equal(m.positionsSummary(item({ details: { position: 'Welder', vacancies: '5' } })), 'Welder · 5', 'the old flat summary')
+  assert.equal(m.positionsSummary(item({ positions: [] })), '')
+  assert.equal(m.positionsSummary({ details: {} }), '', 'rows without the lists at all (old cached data) do not crash')
+  assert.deepEqual(m.positionsInfo(saved()), { titles: ['Paratha Master', 'Captain'], count: 2, vacancies: null })
+  assert.deepEqual(m.positionsInfo({}), { titles: [], count: 0, vacancies: null })
+  assert.equal(m.hasDetails(item({ positions: [paratha] })), true)
+  assert.equal(m.hasDetails(item({ general: [{ id: 'g', label: 'Food', details: 'x', remarks: '' }] })), true)
+  assert.equal(m.hasDetails(item()), false)
+  assert.equal(m.hasDetails({ details: undefined }), false)
+})
+
+test('the downloaded form is named after the client', () => {
+  assert.equal(m.formFileName('Al Noor Restaurant'), 'Al-Noor-Restaurant-requirement-form.xlsx')
+  assert.equal(m.formFileName('  '), 'job-requirement-form.xlsx')
+  assert.equal(m.formFileName('A/B: "C"'), 'A-B-C-requirement-form.xlsx')
 })
 
 test('extra columns are checked by type and shown readably', () => {
@@ -116,7 +265,7 @@ test('an optimistic change merges like the server: details by key, custom by fie
   assert.equal(reopened.closedReason, '')
   assert.equal(reopened.closedAt, null)
   assert.equal(m.applyPatch(item(), { status: 'closed', closedReason: 'expired' }).closedReason, 'expired')
-  assert.equal(m.applyPatch(item(), { ownerId: 'u9' }).ownerId, 'u9')
+  assert.equal(m.applyPatch(item(), { ownerIds: ['u9'] }).ownerId, 'u9')
   assert.deepEqual(m.mergePatches({ details: { a: '1' }, clientName: 'x' }, { details: { b: '2' }, clientName: 'y' }), { details: { a: '1', b: '2' }, clientName: 'y' })
   assert.equal(m.flipStatus('active'), 'closed')
 })
@@ -193,9 +342,28 @@ test('the filters become the same query for the list and the export', () => {
   assert.equal(m.daysBefore('2026-03-02', 6), '2026-02-24')
 })
 
-test('a duplicate keeps the client, country, details and extra columns, not the ad, date or status', () => {
+test('a duplicate keeps the client, country, details, positions with requirements, general rows and extra columns, not the ad, date or status', () => {
   const copy = m.duplicateBody(item({ details: { position: ' Welder ', basicSalary: '', remarks: 'abc' }, custom: { f1: 'x' }, adUrl: '/ad', status: 'closed' }))
   assert.deepEqual(copy, { clientName: 'xyz company', country: 'Kuwait', details: { position: 'Welder', remarks: 'abc' }, custom: { f1: 'x' } })
+  const full = m.duplicateBody(saved())
+  assert.deepEqual(full.positions.map((p) => [p.title, p.requirements.length]), [['Paratha Master', 1], ['Captain', 3]])
+  assert.ok(full.positions.every((p) => p.id === undefined && p.requirements.every((r) => r.id === undefined)), 'new rows, new ids')
+  assert.deepEqual(full.general, [{ label: 'Weekly off', details: '2 days per month', remarks: 'As provided by client' }, { label: 'Air Ticket', details: 'Return', remarks: '' }])
+  assert.deepEqual(full.details, { remarks: 'Pending confirmation.', deadline: '2026-12-01' })
+})
+
+test('an optimistic change replaces the positions and general lists wholesale, giving new rows an id', () => {
+  const row = saved()
+  const edited = m.applyPatch(row, { positions: [{ title: 'Cook', vacancies: '1', salary: '', requirements: [{ field: 'Experience', details: '3 years' }] }], details: { remarks: 'x' } })
+  assert.deepEqual(edited.positions.map((p) => p.title), ['Cook'])
+  assert.ok(edited.positions[0].id && edited.positions[0].requirements[0].id)
+  assert.equal(edited.general.length, 2, 'a list that is not in the patch is untouched')
+  assert.deepEqual(edited.details, { deadline: '2026-12-01', remarks: 'x' })
+  assert.deepEqual(m.applyPatch(row, { general: [] }).general, [])
+  assert.deepEqual(m.applyPatch(item(), { clientName: 'z' }).positions, undefined, 'no list is invented')
+  const later = m.mergePatches({ positions: [{ title: 'a', vacancies: '', salary: '', requirements: [] }], details: { remarks: '1' } }, { positions: [], details: { deadline: 'd' } })
+  assert.deepEqual(later, { positions: [], details: { remarks: '1', deadline: 'd' } }, 'the later list replaces the earlier one, details merge by key')
+  assert.deepEqual(m.mergePatches({ general: [] }, { clientName: 'k' }), { general: [], clientName: 'k' })
 })
 
 test('the row tooltip says who added it and who last updated it', () => {

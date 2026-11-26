@@ -1,0 +1,91 @@
+/*
+ * The requirement form of the Job requirements screen (screens/job-requirements/job-requirement-form.tsx): the client's "Job Requirement Form" as four numbered
+ * sections. Each section is a primary-blue band (like the table header of the sheet) over a bordered box of rows. Colours are tokens only, so the form follows the
+ * palette and dark mode. From 700px a row is one line of columns; below it every row is a small card with its labels shown above the boxes.
+ */
+.jrf { display: grid; gap: 22px; min-width: 0; }
+.jrf-section { min-width: 0; }
+.jrf-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; margin-bottom: -6px; }
+.jrf-top p { flex: 1 1 260px; margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.45; }
+
+.jrf-band { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 6px 14px; border-radius: 10px 10px 0 0; background: var(--primary); color: var(--on-primary); }
+.jrf-band h3 { margin: 0; font-size: 12.5px; font-weight: 700; letter-spacing: .06em; line-height: 1.2; text-transform: uppercase; }
+.jrf-band-no { display: grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--on-primary); color: var(--primary); font-size: 12.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.jrf-band-note { margin-left: auto; color: color-mix(in srgb, var(--on-primary) 82%, var(--primary)); font-size: 12px; font-weight: 500; text-align: right; }
+
+.jrf-box { min-width: 0; border: 1px solid var(--border-control); border-top: 0; border-radius: 0 0 10px 10px; background: var(--bg-card); }
+.jrf-box.is-flush { overflow: hidden; }
+
+/* a header line and a row share the grid of their table */
+.jrf-head, .jrf-row { display: grid; align-items: start; gap: 8px; padding: 8px 12px; }
+.jrf-head { align-items: center; padding-block: 7px; border-bottom: 1px solid var(--border-main); background: var(--tint-1); color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.jrf-row { border-bottom: 1px solid var(--border-main); }
+.jrf-row.has-error { background: color-mix(in srgb, var(--error-ink) 5%, var(--bg-card)); }
+.jrf-pos { grid-template-columns: 52px minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) 36px; grid-template-areas: 'no title vac sal rm'; }
+.jrf-req { grid-template-columns: minmax(150px, 1fr) minmax(0, 2.6fr) 36px; grid-template-areas: 'field details rm'; }
+.jrf-gen { grid-template-columns: 52px minmax(0, 1.1fr) minmax(0, 1.5fr) minmax(0, 1.5fr) 36px; grid-template-areas: 'no label details remarks rm'; }
+.jrf-head.jrf-pos > span:first-child, .jrf-head.jrf-gen > span:first-child { text-align: center; }
+.jrf-pos > .jrf-no, .jrf-gen > .jrf-no { grid-area: no; }
+.jrf-cell[data-area='title'] { grid-area: title; }
+.jrf-cell[data-area='vac'] { grid-area: vac; }
+.jrf-cell[data-area='sal'] { grid-area: sal; }
+.jrf-cell[data-area='field'] { grid-area: field; }
+.jrf-cell[data-area='details'] { grid-area: details; }
+.jrf-cell[data-area='label'] { grid-area: label; }
+.jrf-cell[data-area='remarks'] { grid-area: remarks; }
+.jrf-rm { grid-area: rm; margin-top: 4px; justify-self: center; }
+.jrf-no { display: grid; place-items: center; height: 40px; color: var(--text-muted); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.jrf-no-word, .jrf-m { display: none; }
+.jrf-cell { display: grid; min-width: 0; }
+.jrf :is(.ui-input, .date-picker-trigger) { min-height: 40px; }
+.jrf textarea.ui-input { min-height: 40px; padding-block: 9px; line-height: 1.4; resize: none; }
+.jrf .ui-input[aria-invalid='true'], .jrf .ui-input[aria-invalid='true']:focus { border-color: var(--error-ink); }
+.jrf-error { display: flex; align-items: center; gap: 5px; grid-column: 1 / -1; margin: 0; color: var(--error-ink); font-size: 12.5px; font-weight: 600; }
+
+.jrf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; }
+.jrf-chip { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0 10px; border: 1px dashed var(--border-control); border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: border-color .12s, color .12s, background-color .12s; }
+.jrf-chip:hover:not(:disabled) { border-style: solid; border-color: var(--primary); background: color-mix(in srgb, var(--primary) 7%, var(--bg-card)); color: var(--primary); }
+.jrf-chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.jrf-chip:disabled { opacity: .5; cursor: not-allowed; }
+
+/* section 2: one card per position */
+.jrf-empty { margin: 0; padding: 18px 14px; color: var(--text-muted); font-size: 13.5px; }
+.jrf-pcard { border-bottom: 1px solid var(--border-control); }
+.jrf-pcard:last-child { border-bottom: 0; }
+.jrf-pcard > .jrf-row:last-of-type { border-bottom: 0; }
+.jrf-pcard-head { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 8px 12px; background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); border-bottom: 1px solid var(--border-main); }
+.jrf-pcard-head h4 { min-width: 0; margin: 0; color: var(--text-main); font-size: 14.5px; font-weight: 700; overflow-wrap: anywhere; }
+.jrf-pcard-no { display: grid; flex: none; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--primary); color: var(--on-primary); font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.jrf-muted { margin-left: auto; color: var(--text-muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+
+/* section 4 */
+.jrf-last { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 14px 18px; padding: 14px; }
+.jrf-last .date-picker, .jrf-last .date-picker-trigger { width: 100%; }
+
+.jrf-foot-note { margin-right: auto; color: var(--text-muted); font-size: 13px; font-weight: 600; }
+.jrf-foot-note.is-warn { color: var(--error-ink); }
+
+/* below 700px every row is a card: its labels show above the boxes, the Remove button sits top right */
+@media (max-width: 699px) {
+  .dialog-body:has(> .jrf) { padding-inline: 12px; }
+  .jrf { gap: 18px; }
+  .jrf-band-note, .jrf-head { display: none; }
+  .jrf-row { gap: 10px; padding: 12px; }
+  .jrf-pos { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'no rm' 'title title' 'vac vac' 'sal sal'; }
+  .jrf-req { grid-template-columns: minmax(0, 1fr) 36px; grid-template-areas: 'field rm' 'details details'; }
+  .jrf-gen { grid-template-columns: minmax(0, 1fr) 36px; grid-template-areas: 'no rm' 'label label' 'details details' 'remarks remarks'; }
+  .jrf-pos > .jrf-no, .jrf-gen > .jrf-no { display: block; height: auto; align-self: center; color: var(--text-main); }
+  .jrf-no-word { display: inline; }
+  .jrf-pos > .jrf-rm, .jrf-gen > .jrf-rm { margin-top: 0; justify-self: end; }
+  .jrf-req > .jrf-rm { margin-top: 20px; }
+  .jrf-cell { gap: 4px; }
+  .jrf-m { display: block; color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .jrf :is(input, textarea, .ui-input, .date-picker-trigger) { font-size: 16px; }
+  .jrf-last { grid-template-columns: minmax(0, 1fr); }
+  .jrf-actions { padding: 10px 12px 12px; }
+  .jrf-actions .ui-button { flex: 1 1 auto; min-height: 40px; }
+  .jrf-chip { min-height: 36px; padding: 0 12px; }
+}
+
+/* the "+ Create ..." choice at the end of a field picker */
+.suggest-popup .suggest-create { border-top: 1px solid var(--border-main); color: var(--primary); font-weight: 700; }

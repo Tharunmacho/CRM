@@ -1,71 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { cn } from '@/shared/lib/cn'
-import { Button, Input, Select, Textarea, Field } from '@/shared/ui/primitives'
-import { DatePicker } from '@/shared/ui/date-picker'
+import { Button, Input, Select, Field } from '@/shared/ui/primitives'
 import { Dialog, Sheet } from '@/shared/ui/overlay'
 import { jobRequirementsApi } from '@/features/job-requirements/job-requirements-api'
 import {
-  CLOSED_REASONS, DETAIL_INPUTS, FIELD_LABEL_MAX, FIELD_TYPES, detailsChanges, detailsFor, fieldLabelError, historyWhen,
-  type ClosedReason, type DetailKey, type FieldType, type HistoryEntry, type RequirementField, type RequirementItem, type RequirementPatch,
+  CLOSED_REASONS, FIELD_LABEL_MAX, FIELD_TYPES, fieldLabelError, historyWhen,
+  type ClosedReason, type FieldType, type HistoryEntry, type RequirementField, type RequirementItem,
 } from '@/features/job-requirements/job-requirements-model'
-
-/**
- * "Requirements: <client>": the form behind the Requirements details cell, laid out like the owner's sheet: a header band (Sl. No. | Job Requirements Details |
- * Client Information) and 16 numbered rows, the number and label on the left and a box on the right for what the client wrote; the 17th row is the Deadline
- * (a date picker, used for the due-date reminders). Saves only the keys that changed (the server merges them by key); the form scrolls inside the dialog.
- */
-export function DetailsDialog({ item, gone = false, onClose, onSave }: { item: RequirementItem; /** The row was deleted by someone else while this form was open: what was typed stays, saving is off. */ gone?: boolean; onClose: () => void; onSave: (patch: RequirementPatch) => Promise<boolean> }) {
-  // The baseline is frozen when the form opens: a live refresh that changes the row (another person edited the deadline) must not make the form look
-  // changed, and Save must send only the boxes THIS person touched, never somebody else's newer value written back from a stale copy.
-  const [start] = useState(() => detailsFor(item))
-  const [form, setForm] = useState<Record<DetailKey, string>>(start)
-  const [saving, setSaving] = useState(false)
-  const changes = detailsChanges(start, form)
-  const dirty = Object.keys(changes).length > 0
-  const set = (key: DetailKey, value: string) => setForm((current) => ({ ...current, [key]: value }))
-  const submit = async () => {
-    if (gone) return
-    if (!dirty) { onClose(); return }
-    setSaving(true)
-    const ok = await onSave({ details: changes })
-    setSaving(false)
-    if (ok) onClose()
-  }
-  return (
-    <Dialog open onClose={onClose} width="lg" title={`Requirements: ${item.clientName.trim() || 'new requirement'}`}
-      description={item.country ? `Country: ${item.country}` : undefined}
-      footer={<>
-        <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
-        <Button variant="primary" onClick={() => void submit()} disabled={saving || gone}>{saving ? 'Saving...' : 'Save'}</Button>
-      </>}>
-      {gone && <p role="alert" className="jr-gone">This requirement was deleted by someone else. What you typed is still here, but it can no longer be saved.</p>}
-      <form className="jr-sheet" onSubmit={(event) => { event.preventDefault(); if (!gone) void submit() }}>
-        <div className="jr-sheet-head" aria-hidden="true">
-          <span className="jr-sheet-no">Sl. No.</span><span>Job Requirements Details</span><span>Client Information</span>
-        </div>
-        {DETAIL_INPUTS.map((input) => {
-          const id = `jr-detail-${input.key}`
-          const value = form[input.key]
-          return (
-            <div key={input.key} className={cn('jr-sheet-row', input.kind === 'area' && 'is-tall')}>
-              <span className="jr-sheet-no">{input.no}</span>
-              <label className="jr-sheet-label" htmlFor={id}>{input.label}{input.hint && <small>{input.hint}</small>}</label>
-              <div className="jr-sheet-input">
-                {input.kind === 'area'
-                  ? <Textarea id={id} value={value} rows={4} minRows={4} maxRows={10} maxLength={10000} onChange={(event) => set(input.key, event.target.value)} />
-                  : input.kind === 'date'
-                    ? <DatePicker id={id} value={/^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : ''} onChange={(iso) => set(input.key, iso)} aria-label={input.label} placeholder="Select date" />
-                    : <Input id={id} value={value} maxLength={300} onChange={(event) => set(input.key, event.target.value)} />}
-              </div>
-            </div>
-          )
-        })}
-        <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
-      </form>
-    </Dialog>
-  )
-}
 
 /** "+ Add field" and "Rename": a name, and for a new column its type (a type cannot change later: the saved values would not fit). */
 export function FieldDialog({ field, fields, onClose, onSave }: {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CalendarPlus, ClipboardList, Clock3, Copy, FileSpreadsheet, History, Loader2, Lock, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
+import { AlertTriangle, CalendarPlus, ClipboardList, Clock3, Copy, FileSpreadsheet, History, Loader2, Lock, Pencil, Plus, RefreshCw, Settings2, Trash2, X } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { isAdminLevel } from '@/shared/model/role-labels'
 import { COUNTRY_NAMES } from '@/shared/lib/country-flag'
@@ -11,13 +11,16 @@ import { EmptyState, PageHeader } from '@/shared/ui/display'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { RowMenu, type RowMenuItem } from '@/shared/ui/table'
 import {
-  CUSTOM_WIDTH, FIXED_WIDTHS, NO_FILTERS, STATUS_TABS, buildRows, columnWidths, detailsSummary, canDeleteBy, daysBefore, duplicateBody, filterCount, flipStatus, isoToText, localSummary, ownerChoices, shapeDateText, summaryCounts, whoWhen,
+  CUSTOM_WIDTH, FIXED_WIDTHS, NO_FILTERS, STATUS_TABS, buildRows, columnWidths, positionsSummary, canDeleteBy, daysBefore, duplicateBody, filterCount, flipStatus, isoToText, localSummary, ownerChoices, shapeDateText, summaryCounts, whoWhen,
   type ClosedReason, type ListFilters, type RequirementField, type RequirementItem, type RequirementPatch, type RowFilter, type StatusFilter,
 } from '@/features/job-requirements/job-requirements-model'
-import { downloadRequirements } from '@/features/job-requirements/job-requirements-api'
+import { downloadRequirementForm, downloadRequirements } from '@/features/job-requirements/job-requirements-api'
 import { useJobRequirements } from '@/features/job-requirements/use-job-requirements'
 import { AdCell, ColumnHead, CustomCell, DetailsButton, InlineCell, SaveMark, StatusToggle, dateRead, identity, textRead } from './job-requirement-cells'
-import { CloseDialog, ConfirmDialog, DetailsDialog, FieldDialog, HistoryDrawer } from './job-requirement-dialogs'
+import { CloseDialog, ConfirmDialog, FieldDialog, HistoryDrawer } from './job-requirement-dialogs'
+import { JobRequirementForm } from './job-requirement-form'
+import { FieldManagerDialog } from './job-requirement-fields'
+import { OwnersCell } from './job-requirement-owners'
 import '@/styles/job-requirements.css'
 
 const FIXED = 9
@@ -64,7 +67,9 @@ export default function JobRequirementsPage() {
   const [focusId, setFocusId] = useState<string | null>(null)
   const clientBoxes = useRef<Record<string, HTMLElement | null>>({})
   const sent = useMemo<ListFilters>(() => ({ ...filters, due: view === 'dueSoon' ? 'soon' : view === 'overdue' ? 'overdue' : '' }), [filters, view])
-  const data = useJobRequirements(sent)
+  const people = useMemo(() => ownerChoices(store.users), [store.users])
+  const data = useJobRequirements(sent, people)
+  const [managing, setManaging] = useState(false)
   const { items, fields, loading, error } = data
   const today = useAgencyToday(store.settings.timezone || store.agencyTimezone || 'Asia/Kolkata')   // due-soon / overdue follow the new day at midnight
 
@@ -133,7 +138,7 @@ export default function JobRequirementsPage() {
   const rowName = (item: RequirementItem, serial: number) => item.clientName.trim() || `row ${serial}`
   const colSpan = FIXED + fields.length
   const widths = columnWidths(Math.max(0, boxWidth - 2), fields.length, {
-    client: longest(items.map((item) => item.clientName)), details: longest(items.map((item) => detailsSummary(item.details))),
+    client: longest(items.map((item) => item.clientName)), details: longest(items.map((item) => positionsSummary(item))),
     country: longest(items.map((item) => item.country)), owner: longest(owners.map((owner) => owner.name)),
   })
   const narrowed = filterCount(filters) > 0 || filters.q !== ''
@@ -148,13 +153,20 @@ export default function JobRequirementsPage() {
     { label: 'Overdue', value: summary.overdue, detail: 'deadline has passed', icon: AlertTriangle, tone: 'red' as const, active: view === 'overdue', onSelect: () => setView(view === 'overdue' ? 'all' : 'overdue') },
   ]
 
+  const downloadForm = async (item: RequirementItem) => {
+    try { await downloadRequirementForm(item.id, item.clientName) }
+    catch (failure) { notify(failure instanceof Error ? failure.message : 'The form could not be created. Please try again.', 'warn') }
+  }
+
   const rowMenu = (item: RequirementItem): RowMenuItem[] => [
     { label: 'History', icon: History, onSelect: () => setDialog({ kind: 'history', id: item.id }) },
+    { label: 'Download form (Excel)', icon: FileSpreadsheet, onSelect: () => { void downloadForm(item) } },
     { label: 'Duplicate requirement', icon: Copy, onSelect: () => { void addRow(duplicateBody(item)) } },
     ...(admin ? [{ label: 'Delete', icon: Trash2, tone: 'danger' as const, separated: true, onSelect: () => setDialog({ kind: 'delete-row', id: item.id }) }] : []),
   ]
 
   const actions = <>
+    <Button variant="secondary" icon={<Settings2 size={16} />} onClick={() => setManaging(true)} disabled={Boolean(error && items.length === 0)}>Manage fields</Button>
     <Button variant="secondary" icon={exporting ? <Loader2 size={16} className="jr-spin" /> : <FileSpreadsheet size={16} />} onClick={() => void exportFile()} disabled={exporting || Boolean(error && items.length === 0)}>Export Excel</Button>
     <Button variant="primary" icon={<Plus size={16} />} onClick={() => void addRow()} disabled={creating || loading || Boolean(error)}>New requirement</Button>
   </>
@@ -228,7 +240,7 @@ export default function JobRequirementsPage() {
                   <th scope="col" className="is-left">Client name</th>
                   <th scope="col">Country</th>
                   <th scope="col">Assigned to</th>
-                  <th scope="col">Requirements details</th>
+                  <th scope="col">Job positions</th>
                   <th scope="col">Ad</th>
                   <th scope="col">Status</th>
                   {fields.map((field) => (
@@ -275,12 +287,9 @@ export default function JobRequirementsPage() {
                               onSave={(value) => keep(item.id, { country: value })} />
                           </td>
                           <td data-label="Assigned to">
-                            <Select compact className="jr-owner" aria-label={`Assigned to, for ${name}`} value={item.ownerId ?? ''} onChange={(event) => { if (event.target.value !== (item.ownerId ?? '')) keep(item.id, { ownerId: event.target.value }) }}>
-                              <option value="">Unassigned</option>
-                              {ownerChoices(store.users, item).map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
-                            </Select>
+                            <OwnersCell item={item} choices={ownerChoices(store.users, item)} label={name} onSave={(ids) => keep(item.id, { ownerIds: ids })} />
                           </td>
-                          <td data-label="Requirements details"><DetailsButton item={item} today={today} onOpen={() => setDialog({ kind: 'details', id: item.id })} /></td>
+                          <td data-label="Job positions"><DetailsButton item={item} today={today} onOpen={() => setDialog({ kind: 'details', id: item.id })} /></td>
                           <td data-label="Ad">
                             <AdCell item={item} onUpload={(file) => data.uploadAd(item.id, file)} onRemove={() => data.removeAd(item.id)} onError={(message) => notify(message, 'warn')} />
                           </td>
@@ -315,7 +324,11 @@ export default function JobRequirementsPage() {
       </section>
 
       {dialog?.kind === 'details' && (dialogItem ?? lastDialogItem.current) && (
-        <DetailsDialog item={(dialogItem ?? lastDialogItem.current) as RequirementItem} gone={detailsGone} onClose={() => setDialog(null)} onSave={(patch) => data.save((dialogItem ?? lastDialogItem.current as RequirementItem).id, patch)} />
+        <JobRequirementForm item={(dialogItem ?? lastDialogItem.current) as RequirementItem} options={data.options} onCreateOption={(kind, label) => data.createOption(kind, label)} onManage={() => setManaging(true)} gone={detailsGone} onClose={() => setDialog(null)} onSave={(patch) => data.save((dialogItem ?? lastDialogItem.current as RequirementItem).id, patch)} />
+      )}
+      {managing && (
+        <FieldManagerDialog options={data.options} canDelete={admin} onClose={() => setManaging(false)}
+          onCreate={(kind, label, standard) => data.createOption(kind, label, standard)} onUpdate={(id, body) => data.updateOption(id, body)} onDelete={(id) => data.deleteOption(id)} />
       )}
       {dialog?.kind === 'close' && dialogItem && (
         <CloseDialog item={dialogItem} onClose={() => setDialog(null)} onPick={(reason) => close(dialogItem.id, reason)} />
