@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
-import { CalendarClock, Link2, ListChecks } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
 import { useStore } from '@/shared/state/crm-store'
@@ -8,15 +7,10 @@ import type { Priority, TodoItem } from '@/shared/model/types'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { SuggestInput } from '@/shared/ui/suggest-input'
 import { Dialog } from '@/shared/ui/overlay'
-import { FormSection } from '@/shared/ui/form-section'
 import { DatePicker } from '@/shared/ui/date-picker'
 import { LINK_KINDS, PRIORITIES, linkKindOf, toInputValue, type LinkKind } from './todo-meta'
 import { sectionKeys, sections, sectionKey, type SectionKey } from './organiser'
 import { idLine } from '@/features/candidates/candidate-ids'
-
-function Section({ icon, title, hint, children }: { icon: ReactNode; title: string; hint?: string; children: ReactNode }) {
-  return <FormSection icon={icon} title={title} hint={hint}>{children}</FormSection>
-}
 
 /** Create or edit a manual organiser entry. */
 export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { onClose: () => void; item?: TodoItem | null; initialSection?: SectionKey }) {
@@ -130,6 +124,8 @@ export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { on
   return (
     <Dialog
       open
+      width="lg"
+      scroll="inside"
       onClose={() => { if (!busy) onClose() }}
       title={item ? 'Edit entry' : 'Add entry'}
       footer={
@@ -143,13 +139,12 @@ export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { on
     >
       {error && <p role="alert" className="td-form-error">{error}</p>}
       <fieldset disabled={busy} className="td-form">
-        <Section icon={<ListChecks size={16} />} title="Entry">
-          <Field label="Section" className="sm:col-span-2">
+          <Field label="Section">
             <Select value={form.section} onChange={event => { set('section', event.target.value as SectionKey); setPicker(false); setFieldName('') }}>
               {sectionKeys.map(key => <option key={key} value={key}>{sections[key].label}</option>)}
             </Select>
           </Field>
-          <Field label={config.title} required error={titleError} className="sm:col-span-2">
+          <Field label={config.title} required error={titleError}>
             <Input
               value={form.title}
               maxLength={300}
@@ -175,12 +170,6 @@ export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { on
               <Button variant="ghost" onClick={() => { setPicker(false); setFieldName('') }}>Cancel</Button>
             </div> : <Button onClick={() => setPicker(true)}>Add field</Button>}
           </div>}
-          <Field label="Notes" hint="Optional" className="sm:col-span-2">
-            <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
-          </Field>
-        </Section>
-
-        <Section icon={<CalendarClock size={16} />} title="Schedule">
           <Field label={config.when} required>
             <DatePicker withTime required value={form.dueAt} onChange={(value) => set('dueAt', value)} />
           </Field>
@@ -199,11 +188,6 @@ export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { on
               ))}
             </div>
           </div>
-        </Section>
-
-        <details open={item?.linkTo ? true : undefined}>
-          <summary className="cursor-pointer font-semibold">CRM link (optional)</summary>
-          <Section icon={<Link2 size={16} />} title="Linked record">
           <Field label="Link to">
             <Select
               value={form.kind}
@@ -215,16 +199,17 @@ export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { on
               <option value="order">Order</option>
             </Select>
           </Field>
-          <Field label={form.kind ? LINK_KINDS[form.kind].label : 'Name'}>
+          {form.kind && <Field label={LINK_KINDS[form.kind].label}>
             <Select value={form.link} disabled={!form.kind} onChange={(e) => set('link', e.target.value)} aria-label="Linked item">
               <option value="">{form.kind ? `Choose a ${form.kind}` : 'Choose what to link to first'}</option>
               {form.kind && recordOptions[form.kind].map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </Select>
+          </Field>}
+          <Field label="Notes" hint="Optional" className="sm:col-span-2">
+            <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
           </Field>
-          </Section>
-        </details>
       </fieldset>
     </Dialog>
   )
