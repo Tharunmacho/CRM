@@ -231,6 +231,10 @@ export function StageModal({
                     {answer && <Badge tone={negative ? 'stamp' : greenStageAnswer(stage.no, answer, latest?.data) ? 'green' : 'neutral'}>{answer}</Badge>}
                     {current && <Badge tone={draftAnswer && greenStageAnswer(stage.no, draftAnswer, app.draft) ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
                     {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
+                    {latest && !current && canWork && !(app.status === 'closed' && stage.no === app.currentStage) &&
+                      <ReopenStage app={app} stage={stage.no} disabled={!owner?.active || pending || reopening}
+                        onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Discard unsaved stage changes?')}
+                        onStageChanged={() => { onStageRecorded?.(); onStageChanged?.() }} />}
                     {stage.no === app.currentStage && closureTab(app.closureReason) === 'Declined' && canReopenApplication(app.status, canWork) &&
                       <ReopenApplication app={app} stageTitle={stage.title} disabled={!owner?.active || pending || reopening}
                         onRecorded={onStageRecorded} onDone={onStageChanged} />}
