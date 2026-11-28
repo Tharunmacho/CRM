@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Dialog } from '@/shared/ui/overlay'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Input, Select } from '@/shared/ui/primitives'
 import { sectionKeys, sections, type SectionKey } from './organiser'
@@ -58,18 +58,10 @@ export function DailyWorksheet() {
   const [editing, setEditing] = useState<SectionKey | null>(null)
   const [draft, setDraft] = useState<Column[]>([])
   const [fieldError, setFieldError] = useState('')
-  const [focusKey, setFocusKey] = useState('')
-  function editFields(section: SectionKey, key = '') {
+  function editFields(section: SectionKey) {
     setDraft(fields(section))
-    setFocusKey(key)
     setFieldError('')
     setEditing(section)
-  }
-  function fieldHeading(section: SectionKey, key: string, name: string) {
-    return <button type="button" className="td-field-heading" aria-label={'Edit ' + name + ' field'} onClick={event => {
-      event.preventDefault()
-      editFields(section, key)
-    }}>{name}<Pencil size={12} aria-hidden="true" /></button>
   }
   function applyFields() {
     if (!editing) return
@@ -128,7 +120,7 @@ export function DailyWorksheet() {
       </header>
       {sectionKeys.map((section, index) => <section key={section}>
         <div className="td-section-band">
-          <h3>{index + 1}. {sections[section].label}</h3>
+          <h3><span className="td-section-number">{index + 1}</span>{sections[section].label}</h3>
           <div className="td-sheet-tools">
             <Button type="button" size="sm" variant="ghost" onClick={() => editFields(section)}>Edit fields</Button>
           {section !== 'review'  && <Button type="button" variant="ghost" onClick={() => setRows(previous => [...previous, blank(section)])}>+ Row</Button>}
@@ -136,7 +128,7 @@ export function DailyWorksheet() {
         </div>
         {rows.filter(row => row.section === section).map((row, rowIndex) => <div className={'td-sheet-row td-sheet-' + section} key={row.id}>
           {fields(section).map(({key: label, name}) => label === 'Time' ? <div className="td-clock-cell" key={label}>
-            <span className={rowIndex && fields(section).length <= 6 ? 'td-repeat-label' : undefined}>{fieldHeading(section, label, name + ' (IST)')}</span>
+            <span className={rowIndex && fields(section).length <= 6 ? 'td-repeat-label' : undefined}>{name} (IST)</span>
             <div className="td-clock" role="group" aria-label={name + ' in Indian Standard Time'}>
               <select aria-label={name + ' hour and AM or PM'} value={row.values.Time?.slice(0, 2) || '00'}
                 onChange={e => change(row, label, e.target.value + ':' + (row.values.Time?.slice(3) || '00'))}>
@@ -147,7 +139,7 @@ export function DailyWorksheet() {
                 {Array.from({ length: 60 }, (_, m) => <option key={m} value={pad(m)}>{pad(m)} min</option>)}
               </select>
             </div>
-          </div> : <label key={label}><span className={rowIndex && fields(section).length <= 6 ? "td-repeat-label" : undefined}>{fieldHeading(section, label, name)}</span>
+          </div> : <label key={label}><span className={rowIndex && fields(section).length <= 6 ? "td-repeat-label" : undefined}>{name}</span>
             {label === 'Priority' ? <Select value={row.values.Priority || 'normal'} onChange={e => change(row, label, e.target.value)}>
               <option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option>
             </Select> : <Input type={label.endsWith('date') ? 'date' : 'text'} value={row.values[label] || ''}
@@ -162,7 +154,7 @@ export function DailyWorksheet() {
       footer={<><Button type="button" onClick={() => setEditing(null)}>Cancel</Button><Button type="button" variant="primary" onClick={applyFields}>Save fields</Button></>}>
       <div className="grid gap-2">
         {draft.map((field, index) => <div className="flex items-center gap-2" key={field.key}>
-          <Input autoFocus={field.key === focusKey} aria-label={'Field name ' + (index + 1)} maxLength={60} value={field.name}
+          <Input autoFocus={index === 0} aria-label={'Field name ' + (index + 1)} maxLength={60} value={field.name}
             onChange={event => {
               const name = event.currentTarget.value
               setDraft(previous => previous.map(item => item.key === field.key ? { ...item, name } : item))
