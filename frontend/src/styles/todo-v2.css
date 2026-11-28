@@ -230,9 +230,10 @@ a.td-link > b::after { content: '·'; margin-left: 6px; font-weight: 400; }
 .td-sheet fieldset { display: grid; gap: 0; min-width: 0; margin: 0; padding: 0; border: 0; }
 .td-sheet header, .td-sheet section { min-width: 0; background: var(--bg-card); border: 1px solid var(--border-main); border-radius: 5px; }
 .td-sheet h2 { padding: 16px; text-align: center; font-size: 1.3rem; font-weight: 700; color: var(--primary-deep); }
-.td-sheet-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 8px 14px; }
-.td-sheet-header h2 { grid-column: 2; }
-.td-sheet-header label { justify-self: end; display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.td-sheet-header { display: grid; grid-template-columns: minmax(0,1fr); justify-items: center; gap: 4px; padding: 12px 14px; text-align: center; }
+.td-sheet-header h2 { grid-column: 1; padding: 4px; }
+.td-sheet-header label { justify-self: center; display: grid; justify-items: center; gap: 4px; font-weight: 600; }
+.td-sheet-header input { text-align: center; }
 .td-field-heading { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 .td-field-heading svg { flex: none; color: var(--text-muted); }
 .td-section-band { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; min-height: 40px; padding: 3px 10px; background: var(--primary); color: var(--on-primary); }
@@ -266,12 +267,7 @@ a.td-link > b::after { content: '·'; margin-left: 6px; font-weight: 400; }
   .td-sheet-row :is(label,.td-clock-cell) + :is(label,.td-clock-cell) { border-inline-start: 0; }
   .td-sheet-row :is(label,.td-clock-cell) > span:first-child { text-align: start; }
 }
-@media (max-width: 760px) {
-  .td-sheet-header { grid-template-columns: 1fr; justify-items: center; }
-  .td-sheet-header h2 { grid-column: 1; padding: 4px; }
-  .td-sheet-header label { justify-self: center; }
 
-}
 
 .td-clock { display: flex; align-items: center; gap: 3px; }
 .td-clock select { flex: 1; min-width: 0; height: 40px; padding-inline: 2px; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-control); border-radius: 6px; font: inherit; font-size: .84rem; }
