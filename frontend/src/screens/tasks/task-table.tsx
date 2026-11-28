@@ -1,4 +1,4 @@
-import { ArrowRight, Ban, Globe, SendHorizontal, Trash2, UserRound, UserX } from 'lucide-react'
+import { ArrowRight, ChevronDown, Ban, Globe, SendHorizontal, Trash2, UserRound, UserX } from 'lucide-react'
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { countryCode } from '@/shared/lib/country-flag'
@@ -102,9 +102,10 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [pending, setPending] = useState<DailyNote[]>([])
+  const [expanded, setExpanded] = useState(false)
   const box = useRef<HTMLTextAreaElement>(null)
   const typing = canAdd && !!onAdd
-  useAutoGrow(box, text, { minRows: 1, maxRows: 3, enabled: typing })
+  useAutoGrow(box, text, { minRows: 1, maxRows: 3, enabled: typing && expanded })
   const note = pending[0] ?? notesNewestFirst(row.notes ?? row.todayNotes)[0]
   const submit = async () => {
     if (!onAdd || saving) return
@@ -116,7 +117,7 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
       pending: (note) => setPending((list) => [note, ...list]),
       settled: (note) => setPending((list) => list.filter((item) => item.id !== note.id)),
     }, authorName)
-    if (result.error) { setError(result.error); setText(result.body) } else setNoteDraft(draftKey, '')
+    if (result.error) { setError(result.error); setText(result.body) } else { setNoteDraft(draftKey, ''); setExpanded(false) }
     setSaving(false)
     if (result.error) window.setTimeout(() => box.current?.focus(), 0)
   }
@@ -125,7 +126,11 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
     else if (event.key === 'Escape' && text) { event.preventDefault(); event.stopPropagation(); setText(''); setError('') }
   }
   return (
-    <div className="tw-notes-cell">
+    <details className="tw-notes-cell" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
+      <summary className="tw-note-trigger" aria-label={`Notes for ${row.candidate}`}>
+        <span className="tw-note-body">{note?.body || (typing ? 'Add a note?' : '?')}</span>
+        <ChevronDown size={14} aria-hidden="true" />
+      </summary>
       {typing && (
         <div className="tw-note-add">
           <textarea ref={box} className="tw-note-input" rows={1} value={text} placeholder="Add a note…" maxLength={10000} disabled={saving}
@@ -143,11 +148,10 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
                 <span className="tw-note-when"><time dateTime={note.at}>{noteWhen(note.at, zone)}</time><small>{note.by}</small></span>
                 {!note.id.startsWith(PENDING_NOTE) && mayDelete(row, note) && <NoteDeleteButton note={note} zone={zone} onAsk={onAsk(row, note)} />}
               </div>
-              <p className="tw-note-body">{note.body}</p>
             </li>
         </ul>
-      ) : !typing && <span className="dw-none" title="No notes yet">&mdash;</span>}
-    </div>
+      ) : null}
+    </details>
   )
 }
 

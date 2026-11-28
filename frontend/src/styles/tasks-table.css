@@ -220,3 +220,11 @@
  * lines, then an ellipsis; the full text is the tooltip) and a typed date never outgrows its card column. ---- */
 .dw .dw-doc-input { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; }
 .dw .tw-table td { min-width: 0; max-width: 100%; }
+
+.tw-note-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; padding: 6px 8px; cursor: pointer; list-style: none; }
+.tw-notes-cell:not([open]) > :not(summary) { display: none; }
+.tw-note-trigger::-webkit-details-marker { display: none; }
+.tw-note-trigger .tw-note-body { margin: 0; }
+.tw-note-trigger svg { flex: none; color: var(--text-muted); }
+.tw-notes-cell[open] .tw-note-trigger { border-bottom: 1px solid var(--table-line); }
+.tw-notes-cell[open] .tw-note-trigger svg { transform: rotate(180deg); }
