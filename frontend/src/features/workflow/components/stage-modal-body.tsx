@@ -638,7 +638,7 @@ function CurrentStage({
 
   const pair = stageReplyPairs[def.no]
   const visibleFields = def.fields.filter(field =>
-    (def.no === 3 && data.scheduled === 'yes' && field.name === 'date') ||
+    (def.no === 3 && data.scheduled === 'yes' && ['date', 'time'].includes(field.name)) ||
     (def.no === TOTAL_STAGES && data.ticketStatus === 'received' && ['travelDate', 'file'].includes(field.name)))
   const fieldSpan = fieldSpans(visibleFields)
 
