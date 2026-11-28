@@ -217,3 +217,8 @@ a.td-link > b::after { content: '·'; margin-left: 6px; font-weight: 400; }
   .td-actions button { width: 40px; height: 40px; }
 }
 @media (max-width: 640px) { .td-actions button { width: auto; height: 44px; } }
+
+.td-organiser { min-width: 0; }
+.td-entry-details { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 6px 0; }
+.td-entry-details dt { font-size: 12px; color: var(--text-muted); }
+.td-entry-details dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }

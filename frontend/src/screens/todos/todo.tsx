@@ -1,32 +1,32 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import {
-  AlertCircle, CalendarCheck2, CalendarClock, CheckCheck, Check, Clock3, ListChecks, LockKeyhole, Pencil, Plus,
-  RefreshCw, Sparkles, TimerOff, Trash2,
+  AlertCircle, CalendarCheck2, CheckCheck, Check, Clock3, Pencil, Plus,
+  RefreshCw, Trash2,
 } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
 import { isSameDay } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
-import type { Priority, TodoItem } from '@/shared/model/types'
+import type { TodoItem } from '@/shared/model/types'
 import { Badge, EmptyState, PageHeader, Panel, PanelHeader } from '@/shared/ui/display'
-import { SummaryCards } from '@/shared/ui/workspace'
-import { Button, Checkbox, Input, Select } from '@/shared/ui/primitives'
+import { sections, sectionKeys, sectionKey, type SectionKey } from './organiser'
+import { Button, Checkbox, Select } from '@/shared/ui/primitives'
 import { Dialog, Tabs } from '@/shared/ui/overlay'
 import { useDeadlineClock, useWorkspaceRead } from '@/features/staff/use-workspace-read'
 import { TodoDialog } from './todo-dialog'
 import {
-  Flag, LINK_KINDS, LinkIcon, PRIORITIES, dayDate, dayLabel, dueText, groupByDay, lateText, linkIdOf, linkKindOf, presetDue, presetLabel,
-  untilText, type Preset, type TabKey,
+  Flag, LINK_KINDS, LinkIcon, dayDate, dayLabel, groupByDay, lateText, linkIdOf, linkKindOf,
+  untilText, type TabKey,
 } from './todo-meta'
 import '@/styles/todo-v2.css'
 
-const EMPTY: Record<TabKey, { title: string; description: string }> = {
-  today: { title: 'Nothing due today', description: 'Type a to-do in the quick add box above, or use More options to add notes, a priority and a link to a candidate, client or order.' },
-  upcoming: { title: 'Nothing scheduled ahead', description: 'Add a follow-up for a candidate, client or order. It waits here until its day.' },
-  overdue: { title: 'Nothing is overdue', description: 'A to-do shows here in red when its time has passed, until you tick it off.' },
-  done: { title: 'Nothing ticked off yet', description: 'Finished to-dos stay here. Tick the box on a to-do to finish it.' },
+const EMPTY: Record<TabKey, string> = {
+  today: 'Nothing due today',
+  upcoming: 'Nothing scheduled ahead',
+  overdue: 'Nothing overdue',
+  done: 'No completed entries',
 }
 
 const PRIORITY_TONE = { high: 'amber', normal: 'neutral', low: 'green' } as const
@@ -35,12 +35,13 @@ export default function TodoPage() {
   const store = useStore()
   const todoRead = useWorkspaceRead()
   const clock = useDeadlineClock()
+  const [section, setSection] = useState<SectionKey | ''>('')
   const [tab, setTab] = useState<TabKey>('today')
-  const [dialog, setDialog] = useState<{ item: TodoItem | null; title: string } | null>(null)
+  const [dialog, setDialog] = useState<{ item: TodoItem | null } | null>(null)
 
   const mine = useMemo(
-    () => store.todos.filter((t) => t.ownerId === store.me.id),
-    [store.todos, store.me.id],
+    () => store.todos.filter((t) => t.ownerId === store.me.id && (!section || sectionKey(t.section) === section)),
+    [store.todos, store.me.id, section],
   )
 
   const buckets = useMemo(() => {
@@ -54,38 +55,26 @@ export default function TodoPage() {
     }
   }, [mine, clock])
 
-  const openItems = useMemo(() => mine.filter((t) => !t.done), [mine])
-  const nextUp = useMemo(
-    () => [...openItems].filter((t) => +new Date(t.dueAt) >= clock).sort((a, b) => +new Date(a.dueAt) - +new Date(b.dueAt))[0],
-    [openItems, clock],
-  )
-  const byPriority = useMemo(() => ({
-    high: openItems.filter((t) => t.priority === 'high').length,
-    normal: openItems.filter((t) => t.priority === 'normal').length,
-    low: openItems.filter((t) => t.priority === 'low').length,
-  }), [openItems])
-
   const groups = useMemo(() => {
     // Finished work shows newest first; everything else is soonest first.
     const rows = [...buckets[tab]].sort((a, b) => tab === 'done' ? +new Date(b.dueAt) - +new Date(a.dueAt) : +new Date(a.dueAt) - +new Date(b.dueAt))
     return groupByDay(rows)
   }, [buckets, tab])
-  const completion = mine.length ? Math.round((buckets.done.length / mine.length) * 100) : 0
-  const openDialog = (item: TodoItem | null = null, title = '') => setDialog({ item, title })
+  const openDialog = (item: TodoItem | null = null) => setDialog({ item })
 
   if (todoRead.loading || todoRead.error) return <div className="todo-screen td">
-    <PageHeader title="To-do List" />
+    <PageHeader title="To Do" />
     {todoRead.error ? (
       <Panel className="td-state"><div className="td-state-body">
         <AlertCircle size={20} aria-hidden="true" />
         <div>
-          <p role="alert" className="td-state-title">We could not load your to-do list</p>
+          <p role="alert" className="td-state-title">We could not load To Do</p>
           <p className="td-state-text">{todoRead.error}</p>
         </div>
         <Button icon={<RefreshCw />} onClick={todoRead.refresh}>Try again</Button>
       </div></Panel>
     ) : (
-      <div className="td-skeleton" role="status" aria-label="Loading your to-do list">
+      <div className="td-skeleton" role="status" aria-label="Loading To Do">
         <div className="td-skel-tiles">{[0, 1, 2, 3].map((i) => <span key={i} />)}</div>
         <div className="td-skel-body"><span /><span /></div>
       </div>
@@ -95,29 +84,23 @@ export default function TodoPage() {
   return (
     <div className="todo-screen td">
       <PageHeader
-        title="To-do List"
+        title="To Do"
         actions={
           <>
-            <Button icon={<RefreshCw />} onClick={todoRead.refresh}>Refresh list</Button>
-            <Button variant="primary" icon={<Plus />} onClick={() => openDialog()}>Add to-do</Button>
+            <Button icon={<RefreshCw />} onClick={todoRead.refresh}>Refresh</Button>
+            <Button variant="primary" icon={<Plus />} onClick={() => openDialog()}>Add entry</Button>
           </>
         }
       />
 
-      <SummaryCards
-        items={[
-          { label: 'Today', value: buckets.today.length, detail: 'To do before the day ends', icon: CalendarCheck2, onSelect: () => setTab('today'), active: tab === 'today' },
-          { label: 'Upcoming', value: buckets.upcoming.length, detail: 'Planned for the days ahead', icon: CalendarClock, onSelect: () => setTab('upcoming'), active: tab === 'upcoming' },
-          { label: 'Overdue', value: buckets.overdue.length, detail: buckets.overdue.length ? 'Needs your attention now' : 'Nothing is running late', icon: TimerOff, tone: 'red', onSelect: () => setTab('overdue'), active: tab === 'overdue' },
-          { label: 'Completed', value: buckets.done.length, detail: 'Ticked off', icon: CheckCheck, tone: 'green', onSelect: () => setTab('done'), active: tab === 'done' },
-        ]}
-      />
-
-      <div className="td-layout">
+      <div className="td-organiser">
         <Panel flush className="td-list-panel">
           <PanelHeader
-            title="My to-dos"
-            action={<span className="td-private"><LockKeyhole size={13} aria-hidden="true" /> Private to you</span>}
+            title="My entries"
+            action={<Select aria-label="Filter by section" value={section} onChange={event => setSection(event.target.value as SectionKey | '')}>
+              <option value="">All sections</option>
+              {sectionKeys.map(key => <option key={key} value={key}>{sections[key].label}</option>)}
+            </Select>}
           />
           <Tabs
             tabs={[
@@ -130,15 +113,11 @@ export default function TodoPage() {
             onChange={(k) => setTab(k as TabKey)}
           />
 
-          {tab !== 'done' && <QuickAdd key={tab} tab={tab} now={clock} onMore={(title) => openDialog(null, title)} />}
-
           {groups.length === 0 ? (
             <div className="td-empty">
               <EmptyState
                 icon={<CalendarCheck2 size={22} strokeWidth={1.6} />}
-                title={EMPTY[tab].title}
-                description={EMPTY[tab].description}
-                action={tab !== 'done' && <Button variant="primary" icon={<Plus />} onClick={() => openDialog()}>Add to-do</Button>}
+                title={EMPTY[tab]}
               />
             </div>
           ) : (
@@ -160,120 +139,10 @@ export default function TodoPage() {
           )}
         </Panel>
 
-        <Panel flush className="td-progress-panel">
-          <PanelHeader title="Your progress" />
-          <div className="td-progress-body">
-            <div className="td-ring-wrap">
-              <div className="td-ring" role="img" aria-label={`${completion}% of your to-dos completed`}>
-                <svg viewBox="0 0 120 120" aria-hidden="true">
-                  <circle className="td-ring-track" cx="60" cy="60" r="52" />
-                  {completion > 0 && <circle className="td-ring-fill" cx="60" cy="60" r="52" pathLength={100} strokeDasharray={`${completion} 100`} />}
-                </svg>
-                <div>
-                  <strong className="tnum">{completion}%</strong>
-                  <span>completed</span>
-                </div>
-              </div>
-            </div>
-
-            <dl className="td-figures">
-              <div><dt>Completed</dt><dd className="tnum">{buckets.done.length}</dd></div>
-              <div><dt>Still on your list</dt><dd className="tnum">{openItems.length}</dd></div>
-            </dl>
-
-            <section className="td-block" aria-label="Open items by priority">
-              <h3>Open by priority</h3>
-              {PRIORITIES.map((p) => (
-                <div key={p.value} className="td-prio-row">
-                  <span>{p.label}</span>
-                  <span className="td-prio-bar"><i className={`is-${p.value}`} style={{ width: openItems.length ? `${(byPriority[p.value] / openItems.length) * 100}%` : '0%' }} /></span>
-                  <b className="tnum">{byPriority[p.value]}</b>
-                </div>
-              ))}
-            </section>
-
-            <section className="td-block td-next" aria-label="Next up">
-              <h3><Sparkles size={13} aria-hidden="true" /> Next up</h3>
-              {nextUp ? (
-                <p><strong title={nextUp.title}>{nextUp.title}</strong><span>{dueText(nextUp, clock)}</span></p>
-              ) : (
-                <p><strong>All clear</strong><span>Nothing coming up on your list.</span></p>
-              )}
-            </section>
-
-          </div>
-        </Panel>
       </div>
 
-      {dialog && <TodoDialog key={dialog.item?.id || 'new'} item={dialog.item} initialTitle={dialog.title} onClose={() => setDialog(null)} />}
+      {dialog && <TodoDialog key={dialog.item?.id || 'new'} item={dialog.item} initialSection={section || 'reminders'} onClose={() => setDialog(null)} />}
     </div>
-  )
-}
-
-/* ------------------------------------------------------------- quick add */
-
-function QuickAdd({ tab, now, onMore }: { tab: TabKey; now: number; onMore: (title: string) => void }) {
-  const store = useStore()
-  const [title, setTitle] = useState('')
-  const [preset, setPreset] = useState<Preset>(tab === 'upcoming' ? 'tomorrow' : 'soon')
-  const [priority, setPriority] = useState<Priority>('normal')
-  const [error, setError] = useState('')
-  const [added, setAdded] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    if (!added) return undefined
-    const timer = window.setTimeout(() => setAdded(''), 4000)
-    return () => window.clearTimeout(timer)
-  }, [added])
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    if (busy) return
-    if (!title.trim()) { setError('Type what needs doing, then press Enter.'); return }
-    setBusy(true); setError(''); setAdded('')
-    try {
-      await store.addTodo({ title: title.trim(), dueAt: presetDue(preset, now).toISOString(), priority, linkTo: null, linkLabel: null })
-      setAdded(`Added for ${presetLabel(preset, now)}.`)
-      setTitle('')
-    } catch (e) { setError(e instanceof Error ? e.message : 'We could not add the to-do. Please try again.') }
-    finally { setBusy(false) }
-  }
-
-  return (
-    <form className="td-quick" onSubmit={(e) => void submit(e)} noValidate aria-label="Quick add form">
-      <div className="td-quick-row">
-        <div className="td-quick-input">
-          <ListChecks size={16} aria-hidden="true" />
-          <Input
-            value={title}
-            maxLength={300}
-            aria-label="Quick add a to-do"
-            aria-invalid={!!error}
-            aria-describedby={error ? 'td-quick-error' : undefined}
-            placeholder="Add a to-do"
-            disabled={busy}
-            onChange={(e) => { setTitle(e.target.value); if (error) setError('') }}
-          />
-        </div>
-        <div className="td-quick-when">
-          <Select value={preset} aria-label="Due" onChange={(e) => setPreset(e.target.value as Preset)} disabled={busy}>
-            <option value="soon">{presetLabel('soon', now)}</option>
-            <option value="tomorrow">{presetLabel('tomorrow', now)}</option>
-            <option value="week">{presetLabel('week', now)}</option>
-          </Select>
-        </div>
-        <div className="td-quick-prio">
-          <Select value={priority} aria-label="Priority" onChange={(e) => setPriority(e.target.value as Priority)} disabled={busy}>
-            {PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-          </Select>
-        </div>
-        <Button type="submit" variant="primary" icon={<Plus />} disabled={busy}>{busy ? 'Adding…' : 'Add'}</Button>
-        <Button type="button" disabled={busy} onClick={() => onMore(title.trim())}>More options</Button>
-      </div>
-      {error && <p id="td-quick-error" role="alert" className="td-quick-error">{error}</p>}
-      {added && !error && <p role="status" className="td-quick-added">{added}</p>}
-    </form>
   )
 }
 
@@ -317,6 +186,10 @@ function Row({ item, now, onEdit }: { item: TodoItem; now: number; onEdit: () =>
 
           <div className="td-body">
             <p className="td-title">{item.title}</p>
+            {item.section && <small>{sections[sectionKey(item.section)].label}</small>}
+            {item.details && Object.keys(item.details).length > 0 && <dl className="td-entry-details">
+              {Object.entries(item.details).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+            </dl>}
             {item.notes && <p className="td-notes">{item.notes}</p>}
             <div className="td-chips">
               {item.done ? (

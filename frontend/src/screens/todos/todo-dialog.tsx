@@ -9,15 +9,16 @@ import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { FormSection } from '@/shared/ui/form-section'
 import { DatePicker } from '@/shared/ui/date-picker'
-import { LINK_KINDS, PRIORITIES, linkKindOf, presetDue, presetLabel, toInputValue, type LinkKind, type Preset } from './todo-meta'
+import { LINK_KINDS, PRIORITIES, linkKindOf, toInputValue, type LinkKind } from './todo-meta'
+import { sectionKeys, sections, sectionKey, type SectionKey } from './organiser'
 import { idLine } from '@/features/candidates/candidate-ids'
 
 function Section({ icon, title, hint, children }: { icon: ReactNode; title: string; hint?: string; children: ReactNode }) {
   return <FormSection icon={icon} title={title} hint={hint}>{children}</FormSection>
 }
 
-/** Add a to-do, or edit one. `initialTitle` carries over what was typed in the quick-add row. */
-export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () => void; item?: TodoItem | null; initialTitle?: string }) {
+/** Create or edit a manual organiser entry. */
+export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { onClose: () => void; item?: TodoItem | null; initialSection?: SectionKey }) {
   const store = useStore()
   const defaultDue = (() => {
     const d = new Date()
@@ -27,17 +28,19 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
 
   const initialKind = linkKindOf(item?.linkTo)
   const [form, setForm] = useState({
-    title: item?.title || initialTitle,
+    section: item ? sectionKey(item.section) : initialSection,
+    details: { ...item?.details } as Record<string, string>,
+    title: item?.title ?? '',
     notes: item?.notes || '',
     dueAt: item ? toInputValue(item.dueAt) : defaultDue,
     priority: (item?.priority || 'normal') as Priority,
     kind: (initialKind || '') as LinkKind | '',
     link: item?.linkTo || '',
   })
+  const config = sections[form.section]
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [titleError, setTitleError] = useState('')
-  const now = Date.now()
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }))
 
   const recordOptions = useMemo(() => {
@@ -70,6 +73,8 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
     setBusy(true); setError('')
     const payload = {
       title: form.title.trim(),
+      section: form.section,
+      details: Object.fromEntries(config.fields.filter(label => form.details[label]?.trim()).map(label => [label, form.details[label].trim()])),
       notes: form.notes.trim() || undefined,
       dueAt: due.toISOString(),
       priority: form.priority,
@@ -89,36 +94,47 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
     <Dialog
       open
       onClose={() => { if (!busy) onClose() }}
-      title={item ? 'Edit to-do' : 'Add a to-do'}
+      title={item ? 'Edit entry' : 'Add entry'}
       footer={
         <>
           <Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={busy} onClick={() => void save()}>
-            {busy ? 'Saving…' : item ? 'Save changes' : 'Add to-do'}
+            {busy ? 'Saving…' : item ? 'Save changes' : 'Add entry'}
           </Button>
         </>
       }
     >
       {error && <p role="alert" className="td-form-error">{error}</p>}
       <fieldset disabled={busy} className="td-form">
-        <Section icon={<ListChecks size={16} />} title="What needs doing" hint="A short title is all that is required.">
-          <Field label="Title" required error={titleError} className="sm:col-span-2">
+        <Section icon={<ListChecks size={16} />} title="Entry">
+          <Field label="Section" className="sm:col-span-2">
+            <Select value={form.section} onChange={event => set('section', event.target.value as SectionKey)}>
+              {sectionKeys.map(key => <option key={key} value={key}>{sections[key].label}</option>)}
+            </Select>
+          </Field>
+          <Field label={config.title} required error={titleError} className="sm:col-span-2">
             <Input
               value={form.title}
               maxLength={300}
               autoFocus
               aria-invalid={!!titleError}
               onChange={(e) => { set('title', e.target.value); if (titleError) setTitleError('') }}
-              placeholder="Call the client about the interview slot"
+
             />
           </Field>
+          {config.fields.map(label => <Field key={label} label={label}>
+            <Input value={form.details[label] ?? ''} maxLength={1000} onChange={event => {
+              const value = event.target.value
+              setForm(previous => ({ ...previous, details: { ...previous.details, [label]: value } }))
+            }} />
+          </Field>)}
           <Field label="Notes" hint="Optional" className="sm:col-span-2">
             <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
           </Field>
         </Section>
 
-        <Section icon={<CalendarClock size={16} />} title="When" hint="You are reminded in the notification bell at this time.">
-          <Field label="Due date and time" required>
+        <Section icon={<CalendarClock size={16} />} title="Schedule">
+          <Field label={config.when} required>
             <DatePicker withTime required value={form.dueAt} onChange={(value) => set('dueAt', value)} />
           </Field>
           <div className="ui-field block">
@@ -136,15 +152,11 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
               ))}
             </div>
           </div>
-          <div className="sm:col-span-2 td-presets" role="group" aria-label="Quick due times">
-            <span>Quick times</span>
-            {(['soon', 'tomorrow', 'week'] as Preset[]).map((p) => (
-              <button key={p} type="button" onClick={() => set('dueAt', format(presetDue(p, now), "yyyy-MM-dd'T'HH:mm"))}>{presetLabel(p, now)}</button>
-            ))}
-          </div>
         </Section>
 
-        <Section icon={<Link2 size={16} />} title="Link (optional)" hint="Pick a candidate, client or order so you can open it from the list.">
+        <details open={item?.linkTo ? true : undefined}>
+          <summary className="cursor-pointer font-semibold">CRM link (optional)</summary>
+          <Section icon={<Link2 size={16} />} title="Linked record">
           <Field label="Link to">
             <Select
               value={form.kind}
@@ -164,7 +176,8 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
               ))}
             </Select>
           </Field>
-        </Section>
+          </Section>
+        </details>
       </fieldset>
     </Dialog>
   )

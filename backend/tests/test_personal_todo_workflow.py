@@ -56,3 +56,20 @@ def test_edit_keeps_completion_and_reschedules_an_already_delivered_reminder(wor
         row = db.get(TodoItem, 'todo-edit')
         assert row.title == 'After edit' and row.reminded_at is None
     assert history_client.patch('/api/todos/todo-edit', json={'done': False, 'ownerId': 'manager'}).status_code == 422
+
+
+def test_manual_organiser_details_survive_updates_and_legacy_clients(workspace, history_client):
+    payload = {"title": "Electrical helper", "section": "interviews",
+               "details": {"Client or agency": "Example", "Number of candidates": "4"},
+               "dueAt": NOW.isoformat()}
+    created = history_client.post("/api/todos", json=payload)
+    assert created.status_code == 201, created.text
+    url = f"/api/todos/{created.json()['id']}"
+    assert created.json()["details"] == payload["details"]
+    legacy_edit = history_client.patch(url, json={"title": "Interview", "dueAt": NOW.isoformat()})
+    assert legacy_edit.json()["section"] == "interviews"
+    assert legacy_edit.json()["details"] == payload["details"]
+    result = history_client.patch(url, json={**payload, "section": "payables", "details": {"Amount": "2500", "Currency": "INR"}})
+    assert result.json()["details"] == {"Amount": "2500", "Currency": "INR"}
+    assert history_client.patch(url, json={"done": True}).json()["section"] == "payables"
+    assert history_client.patch(url, json={**payload, "section": "invalid"}).status_code == 422

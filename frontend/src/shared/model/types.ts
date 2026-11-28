@@ -345,6 +345,8 @@ export interface Task {
 export type Priority = 'high' | 'normal' | 'low'
 
 export interface TodoItem {
+  section?: string | null
+  details?: Record<string, string> | null
   id: string
   ownerId: string
   title: string

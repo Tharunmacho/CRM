@@ -867,6 +867,8 @@ class DailyGoalProgress(Base, PkMixin):
 
 class TodoItem(Base, PkMixin):
     __tablename__ = "personal_todos"
+    section: Mapped[str | None] = mapped_column(String(24))
+    details: Mapped[dict | None] = mapped_column(JSONB)
     __table_args__ = {
         "comment": "Private to-do items belonging to individual CRM users."
     }

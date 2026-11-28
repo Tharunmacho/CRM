@@ -1265,6 +1265,9 @@ def record_call(candidate_id: str, body: CallIn, db: Session = Depends(get_db), 
 # -------------------------------------------------------------------- todos
 
 class TodoIn(BaseModel):
+    section: Literal["meetings", "interviews", "calls", "recruitment", "payables", "receivables", "deployment", "reminders", "review"] | None = None
+    details: dict[str, str] | None = Field(default=None, max_length=12)
+
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     title: str = Field(min_length=1, max_length=300)
     notes: str | None = None
@@ -1293,6 +1296,7 @@ def create_todo(body: TodoIn, db: Session = Depends(get_db), user: User = Depend
     row = TodoItem(
         owner_id=user.id,
         title=body.title.strip(),
+        section=body.section, details=body.details,
         notes=body.notes,
         due_at=body.dueAt,
         priority=body.priority,
@@ -1325,6 +1329,10 @@ def toggle_todo(todo_id: str, body: TodoIn | TodoCompletionIn | None = None, db:
     else:
         if row.due_at != body.dueAt:
             row.reminded_at = None
+        if "section" in body.model_fields_set:
+            row.section = body.section
+        if "details" in body.model_fields_set:
+            row.details = body.details
         row.title, row.notes, row.due_at, row.priority = body.title, body.notes, body.dueAt, body.priority
         row.link_to, row.link_label = body.linkTo, body.linkLabel
     db.add(AuditEntry(actor_id=user.id, action="Updated personal to-do" if isinstance(body, TodoIn) else "Completed personal to-do" if row.done else "Reopened personal to-do", entity_type="todo", entity_id=row.id, target=row.title))

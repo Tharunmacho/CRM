@@ -76,7 +76,7 @@ const NAV: NavItem[] = [
   { to: '/data-bank', label: 'Data Bank', icon: Database, group: 'Recruitment' },
   { to: '/mapped', label: 'Matched Candidates', icon: GitBranch, group: 'Recruitment', extension: true },
   { to: '/tasks', label: 'Tasks', icon: ListChecks, signal: 'tasks', group: 'Workspace' },
-  { to: '/todo', label: 'To-do List', icon: SquareCheckBig, capability: 'todo_list', group: 'Workspace' },
+  { to: '/todo', label: 'To Do', icon: SquareCheckBig, capability: 'todo_list', group: 'Workspace' },
   { to: '/travelled', label: 'Travelled', icon: Plane, group: 'Workspace' },
   { to: '/reports', label: 'Reports', icon: FileBarChart, group: 'Workspace' },
   { to: '/users', label: 'User Management', icon: Users, capability: 'user_management', group: 'Workspace' },

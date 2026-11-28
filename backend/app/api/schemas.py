@@ -271,6 +271,8 @@ class RemarkOut(Wire):
 
 
 class TodoOut(Wire):
+    section: str | None = None
+    details: dict[str, str] | None = None
     id: str
     owner_id: str
     title: str
