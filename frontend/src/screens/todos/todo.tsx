@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import {
-  AlertCircle, CalendarCheck2, CheckCheck, Check, Clock3, Pencil, Plus,
+  AlertCircle, CalendarCheck2, CheckCheck, Check, Clock3, Pencil,
   RefreshCw, Trash2,
 } from 'lucide-react'
 import { api } from '@/shared/api/client'
@@ -15,6 +15,7 @@ import { sections, sectionKeys, sectionKey, type SectionKey } from './organiser'
 import { Button, Checkbox, Select } from '@/shared/ui/primitives'
 import { Dialog, Tabs } from '@/shared/ui/overlay'
 import { useDeadlineClock, useWorkspaceRead } from '@/features/staff/use-workspace-read'
+import { DailyWorksheet } from './worksheet'
 import { TodoDialog } from './todo-dialog'
 import {
   Flag, LINK_KINDS, LinkIcon, dayDate, dayLabel, groupByDay, lateText, linkIdOf, linkKindOf,
@@ -88,11 +89,12 @@ export default function TodoPage() {
         actions={
           <>
             <Button icon={<RefreshCw />} onClick={todoRead.refresh}>Refresh</Button>
-            <Button variant="primary" icon={<Plus />} onClick={() => openDialog()}>Add entry</Button>
+
           </>
         }
       />
 
+      <DailyWorksheet />
       <div className="td-organiser">
         <Panel flush className="td-list-panel">
           <PanelHeader
