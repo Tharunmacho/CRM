@@ -693,6 +693,7 @@ export const STAGES: StageDef[] = [
       { name: 'file', required: true, label: 'Ticket copy', type: 'file' },
     ],
     evaluate: (d) => {
+      if (d.ticketStatus === 'pending') return { canComplete: false, missing: ['Air ticket received'], outcome: '' }
       const missing = need(d, [['file', 'Air ticket'], ['travelDate', 'Travel date']])
       return missing.length ? { canComplete: false, missing, outcome: '' } : manual('Booked')
     },

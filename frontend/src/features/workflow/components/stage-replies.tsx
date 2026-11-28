@@ -1,7 +1,20 @@
 ﻿import { useState } from 'react'
-import { ADVANCE_STAGE } from '@/shared/workflow/stages'
-import type { AdvanceStatus } from '@/shared/workflow/advance'
 import { Button, Input } from '@/shared/ui/primitives'
+
+type ReplyValue = string | boolean
+interface ReplyPair { field: string; choices: [string, ReplyValue][] }
+export const stageReplyPairs: Record<number, ReplyPair | undefined> = {
+  4: { field: 'result', choices: [['Selected', 'selected'], ['Not Selected', 'rejected']] },
+  5: { field: 'result', choices: [['Agreed', 'agreed'], ['Not Agreed', 'declined']] },
+  6: { field: 'advanceStatus', choices: [['Received', 'collected'], ['Pending', 'pending']] },
+  7: { field: 'collected', choices: [['Received', 'yes'], ['Pending', 'no']] },
+  8: { field: 'result', choices: [['Fit', 'fit'], ['Unfit', 'unfit']] },
+  9: { field: 'pccStatus', choices: [['Received', 'received'], ['Pending', 'pending']] },
+  10: { field: 'arrived', choices: [['Received', 'yes'], ['Not Received', 'no']] },
+  11: { field: 'googleReview', choices: [['Received', true], ['Pending', false]] },
+  12: { field: 'done', choices: [['Received', 'yes'], ['Pending', 'no']] },
+  13: { field: 'ticketStatus', choices: [['Received', 'received'], ['Pending', 'pending']] },
+}
 
 function readReplies(key: string): string[] {
   try {
@@ -12,13 +25,14 @@ function readReplies(key: string): string[] {
   }
 }
 
-export function StageReplies({ userId, stage, disabled, status, feedback, onChoose }: {
+export function StageReplies({ userId, stage, disabled, status, feedback, onSelect, onChoose }: {
   userId: string
   stage: number
   disabled: boolean
   status: unknown
   feedback: unknown
-  onChoose: (text: string, status?: AdvanceStatus) => void
+  onSelect: (field: string, value: ReplyValue) => void
+  onChoose: (text: string) => void
 }) {
   const selectedLines = new Set(typeof feedback === 'string' ? feedback.split('\n').map(line => line.trim()) : [])
   const key = `crm.stageReplies.${userId}.${stage}`
@@ -50,14 +64,12 @@ export function StageReplies({ userId, stage, disabled, status, feedback, onChoo
   }
 
   return <fieldset className="mb-4 space-y-2" disabled={disabled}>
-    <legend className="mb-2 font-semibold">Quick replies</legend>
+    <legend className="sr-only">Stage replies</legend>
     <div className="sm-decision-row sm-quick-replies">
-      {stage === ADVANCE_STAGE && <>
-        <Button size="sm" aria-pressed={status === 'collected'} onClick={() => onChoose('Advance payment received.', 'collected')}>Received</Button>
-        <Button size="sm" aria-pressed={status === 'pending'} onClick={() => onChoose('Advance payment not received.', 'pending')}>Not received</Button>
-      </>}
+      {stageReplyPairs[stage]?.choices.map(([text, value]) => <Button key={text} size="sm" aria-pressed={status === value}
+        onClick={() => onSelect(stageReplyPairs[stage]!.field, value)}>{text}</Button>)}
       {replies.map(reply => <Button key={reply} size="sm" aria-pressed={selectedLines.has(reply)} onClick={() => onChoose(reply)}>{reply}</Button>)}
-      <Button size="sm" aria-expanded={editing} onClick={() => setEditing(!editing)}>{editing ? 'Done' : replies.length ? 'Manage replies' : 'Create a reply'}</Button>
+      <Button size="sm" aria-expanded={editing} onClick={() => setEditing(!editing)}>{editing ? 'Done' : 'Create reply'}</Button>
     </div>
     {editing && <div className="space-y-2">
       <label>New reply<Input value={label} maxLength={240} onChange={event => setLabel(event.target.value)} onKeyDown={event => {

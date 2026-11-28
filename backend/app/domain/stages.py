@@ -203,6 +203,7 @@ class VisaStamping(StageInput):
 
 
 class Ticket(StageInput):
+    ticketStatus: Literal["received", "pending"] | None = None
     bookedBy: Literal["employer", "agency"] | None = None
     travelDate: Date | None = None
     airline: str | None = Field(default=None, max_length=200)
@@ -386,6 +387,8 @@ def _google_review(d: dict) -> Evaluation:
 
 
 def _ticket(d: dict) -> Evaluation:
+    if d.get("ticketStatus") == "pending":
+        return _need("Air ticket received")
     # A candidate becomes deployed only after the actual travel ticket is on
     # file and a travel date has been recorded.  Earlier stages can be moved
     # manually when a recruiter has documented their work, but deployment is

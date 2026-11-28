@@ -58,7 +58,7 @@ import { useCandidateDocuments } from '@/features/candidates/use-candidate-docum
 import { SlaMeter, StageRail } from './stage-rail'
 import { agentName } from '@/features/candidates/data-bank-search'
 import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
-import { StageReplies } from './stage-replies'
+import { StageReplies, stageReplyPairs } from './stage-replies'
 import '@/styles/candidate-v2.css'
 import '@/styles/stage-modal.css'
 import '@/styles/touch-targets.css'
@@ -227,9 +227,9 @@ export function StageModal({
                     {interviewDate && <div className="text-sm">Interview date: <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${schedule.time.slice(0, 5)}`}</time></div>}
                   </div>
                   <div className="sm-monitor-answers">
-                    {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
                     {answer && <Badge tone={negative ? 'stamp' : greenStageAnswer(stage.no, answer, latest?.data) ? 'green' : 'neutral'}>{answer}</Badge>}
                     {current && <Badge tone={draftAnswer && greenStageAnswer(stage.no, draftAnswer, app.draft) ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
+                    {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
                   </div>
                 </div>
                 {current && canWork && <div className="sm-embedded">
@@ -247,7 +247,7 @@ export function StageModal({
 }
 
 function greenStageAnswer(stage: number, answer: string, data?: Record<string, unknown> | null) {
-  if (stage === ADVANCE_STAGE && (answer === 'Received' || answer === 'Not received')) return true
+  if (stageReplyPairs[stage]?.choices.some(([label]) => label === answer)) return true
   if (typeof data?.feedback === 'string' && data.feedback.trim() === answer) return true
   return stage <= 3 || (stage === 4 && answer === 'Selected') || (stage === 5 && answer === 'Agreed')
 }
@@ -255,6 +255,9 @@ function greenStageAnswer(stage: number, answer: string, data?: Record<string, u
 function stageAnswer(stage: typeof STAGES[number], data: Record<string, unknown>, outcome = ''): string {
   const stop = stage.stops?.find(option => option.value === data.stop)
   if (stop) return stop.label
+  const pair = stageReplyPairs[stage.no]
+  const saved = pair?.choices.find(([, value]) => data[pair.field] === value)
+  if (saved) return saved[0]
   if (stage.no <= 3) {
     const primary = stage.fields.find(field => field.type === 'radio')
     const selected = primary?.options?.find(option => option.value === data[primary.name])
@@ -380,8 +383,8 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
   return (
     <section>
       <header className="sm-attempt-head">
-        <time dateTime={record.completedAt}>{dateTimeLabel(record.completedAt)}</time>
         {answer && <Badge tone={negative ? 'stamp' : 'green'}>{answer}</Badge>}
+        <time dateTime={record.completedAt}>{dateTimeLabel(record.completedAt)}</time>
       </header>
 
       <dl className="sm-record-fields">
@@ -622,7 +625,8 @@ function CurrentStage({
   }
 
   // Short fields (Yes/No, date, time, choices) sit side by side on a 12-column grid; long ones take the whole row.
-  const shownFields = def.fields.filter((f) => f.name !== 'feedback' && !(def.no === ADVANCE_STAGE && f.name === 'advanceStatus') && fieldVisible(f, data))
+  const pair = stageReplyPairs[def.no]
+  const shownFields = def.fields.filter((f) => f.name !== 'feedback' && f.name !== pair?.field && !(def.no === ADVANCE_STAGE && f.name === 'collected') && !(def.no === ADVANCE_STAGE && f.name === 'advanceStatus') && fieldVisible(f, data))
   // The choice that decides the stage is asked outright, above the feedback; only the rest is an optional detail.
   const decisionFields = shownFields.filter((f) => def.decision?.fields.includes(f.name))
   const visibleFields = shownFields.filter((f) => !def.decision?.fields.includes(f.name))
@@ -656,10 +660,10 @@ function CurrentStage({
           )}
         </header>
 
-        {def.decision && decisionMain && (
+        {def.decision && (decisionMain || decisionExtras.length > 0) && (
           <div className="sm-decision">
-            <DecisionChoice def={def} field={decisionMain} value={data[decisionMain.name] as string | undefined} onChange={(value) => set(decisionMain.name, value)}
-              disabled={!canWork || busy || completed} />
+            {decisionMain && <DecisionChoice def={def} field={decisionMain} value={data[decisionMain.name] as string | undefined} onChange={(value) => set(decisionMain.name, value)}
+              disabled={!canWork || busy || completed} />}
             {decisionExtras.length > 0 && (
               <div className="sm-form sm-decision-more">
                 {decisionExtras.map((f, index) => (
@@ -675,16 +679,18 @@ function CurrentStage({
 
         <div className="sm-feedback">
           {canWork && <StageReplies key={`${store.me?.id}:${def.no}`} userId={store.me!.id} stage={def.no} disabled={busy || completed}
-            status={data.advanceStatus} feedback={data.feedback} onChoose={(reply, status) => status
-              ? applyReply(reply, { advanceStatus: status }, ['Advance payment received.', 'Advance payment not received.'])
-              : applyReply(reply)} />}
+            status={pair ? data[pair.field] : undefined} feedback={data.feedback} onSelect={(field, value) => {
+              setData(previous => ({ ...previous, [field]: value, stop: undefined,
+                ...(field === 'advanceStatus' ? { collected: value === 'collected' ? 'yes' : 'no' } : {}) }))
+              setDirty(true)
+            }} onChoose={applyReply} />}
           <details open={Boolean(data.feedback) || undefined}>
             <summary>{data.feedback ? 'Feedback' : 'Add feedback (optional)'}</summary>
             <StageFieldInput field={def.fields.find((field) => field.name === 'feedback')!} value={data.feedback} onChange={(value) => set('feedback', value)} disabled={!canWork || busy || completed} applicationId={app.id} versions={[]} stage={app.currentStage} onUploaded={onUploaded} onUploading={() => {}} />
           </details>
         </div>
 
-        {def.stops && def.stops.length > 0 && (
+        {(!pair || Boolean(data.stop)) && def.stops && def.stops.length > 0 && (
           <div className="sm-stop">
             <Field label="Not going ahead with this candidate?">
               <div className="sm-decision-row" role="group" aria-label="Stop this candidate here" data-name="stop">
@@ -704,7 +710,7 @@ function CurrentStage({
         )}
 
         <details className="sm-stage-details">
-          <summary>{def.decision ? 'Additional details' : 'Outcome and additional details'} <span>Optional</span></summary>
+          <summary>Details</summary>
           <div className="sm-form">
           {visibleFields.map((f, index) => (
             <div key={f.name} className={`sm-c${fieldSpan[index]}`}>
