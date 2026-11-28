@@ -21,13 +21,21 @@ const columns: Record<SectionKey, string[]> = {
 
 const activities = ['New requirements received', 'Candidates sourced', 'Candidates pre-screened', 'CVs forwarded to clients', 'Interviews arranged', 'Candidates selected', 'Offer letters received', 'Visas received']
 type Row = { id: string; section: SectionKey; values: Record<string, string>; touched: boolean }
-const blank = (section: SectionKey, values = {}): Row => ({ id: crypto.randomUUID(), section, values, touched: false })
+const indiaClock = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+})
+const pad = (n: number) => String(n).padStart(2, '0')
+const hourLabel = (hour: number) => (hour % 12 || 12) + (hour < 12 ? ' AM' : ' PM')
+const blank = (section: SectionKey, values = {}): Row => ({
+  id: crypto.randomUUID(), section, touched: false,
+  values: section === 'meetings' || section === 'interviews' ? { Time: indiaClock.format(new Date()), ...values } : values,
+})
 const initial = () => sectionKeys.flatMap(section => section === 'recruitment'
   ? activities.map(Activity => blank(section, { Activity })) : [blank(section)])
 
 export function DailyWorksheet() {
   const store = useStore()
-  const [date, setDate] = useState(() => format(new Date(), 'yyyy-MM-dd'))
+  const [date, setDate] = useState(() => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()))
   const [rows, setRows] = useState(initial)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -81,7 +89,7 @@ export function DailyWorksheet() {
         await store.addTodo({
           section, title: values[title]?.trim() || 'End-of-day review',
           details: Object.fromEntries(fields(section).filter(({key}) => key !== title && key !== 'Priority' && values[key]?.trim()).map(({key, name}) => [name, values[key].trim()])),
-          dueAt: new Date(day + 'T' + (values.Time || '17:00')).toISOString(),
+          dueAt: new Date(day + 'T' + (values.Time || '17:00') + '+05:30').toISOString(),
           priority: (values.Priority || 'normal') as Priority,
         })
         setRows(previous => previous.map(entry => entry.id === row.id ? blank(section, section === 'recruitment' ? { Activity: values.Activity } : {}) : entry))
@@ -97,10 +105,22 @@ export function DailyWorksheet() {
       {sectionKeys.map((section, index) => <section key={section}>
         <h3>{index + 1}. {sections[section].label}</h3>
         {rows.filter(row => row.section === section).map((row, rowIndex) => <div className={'td-sheet-row td-sheet-' + section} key={row.id}>
-          {fields(section).map(({key: label, name}) => <label key={label}><span className={rowIndex && fields(section).length <= 6 ? "td-repeat-label" : undefined}>{name}</span>
+          {fields(section).map(({key: label, name}) => label === 'Time' ? <div className="td-clock-cell" key={label}>
+            <span className={rowIndex && fields(section).length <= 6 ? 'td-repeat-label' : undefined}>{name} (IST)</span>
+            <div className="td-clock" role="group" aria-label={name + ' in Indian Standard Time'}>
+              <select aria-label={name + ' hour and AM or PM'} value={row.values.Time?.slice(0, 2) || '00'}
+                onChange={e => change(row, label, e.target.value + ':' + (row.values.Time?.slice(3) || '00'))}>
+                {Array.from({ length: 24 }, (_, h) => <option key={h} value={pad(h)}>{hourLabel(h)}</option>)}
+              </select>
+              <select aria-label={name + ' minutes'} value={row.values.Time?.slice(3) || '00'}
+                onChange={e => change(row, label, (row.values.Time?.slice(0, 2) || '00') + ':' + e.target.value)}>
+                {Array.from({ length: 60 }, (_, m) => <option key={m} value={pad(m)}>{pad(m)} min</option>)}
+              </select>
+            </div>
+          </div> : <label key={label}><span className={rowIndex && fields(section).length <= 6 ? "td-repeat-label" : undefined}>{name}</span>
             {label === 'Priority' ? <Select value={row.values.Priority || 'normal'} onChange={e => change(row, label, e.target.value)}>
               <option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option>
-            </Select> : <Input type={label === 'Time' ? 'time' : label.endsWith('date') ? 'date' : 'text'} value={row.values[label] || ''}
+            </Select> : <Input type={label.endsWith('date') ? 'date' : 'text'} value={row.values[label] || ''}
               maxLength={label === sections[section].title ? 300 : 1000} onChange={e => change(row, label, e.target.value)} />}
           </label>)}
         </div>)}
