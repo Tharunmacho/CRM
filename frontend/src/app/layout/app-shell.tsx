@@ -28,12 +28,13 @@ import {
   Search,
   SquareCheckBig,
   Sun,
+  UserRound,
   UserPlus,
   Users,
   X,
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
-import { ago, initials, slaState } from '@/shared/lib/format'
+import { ago, slaState } from '@/shared/lib/format'
 import { useTheme } from '@/shared/lib/theme'
 import { brandLogoSrc, brandMarkSrc, LOGO_HEIGHT, LOGO_WIDTH, MARK_HEIGHT, MARK_WIDTH } from '@/shared/lib/brand-images'
 import { useStore } from '@/shared/state/crm-store'
@@ -427,7 +428,7 @@ function ProfileMenu() {
       width="w-[min(19rem,calc(100vw-2rem))]"
       trigger={({ open, toggle }) => (
         <button type="button" className="topbar-profile-trigger" onClick={toggle} aria-label={`Account menu for ${me.name}`} aria-expanded={open}>
-          <span className="topbar-profile-avatar" aria-hidden="true">{initials(me.name)}</span>
+          <span className="topbar-profile-avatar" aria-hidden="true"><UserRound size={18} /></span>
           <span className="topbar-profile-copy"><strong>{me.name}</strong><small>{roleLabel(me.role, true)}</small></span>
           <ChevronDown size={14} aria-hidden="true" />
         </button>

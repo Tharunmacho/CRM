@@ -16,7 +16,7 @@ export interface Searchable {
   /** Names of the allocated CRM staff. */
   staffNames?: string[]
   /** The record's own staff details (name, designation, phone, email). */
-  staffContacts?: { name?: string | null; phone?: string | null }[]
+  staffContacts?: { name?: string | null; phone?: string | null; designation?: string | null; email?: string | null }[]
   /** Short labels shown as chips on the record (an agency's specialisations and preferred countries). */
   tags?: string[]
 }
@@ -57,7 +57,7 @@ function textFields(record: Searchable): string[] {
   return [
     record.name, record.agencyName, record.email, record.address, record.state,
     ...(record.staffNames ?? []),
-    ...(record.staffContacts ?? []).map((contact) => contact.name),
+    ...(record.staffContacts ?? []).flatMap((contact) => [contact.name, contact.designation, contact.email]),
     ...(record.tags ?? []),
   ].map(foldText).filter(Boolean)
 }

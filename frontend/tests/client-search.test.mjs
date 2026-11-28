@@ -89,3 +89,10 @@ test('an agency is found by its specialisation or preferred country tags', () =>
   assert.equal(matchesSearch(agency, 'gulf blue'), true)
   assert.equal(matchesSearch(agency, 'singapore'), false)
 })
+
+test('contact designation and email match across letter cases', () => {
+  const row = { staffContacts: [{ designation: 'HR Manager', email: 'Desk@Example.com' }] }
+  for (const query of ['hr manager', 'HR MANAGER', 'hR MaNaGeR', 'DESK@EXAMPLE.COM', 'desk@example.com']) {
+    assert.equal(matchesSearch(row, query), true)
+  }
+})

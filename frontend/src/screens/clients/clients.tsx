@@ -100,15 +100,9 @@ const clientPlace = (row: { country: string; city: string }) => ({ primary: row.
 /** Overlapping small avatars with the first names beside them, or a muted line when nobody is allocated. */
 function StaffStack({ staff, query }: { staff: { id: string; name: string }[]; query: string }) {
   if (staff.length === 0) return <span className="cl-quiet" aria-label="No recruiter assigned">—</span>
-  const shown = staff.slice(0, 4)
-  const more = staff.length - shown.length
   const label = staff.map((person) => person.name).join(', ')
   return <span className="cs-stack" title={label}>
-    <span className="cs-stack-avs" role="img" aria-label={`Assigned recruiter: ${label}`}>
-      {shown.map((person) => <Avatar key={person.id} name={person.name} size="sm" />)}
-      {more > 0 && <span className="cs-more" aria-hidden="true">+{more}</span>}
-    </span>
-    <span className="cs-stack-names" aria-hidden="true">{staff.map((person, index) => <span key={person.id}>{index > 0 && ', '}<Hi text={firstName(person.name)} query={query} /></span>)}</span>
+    <span className="cs-stack-names">{staff.map((person, index) => <span key={person.id}>{index > 0 && ', '}<Hi text={firstName(person.name)} query={query} /></span>)}</span>
   </span>
 }
 

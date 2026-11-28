@@ -69,3 +69,10 @@
 @media (max-width: 359px) {
   .pagination-label { display: none; }
 }
+
+/* Identity cells show the name alone unless a photo or an icon is available. */
+:root :is(.record-avatar, .v2-avatar, .jv-avatar, .db-avatar, .ac-avatar,
+          .af-avatar, .ic-avatar, .ld-pick-avatar, .jro-avatar):not(:has(img, svg)),
+:root .jro-avatars {
+  display: none !important;
+}
