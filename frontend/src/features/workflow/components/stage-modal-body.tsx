@@ -231,7 +231,7 @@ export function StageModal({
                     onClick={() => setSelectedHistory(selectedHistory === stage.no ? null : stage.no)}>
                     <b>{title}</b><span aria-hidden="true">{selectedHistory === stage.no ? '\u25B4' : '\u25BE'}</span>
                   </button> : <b>{title}</b>}
-                    {interviewDate && <div className="text-sm">Interview date: <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${schedule.time.slice(0, 5)}`}</time></div>}
+                    {interviewDate && <div className="text-sm">Interview date: <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${interviewTimeLabel(schedule.time)}`}</time></div>}
                   </div>
                   <div className="sm-monitor-answers">
                     {answer && <Badge tone={negative ? 'stamp' : greenStageAnswer(stage.no, answer, latest?.data) ? 'green' : 'neutral'}>{answer}</Badge>}
@@ -470,10 +470,20 @@ function ReopenStage({ app, stage, disabled, onBusyChange, beforeReopen, onStage
   </div>
 }
 
+function interviewHourLabel(hour: number) {
+  return `${hour % 12 || 12} ${hour < 12 ? 'AM' : 'PM'}`
+}
+
+function interviewTimeLabel(time: string) {
+  const [hour, minute] = time.split(':')
+  return interviewHourLabel(Number(hour)).replace(' ', `:${minute} `) + ' IST'
+}
+
 function readValue(f: StageField, raw: unknown, row: Record<string, unknown> = {}): string {
   if (raw == null || raw === '') return '—'
   if (f.type === 'file') return (raw as StoredFile).name ?? 'Uploaded'
   if (f.type === 'checkbox') return raw ? 'Yes' : 'No'
+  if (f.type === 'time') return interviewTimeLabel(String(raw))
   if (f.type === 'date') return dateLabel(raw as string)
   // The advance is shown in the currency it was collected in, not the order's.
   if (f.type === 'number')
@@ -835,6 +845,23 @@ function StageFieldInput({
         : ((value as string) ?? '')
 
   switch (field.type) {
+    case 'time': {
+      const [hour = '', minute = '00'] = String(value ?? '').split(':')
+      return <Field label="Interview time (IST)">
+        <div className="flex gap-2">
+          <Select aria-label="Interview hour (IST)" value={hour} disabled={disabled}
+            onChange={event => onChange(event.target.value ? `${event.target.value}:${minute}` : undefined)}>
+            <option value="">Hour</option>
+            {Array.from({ length: 24 }, (_, h) => <option key={h} value={String(h).padStart(2, '0')}>{interviewHourLabel(h)}</option>)}
+          </Select>
+          <Select aria-label="Interview minute" value={hour ? minute : ''} disabled={disabled || !hour}
+            onChange={event => onChange(`${hour}:${event.target.value}`)}>
+            <option value="" disabled>Minute</option>
+            {Array.from({ length: 60 }, (_, m) => String(m).padStart(2, '0')).map(m => <option key={m}>{m}</option>)}
+          </Select>
+        </div>
+      </Field>
+    }
     case 'radio':
       return (
         <Field label={field.label} required={field.required}>
@@ -931,7 +958,7 @@ function StageFieldInput({
       return (
         <Field label={field.label} required={field.required}>
           <Input
-            type={field.type === 'number' ? 'number' : field.type === 'time' ? 'time' : 'text'}
+            type={field.type === 'number' ? 'number' : 'text'}
             ident={field.ident}
             placeholder={field.placeholder}
             value={(value as string) ?? ''}
