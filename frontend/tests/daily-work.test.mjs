@@ -81,7 +81,7 @@ test('the table has the agreed sheet columns and no Deadline column; the Recruit
   assert.doesNotMatch(table, /secondaryId|cid-ref/)
   // Open goes to the application form, the row menu keeps both entries, remarks stay.
   const screen = await code('../src/screens/tasks/daily-work.tsx')
-  assert.match(screen, /navigate\(applicationFormHref\(row\.candidateId\)\)/)
+  assert.match(screen, /navigate\(applicationFormHref\(row\.candidateId, null, row\.applicationId\)\)/)
   assert.match(table, /Open candidate profile/)
   assert.match(table, /View stage/)
   assert.doesNotMatch(table, /Add remark/, 'no typing in the Remarks cell: it is a dropdown of remark templates')

@@ -5,6 +5,8 @@ import { countryCode } from '@/shared/lib/country-flag'
 import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { useAutoGrow } from '@/shared/ui/use-auto-grow'
+import { Link } from 'react-router-dom'
+import { applicationFormHref } from '@/features/application-form/form-model'
 import { RecordIdentity } from '@/shared/ui/workspace'
 import { agencyLabel, clockTime, closedRowsOf, countryCell, isClosed, nothingYet, noteWhen, notesNewestFirst, PENDING_NOTE, rowAction, sendNote, staffPlace, taskColumnsFor, widthsWithSpare, todayChips, todayPlace, type DailyNote, type TaskRow } from '@/features/daily-work/daily-work-model'
 import { getNoteDraft, noteDraftKey, setNoteDraft } from '@/features/daily-work/note-drafts'
@@ -40,6 +42,7 @@ export interface TaskTableProps {
   staffName: (id: string) => string | undefined
   canWork: (row: TaskRow) => boolean
   onOpen: (row: TaskRow) => void
+  onViewStage: (row: TaskRow) => void
   onProfile: (row: TaskRow) => void
   /** Save the date of commencement typed in the DOC cell (null clears it). */
   onSaveDoc: (row: TaskRow, iso: string | null) => Promise<void>
@@ -170,7 +173,7 @@ function TodayChips({ row, zone, inStage }: { row: TaskRow; zone?: string; inSta
   )
 }
 
-export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, onProfile, onSaveDoc, onRemark, onClearRemark, onAddNote, authorName, canDeleteNote, onDeleteNote, labelledBy, busy }: TaskTableProps) {
+export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, onViewStage, onProfile, onSaveDoc, onRemark, onClearRemark, onAddNote, authorName, canDeleteNote, onDeleteNote, labelledBy, busy }: TaskTableProps) {
   const [measure, panelWidth] = useTableWidth()
   const [asking, setAsking] = useState<{ row: TaskRow; note: DailyNote } | null>(null)
   // A candidate with no job yet can be declined or rejected right from the row: no client or job is needed before Forwarded to client (stage 2).
@@ -206,7 +209,9 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
                 <td data-label="CLIENT" className={cn(!row.client && 'is-empty')}><ClientCell item={row} country /></td>
                 <td data-label="JOB" className={cn(!row.position && 'is-empty')}><PositionCellView item={row} /></td>
                 <td data-label="CANDIDATE NAME">
-                  <RecordIdentity name={row.candidate} />
+                  <Link to={applicationFormHref(row.candidateId, null, row.applicationId)} aria-label={`Open application form for ${row.candidate}`}>
+                    <RecordIdentity name={row.candidate} />
+                  </Link>
                   {staff === 'candidate' && name && <span className="tw-owner-line" title={`Recruiter: ${name}`}>{name}</span>}
                 </td>
                 {supervisor && staff !== 'candidate' && <td data-label="Recruiter">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
@@ -228,7 +233,7 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
                     <Button size="sm" variant={called || moved || closed ? 'secondary' : 'primary'} className="dw-act" onClick={() => onOpen(row)}
                       aria-label={`${action} ${row.candidate}`}>{action}</Button>
                     <RowMenu candidate={row.candidate} items={[
-                      ...(row.applicationId ? [{ label: 'View stage', icon: ArrowRight, onSelect: () => onOpen(row) }] : []),
+                      ...(row.applicationId ? [{ label: 'View stage', icon: ArrowRight, onSelect: () => onViewStage(row) }] : []),
                       { label: 'Open candidate profile', icon: UserRound, onSelect: () => onProfile(row) },
                       ...(noCountry && !closed ? [{ label: 'Add preferred country', icon: Globe, onSelect: () => onProfile(row) }] : []),
                       ...(!row.applicationId && !closed && work ? [
