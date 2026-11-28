@@ -213,14 +213,18 @@ export function StageModal({
               const current = stage.no === live
               const answer = latest ? stageAnswer(stage, latest.data, latest.outcome) : ''
               const draftAnswer = current ? stageAnswer(stage, app.draft ?? {}) : ''
+              const schedule = stage.key === 'interview_scheduling' ? (current ? app.draft : latest?.data) : undefined
+              const interviewDate = schedule?.scheduled !== 'no' && !schedule?.stop && typeof schedule?.date === 'string' ? schedule.date : ''
               const title = latest && !negative && stage.key === 'prescreening' ? 'Prescreened' : stage.title
               return <li key={stage.no} data-sm-stage={stage.no} className={cn('sm-step', current ? 'is-current' : negative ? 'is-closed' : latest ? 'is-done' : 'is-upcoming')}>
                 <span className="sm-node" aria-hidden="true">{latest && !negative ? <Check className="h-4 w-4" /> : stage.no}</span>
                 <div className="sm-card sm-monitor-row">
-                  <b>{title}</b>
+                  <div><b>{title}</b>
+                    {interviewDate && <div className="text-sm">Interview date: <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${schedule.time.slice(0, 5)}`}</time></div>}
+                  </div>
                   <div className="sm-monitor-answers">
-                    {answer && <Badge tone={stage.no <= 3 ? 'green' : negative ? 'stamp' : 'neutral'}>{answer}</Badge>}
-                    {current && <Badge tone={draftAnswer && stage.no <= 3 ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
+                    {answer && <Badge tone={negative ? 'stamp' : greenStageAnswer(stage.no, answer) ? 'green' : 'neutral'}>{answer}</Badge>}
+                    {current && <Badge tone={draftAnswer && greenStageAnswer(stage.no, draftAnswer) ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
                   </div>
                   {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
                 </div>
@@ -231,6 +235,10 @@ export function StageModal({
       </div>
     </Dialog>
   )
+}
+
+function greenStageAnswer(stage: number, answer: string) {
+  return stage <= 3 || (stage === 4 && answer === 'Selected') || (stage === 5 && answer === 'Agreed')
 }
 
 function stageAnswer(stage: typeof STAGES[number], data: Record<string, unknown>, outcome = ''): string {
