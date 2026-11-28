@@ -125,7 +125,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const tabs = viewTabs(data.viewCounts, currentSeen.current)
   const failed = !daily.data && !!daily.error
   const open = (row: { applicationId: string | null; candidateId: string; stage: number | null }) =>
-    navigate(applicationFormHref(row.candidateId, null, row.applicationId))
+    row.applicationId ? setOpenApp({ id: row.applicationId, stage: row.stage ?? undefined }) : navigate(applicationFormHref(row.candidateId))
 
   return (
     <div className="tk dw dwb">
@@ -175,7 +175,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
         ) : (
           <TaskTable rows={rows} zone={zone} labelledBy={viewTabId(view)} busy={waiting} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
             canWork={(row) => (!!row.taskId || (isClosed(row) && !!row.applicationId)) && (store.can('work_any_candidate') || row.ownerId === store.me.id)}
-            onOpen={open} onViewStage={(row) => row.applicationId && setOpenApp({ id: row.applicationId, stage: row.stage ?? undefined })} onProfile={(row) => navigate(`/candidates/${row.candidateId}`)}
+            onOpen={open} onViewStage={open} onProfile={(row) => navigate(`/candidates/${row.candidateId}`)}
             onSaveDoc={async (row, iso) => { if (!row.applicationId) return; await saveApplicationForm(row.candidateId, { applicationId: row.applicationId }, { application: { commencementDate: iso } }); await refreshAll() }}
             onRemark={async (row, text) => { if (row.taskId) await store.addRemark(row.taskId, text); else if (isClosed(row) && row.applicationId) await store.addEndedRemark(row.applicationId, text); else return; await refreshAll() }}
             onClearRemark={async (row) => { if (row.taskId) await store.clearRemark(row.taskId); else if (isClosed(row) && row.applicationId) await store.clearEndedRemark(row.applicationId); else return; await refreshAll() }}

@@ -127,7 +127,7 @@ export function StageModal({
   useEffect(() => { reportBusy?.(pending || reopening); return () => reportBusy?.(false) }, [pending, reopening, reportBusy])
 
   useEffect(() => {
-    if (!embedded || !open || !applicationId) return
+    if (!open || !applicationId) return
     let live = true
     setFiles([])
     setFileError(false)
@@ -136,7 +136,7 @@ export function StageModal({
       .then((rows) => { if (live) setFiles((current) => [...rows, ...current.filter((file) => !rows.some((row) => row.id === file.id))]) })
       .catch(() => { if (live) setFileError(true) })
     return () => { live = false }
-  }, [embedded, applicationId, open, fileRetry, canWork])
+  }, [applicationId, open, fileRetry, canWork])
 
   const order = app ? store.order(app.orderId) : undefined
   const client = order ? store.company(order.companyId) : undefined
@@ -172,6 +172,8 @@ export function StageModal({
   const effective = app.stages.filter((record) => !record.reopenedReason)
   const live = app.status === 'active' ? app.currentStage : null
 
+  const editor = <CurrentStage key={`${app.id}-${app.currentStage}-${app.stages.length}`} app={app} canWork={canWork && !reopening} onDirtyChange={setDirty} onBusyChange={setPending} files={files} onUploaded={(file) => setFiles((items) => [...items.filter((item) => item.id !== file.id), file])} onStageChanged={onStageChanged} onStageRecorded={onStageRecorded} compact />
+
   if (embedded) {
     if (!open) return null
     const selectedStage = stageByNo(focusStage ?? app.currentStage) ?? stageByNo(app.currentStage)
@@ -183,7 +185,7 @@ export function StageModal({
       {!owner?.active && <p className="sm-note">Assign an active recruiter before moving or reopening a stage. You can still save a draft.</p>}
       {app.status === 'closed' && <ClosedRow app={app} canReopen={canReopenApplication(app.status, canWork)} disabled={!owner?.active || pending || reopening} onRecorded={onStageRecorded} onDone={onStageChanged} />}
       {fileError && <p className="sm-alert" role="alert">We could not load the documents. Feedback is still available. <button type="button" className="underline" onClick={() => setFileRetry((value) => value + 1)}>Retry documents</button></p>}
-      {current ? <CurrentStage key={`${app.id}-${app.currentStage}-${app.stages.length}`} app={app} canWork={canWork && !reopening} onDirtyChange={setDirty} onBusyChange={setPending} files={files} onUploaded={(file) => setFiles((items) => [...items.filter((item) => item.id !== file.id), file])} onStageChanged={onStageChanged} onStageRecorded={onStageRecorded} compact />
+      {current ? editor
         : <section className="sm-card sm-inline-history">
           <header className="sm-inline-title"><div><small>Stage {selectedStage.no} of {STAGES.length}</small><h3>{selectedStage.title}</h3></div>{activeRecords.length > 0 && <Badge tone="green" variant="dot">Saved history</Badge>}</header>
           {selectedRecords.map((record) => <div className="sm-inline-attempt" key={`${record.stage}-${record.attempt}`}>{record.reopenedReason && <ReopenedNote record={record} reopenings={reopenings} />}<CompletedStage record={record} files={files} app={app} /></div>)}
@@ -196,7 +198,9 @@ export function StageModal({
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={() => {
+        if (!pending && !reopening && (!dirty || window.confirm('Discard unsaved stage changes?'))) onClose()
+      }}
       width="full"
       title="Stages for this order"
       hideHeading
@@ -228,6 +232,11 @@ export function StageModal({
                     {current && <Badge tone={draftAnswer && greenStageAnswer(stage.no, draftAnswer, app.draft) ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
                   </div>
                 </div>
+                {current && canWork && <div className="sm-embedded">
+                  {!owner?.active && <p className="sm-note">Assign an active recruiter before moving this stage. You can still save a draft.</p>}
+                  {fileError && <button type="button" className="underline" onClick={() => setFileRetry(value => value + 1)}>Retry documents</button>}
+                  {editor}
+                </div>}
               </li>
             })}
           </ol>
