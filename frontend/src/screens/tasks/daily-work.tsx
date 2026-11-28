@@ -9,13 +9,13 @@ import { StageModal } from '@/features/workflow/components/stage-modal'
 import { applicationFormHref } from '@/features/application-form/form-model'
 import { saveApplicationForm } from '@/features/application-form/form-api'
 import {
-  exportLabel, isClosed, listTitle, parseView, recruiterWork, taskRows, viewEmptyTitle, viewSummary, viewTabs, type DailyView, type DailyWorkResponse,
+  exportLabel, isClosed, listTitle, parseView, recruiterWork, taskRows, viewEmptyTitle, viewSummary, viewTabs, type TaskRow, type DailyView, type DailyWorkResponse,
 } from '@/features/daily-work/daily-work-model'
 import { downloadDailyWork } from '@/features/daily-work/daily-work-export'
 import { canDeleteNote, deleteFailure, withoutNotes } from '@/features/daily-work/note-delete-model'
 import { agencyDay } from '@/shared/lib/task-time'
 import { useDailyWork, useFollowUp } from '@/features/daily-work/use-daily-work'
-import { TaskTable } from './task-table'
+import { NotesCell, TaskTable } from './task-table'
 import { ViewTabs, viewTabId } from './view-tabs'
 import { WorkBoard } from './daily-staff-board'
 import '@/styles/daily-work.css'
@@ -124,6 +124,14 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   if (withFollowUp) currentSeen.current = rows.filter((row) => !isClosed(row)).length
   const tabs = viewTabs(data.viewCounts, currentSeen.current)
   const failed = !daily.data && !!daily.error
+  const noteRow = openApp && rows.find(row => row.applicationId === openApp.id)
+  const canWorkRow = (row: TaskRow) => (!!row.taskId || (isClosed(row) && !!row.applicationId)) && (store.can('work_any_candidate') || row.ownerId === store.me.id)
+  const addNote = async (row: TaskRow, text: string) => {
+    if (row.taskId) await store.addRemark(row.taskId, text, 'note')
+    else if (isClosed(row) && row.applicationId) await store.addEndedRemark(row.applicationId, text, 'note')
+    else throw new Error('This task is no longer available.')
+    await refreshAll()
+  }
   const open = (row: { applicationId: string | null; candidateId: string; stage: number | null }) =>
     row.applicationId ? setOpenApp({ id: row.applicationId, stage: row.stage ?? undefined }) : navigate(applicationFormHref(row.candidateId))
 
@@ -174,16 +182,19 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
             action={person ? <Button onClick={() => setStaff('all')}>Show all recruiters</Button> : undefined} />
         ) : (
           <TaskTable rows={rows} zone={zone} labelledBy={viewTabId(view)} busy={waiting} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
-            canWork={(row) => (!!row.taskId || (isClosed(row) && !!row.applicationId)) && (store.can('work_any_candidate') || row.ownerId === store.me.id)}
+            canWork={canWorkRow}
             onOpen={open} onViewStage={open} onProfile={(row) => navigate(`/candidates/${row.candidateId}`)}
             onSaveDoc={async (row, iso) => { if (!row.applicationId) return; await saveApplicationForm(row.candidateId, { applicationId: row.applicationId }, { application: { commencementDate: iso } }); await refreshAll() }}
             onRemark={async (row, text) => { if (row.taskId) await store.addRemark(row.taskId, text); else if (isClosed(row) && row.applicationId) await store.addEndedRemark(row.applicationId, text); else return; await refreshAll() }}
             onClearRemark={async (row) => { if (row.taskId) await store.clearRemark(row.taskId); else if (isClosed(row) && row.applicationId) await store.clearEndedRemark(row.applicationId); else return; await refreshAll() }}
-            onAddNote={async (row, text) => { if (row.taskId) await store.addRemark(row.taskId, text, 'note'); else if (isClosed(row) && row.applicationId) await store.addEndedRemark(row.applicationId, text, 'note'); else return; await refreshAll() }} authorName={store.me?.name}
+            onAddNote={addNote} authorName={store.me?.name}
             canDeleteNote={(row, note) => canDeleteNote(note, row, store.me)} onDeleteNote={(_row, note) => deleteNote(note.id)} />
         )}
       </section>
-      <StageModal applicationId={openApp?.id ?? null} open={!!openApp} focusStage={openApp?.stage} onStageRecorded={() => void refreshAll().catch(() => undefined)} onClose={() => { setOpenApp(null); void refreshAll() }} />
+      <StageModal applicationId={openApp?.id ?? null} open={!!openApp} focusStage={openApp?.stage} dailyNotes={noteRow && (
+        <NotesCell key={noteRow.applicationId} row={noteRow} zone={zone} canAdd={canWorkRow(noteRow)}
+          authorName={store.me?.name} onAdd={addNote} />
+      )} onStageRecorded={() => void refreshAll().catch(() => undefined)} onClose={() => { setOpenApp(null); void refreshAll() }} />
     </div>
   )
 }

@@ -283,7 +283,7 @@ def fetch_rows(db, owner_ids, *, now: datetime | None = None, tz=None) -> list:
 
 
 REMARK, NOTE = "remark", "note"
-NOTE_CAP = 100   # notes of one candidate in one list
+
 
 
 def _remark_query(*where):
@@ -320,8 +320,8 @@ def _candidate_notes(remark_rows) -> dict[str, list]:
 
 
 def _row_notes(found, candidate_id, app_id):
-    """The candidate's initial-call notes and the notes on the placement shown in this row, newest first, at most NOTE_CAP."""
-    return [note for placement, note in found.get(candidate_id, ()) if placement is None or placement == app_id][:NOTE_CAP]
+    """The candidate's initial-call notes and the notes on the placement shown in this row, newest first."""
+    return [note for placement, note in found.get(candidate_id, ()) if placement is None or placement == app_id]
 
 
 def _note_fields(notes: list[dict], *, now: datetime, tz=None) -> dict:

@@ -92,12 +92,12 @@ function NoteDeleteButton({ note, zone, onAsk }: { note: DailyNote; zone?: strin
 interface NotesCellProps {
   row: TaskRow; zone?: string; canAdd: boolean; authorName?: string
   onAdd?: (row: TaskRow, text: string) => Promise<void>
-  mayDelete: (row: TaskRow, note: DailyNote) => boolean
-  onAsk: (row: TaskRow, note: DailyNote) => () => void
+  mayDelete?: (row: TaskRow, note: DailyNote) => boolean
+  onAsk?: (row: TaskRow, note: DailyNote) => () => void
 }
 
 /** The NOTES cell: the input (people who may work the candidate), then every note newest first, in full: the list grows with the notes and never scrolls inside the cell. */
-function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: NotesCellProps) {
+export function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: NotesCellProps) {
   // What was typed stays in the box when the table is drawn again (see note-drafts.ts); it goes when the note is saved or cleared.
   const draftKey = noteDraftKey(authorName, row.candidateId)
   const [text, setTextState] = useState(() => getNoteDraft(draftKey))
@@ -109,7 +109,8 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
   const box = useRef<HTMLTextAreaElement>(null)
   const typing = canAdd && !!onAdd
   useAutoGrow(box, text, { minRows: 1, maxRows: 3, enabled: typing && expanded })
-  const note = pending[0] ?? notesNewestFirst(row.notes ?? row.todayNotes)[0]
+  const history = [...pending, ...notesNewestFirst(row.notes ?? row.todayNotes)]
+  const note = history[0]
   const submit = async () => {
     if (!onAdd || saving) return
     const typed = text
@@ -131,7 +132,7 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
   return (
     <details className="tw-notes-cell" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary className="tw-note-trigger" aria-label={`Notes for ${row.candidate}`}>
-        <span className="tw-note-body">{note?.body || (typing ? 'Add a note?' : '?')}</span>
+        <span className="tw-note-body">{note?.body || (typing ? 'Add a note' : 'No notes')}</span>
         <ChevronDown size={14} aria-hidden="true" />
       </summary>
       {typing && (
@@ -145,13 +146,14 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
       )}
       {error && <p className="tw-note-error" role="alert">{error}</p>}
       {note ? (
-        <ul className="tw-note-list" aria-label={`Latest note for ${row.candidate}`}>
-            <li key={note.id} className={cn(note.id.startsWith(PENDING_NOTE) && 'is-pending')}>
+        <ul className="tw-note-list" aria-label={`Note history for ${row.candidate}`}>
+          {history.map(note => <li key={note.id} className={cn(note.id.startsWith(PENDING_NOTE) && 'is-pending')}>
               <div className="tw-note-head">
                 <span className="tw-note-when"><time dateTime={note.at}>{noteWhen(note.at, zone)}</time><small>{note.by}</small></span>
-                {!note.id.startsWith(PENDING_NOTE) && mayDelete(row, note) && <NoteDeleteButton note={note} zone={zone} onAsk={onAsk(row, note)} />}
+                {!note.id.startsWith(PENDING_NOTE) && onAsk && mayDelete?.(row, note) && <NoteDeleteButton note={note} zone={zone} onAsk={onAsk(row, note)} />}
               </div>
-            </li>
+              <p className="tw-note-body">{note.body}</p>
+            </li>)}
         </ul>
       ) : null}
     </details>

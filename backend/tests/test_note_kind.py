@@ -15,7 +15,7 @@ from sqlalchemy import event, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Remark
-from app.services import daily_work, tasks_export
+from app.services import tasks_export
 from test_daily_work import (  # noqa: F401  (desk is a fixture)
     TUESDAY, as_user, desk, follow, listing, mapped_candidates,
 )
@@ -129,13 +129,12 @@ def test_follow_up_rows_carry_the_notes_too_and_clearing_keeps_them(desk):
     assert stored(desk, keep).cleared_at is None
 
 
-def test_notes_are_capped_per_candidate(desk, monkeypatch):
+def test_notes_keep_full_history_per_candidate(desk):
     mapped_candidates(desk, 1)
     task = only_row(desk)["taskId"]
-    monkeypatch.setattr(daily_work, "NOTE_CAP", 3)
     for n in range(5):
         put(desk, task, f"Note {n}", kind="note", minutes=n)
-    assert bodies(only_row(desk)["notes"]) == ["Note 4", "Note 3", "Note 2"]
+    assert bodies(only_row(desk)["notes"]) == ["Note 4", "Note 3", "Note 2", "Note 1", "Note 0"]
 
 
 # ------------------------------------------------------------------------------------------------ deleting and the statement count

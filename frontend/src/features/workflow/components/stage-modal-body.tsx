@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   BookUser,
   Briefcase,
@@ -74,6 +74,7 @@ export function StageModal({
   open,
   onClose,
   focusStage,
+  dailyNotes,
   embedded = false,
   onDirtyChange: reportDirty,
   onBusyChange: reportBusy,
@@ -84,6 +85,7 @@ export function StageModal({
   open: boolean
   onClose: () => void
   /** Open this stage's section (expanded) and scroll to it, e.g. when a task for that stage was clicked. */
+  dailyNotes?: ReactNode
   focusStage?: number
   /** Show only the selected stage inside the candidate's recruitment card. */
   embedded?: boolean
@@ -260,6 +262,10 @@ export function StageModal({
               </li>
             })}
           </ol>
+          {dailyNotes && <section className="sm-card p-4" aria-label="Daily notes">
+            <h3 className="mb-2 font-semibold">Daily notes</h3>
+            {dailyNotes}
+          </section>}
         </div>
       </div>
     </Dialog>

@@ -12,7 +12,7 @@ test('NOTES: the latest note is shown in full: no height cap, no inner scroll bo
   assert.match(rules(css, '.tw-note-body').join(' '), /overflow-wrap: anywhere/, 'long words and links wrap at the cell width')
   const table = await read('screens/tasks/task-table.tsx')
   assert.doesNotMatch(table, /className="tw-note-list"[^\n]*tabIndex/, 'there is no scroller to focus any more')
-  assert.match(table, /aria-label=\{`Latest note for \$\{row\.candidate\}`\}/, 'still a labelled list, newest first')
+  assert.match(table, /aria-label=\{`Note history for \$\{row\.candidate\}`\}/, 'still a labelled list, newest first')
   assert.match(table, /Delete note|DELETE_NOTE_/, 'each note keeps its delete button')
 })
 

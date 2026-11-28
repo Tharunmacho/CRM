@@ -273,7 +273,7 @@ test('a closed row: the outcome replaces the progress dashes; TODAY is a dash; D
   assert.match(table, /<DocCell item=\{row\} canAdd=\{work\}/)
   // the screen routes a closed row (no task id) to the by-placement writes and lets its recruiter / admin / MD work it
   const screen = await code('../src/screens/tasks/daily-work.tsx')
-  assert.match(screen, /canWork=\{\(row\) => \(!!row\.taskId \|\| \(isClosed\(row\) && !!row\.applicationId\)\) && \(store\.can\('work_any_candidate'\) \|\| row\.ownerId === store\.me\.id\)\}/)
+  assert.match(screen, /const canWorkRow = \(row: TaskRow\) => \(!!row\.taskId \|\| \(isClosed\(row\) && !!row\.applicationId\)\) && \(store\.can\('work_any_candidate'\) \|\| row\.ownerId === store\.me\.id\)/)
   for (const call of ['store.addEndedRemark(row.applicationId, text)', "store.addEndedRemark(row.applicationId, text, 'note')", 'store.clearEndedRemark(row.applicationId)']) assert.ok(screen.includes(call), call)
   const store = await code('../src/shared/state/crm-store.tsx')
   assert.match(store, /\/applications\/\$\{encodeURIComponent\(applicationId\)\}\/ended-remarks`/)
@@ -394,5 +394,5 @@ test('rejecting or declining in the stage window re-reads the Tasks lists at onc
   assert.match(tail, /onStageRecorded\?\.\(\)/, 'told right after the post, before the workspace refresh that follows')
   assert.doesNotMatch(tail, /onStageChanged\?\.\(\)/, 'never the prop the candidate form uses to close its stage panel and reload')
   const screen = await code('../src/screens/tasks/daily-work.tsx')
-  assert.match(screen, /<StageModal [^\n]*onStageRecorded=\{\(\) => void refreshAll\(\)/)
+  assert.match(screen, /<StageModal [\s\S]*?onStageRecorded=\{\(\) => void refreshAll\(\)/)
 })
