@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { api } from '@/shared/api/client'
 import type { Application } from '@/shared/model/types'
 import { useStore } from '@/shared/state/crm-store'
+import { RowMenu } from '@/shared/ui/table'
 import { Dialog } from '@/shared/ui/overlay'
 import { Button, Field, Textarea } from '@/shared/ui/primitives'
 import { MIN_REOPEN_REASON, reopenExplanation, reopenFailure, reopenReasonOk } from '../reopen-application'
@@ -12,8 +13,8 @@ import { MIN_REOPEN_REASON, reopenExplanation, reopenFailure, reopenReasonOk } f
  * POST /applications/{id}/reopen-application. The server puts the candidate back at the stage where it ended with an open task, so
  * `onRecorded` lets the Tasks page re-read at once (the candidate leaves Declined / Rejected) and `onDone` lets the host screen reload.
  */
-export function ReopenApplication({ app, stageTitle, disabled = false, onRecorded, onDone }: {
-  app: Application; stageTitle: string; disabled?: boolean; onRecorded?: () => void; onDone?: () => void
+export function ReopenApplication({ app, stageTitle, inMenu = false, disabled = false, onRecorded, onDone }: {
+  app: Application; stageTitle: string; inMenu?: boolean; disabled?: boolean; onRecorded?: () => void; onDone?: () => void
 }) {
   const store = useStore()
   const [open, setOpen] = useState(false)
@@ -39,7 +40,9 @@ export function ReopenApplication({ app, stageTitle, disabled = false, onRecorde
     } finally { setBusy(false) }
   }
   return <>
-    <Button variant="primary" size="sm" disabled={disabled} icon={<RotateCcw className="h-4 w-4" />} onClick={() => setOpen(true)}>Reopen stage</Button>
+    {inMenu ? <RowMenu label={`Actions for ${stageTitle}`} items={[{
+      label: 'Reopen stage', icon: RotateCcw, onSelect: () => setOpen(true), disabledReason: disabled ? 'Reopening is unavailable' : undefined,
+    }]} /> : <Button variant="primary" size="sm" disabled={disabled} icon={<RotateCcw className="h-4 w-4" />} onClick={() => setOpen(true)}>Reopen stage</Button>}
     <Dialog open={open} onClose={close} title={`Reopen ${stageTitle}?`} description={reopenExplanation(stageTitle)} width="sm"
       footer={<>
         <Button disabled={busy} onClick={close}>Cancel</Button>

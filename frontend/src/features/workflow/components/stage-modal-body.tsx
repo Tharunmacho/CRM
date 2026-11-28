@@ -18,6 +18,7 @@ import { formatPhone } from '@/shared/lib/phone'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { applicationFileSlot, applicationFileVersions, newestFileVersions, type ApplicationFile } from '@/shared/lib/document-files'
 import { useStore } from '@/shared/state/crm-store'
+import { RowMenu } from '@/shared/ui/table'
 import { DatePicker } from '@/shared/ui/date-picker'
 import { ApiError, api } from '@/shared/api/client'
 import { taskClockStart } from '@/shared/lib/task-time'
@@ -231,18 +232,20 @@ export function StageModal({
                     onClick={() => setSelectedHistory(selectedHistory === stage.no ? null : stage.no)}>
                     <b>{title}</b><span aria-hidden="true">{selectedHistory === stage.no ? '\u25B4' : '\u25BE'}</span>
                   </button> : <b>{title}</b>}
-                    {interviewDate && <div className="text-sm">Interview date: <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${interviewTimeLabel(schedule.time)}`}</time></div>}
                   </div>
                   <div className="sm-monitor-answers">
+                    <div className="sm-result-stack">
                     {answer && <Badge tone={negative ? 'stamp' : greenStageAnswer(stage.no, answer, latest?.data) ? 'green' : 'neutral'}>{answer}</Badge>}
                     {current && <Badge tone={draftAnswer && greenStageAnswer(stage.no, draftAnswer, app.draft) ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
+                      {interviewDate && <div className="sm-interview-date">Interview date <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${interviewTimeLabel(schedule.time)}`}</time></div>}
+                    </div>
                     {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
                     {latest && !current && canWork && !(app.status === 'closed' && stage.no === app.currentStage) &&
-                      <ReopenStage app={app} stage={stage.no} disabled={!owner?.active || pending || reopening}
+                      <ReopenStage inMenu app={app} stage={stage.no} disabled={!owner?.active || pending || reopening}
                         onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Discard unsaved stage changes?')}
                         onStageChanged={() => { onStageRecorded?.(); onStageChanged?.() }} />}
                     {stage.no === app.currentStage && closureTab(app.closureReason) === 'Declined' && canReopenApplication(app.status, canWork) &&
-                      <ReopenApplication app={app} stageTitle={stage.title} disabled={!owner?.active || pending || reopening}
+                      <ReopenApplication app={app} inMenu stageTitle={stage.title} disabled={!owner?.active || pending || reopening}
                         onRecorded={onStageRecorded} onDone={onStageChanged} />}
                   </div>
                 </div>
@@ -436,7 +439,7 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
   )
 }
 
-function ReopenStage({ app, stage, disabled, onBusyChange, beforeReopen, onStageChanged }: { app: Application; stage: number; disabled: boolean; onBusyChange: (busy: boolean) => void; beforeReopen: () => boolean; onStageChanged?: () => void }) {
+function ReopenStage({ app, stage, inMenu = false, disabled, onBusyChange, beforeReopen, onStageChanged }: { app: Application; stage: number; inMenu?: boolean; disabled: boolean; onBusyChange: (busy: boolean) => void; beforeReopen: () => boolean; onStageChanged?: () => void }) {
   const store = useStore()
   const [editing, setEditing] = useState(false)
   const [reason, setReason] = useState('')
@@ -466,7 +469,9 @@ function ReopenStage({ app, stage, disabled, onBusyChange, beforeReopen, onStage
         <p className="text-[13px] leading-5 text-ink-600">This starts stage {stage} again, sets aside the results of any later stages, and replaces the task that is open now. Earlier records and files stay on record. Reopening a deployment also changes the order's deployed count.</p>
         <Field label="Reason for reopening" required><Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={2000} disabled={busy || disabled} placeholder="What needs to be corrected?" /></Field>
         <div className="flex flex-wrap gap-2"><Button variant="primary" disabled={busy || disabled || !reason.trim()} onClick={() => void reopen()}>{busy ? 'Reopening…' : `Reopen stage ${stage}`}</Button><Button disabled={busy || disabled} onClick={() => { setEditing(false); setError('') }}>Cancel</Button></div>
-      </div> : <Button variant="secondary" size="sm" disabled={disabled} icon={<RotateCcw className="h-4 w-4" />} onClick={() => setEditing(true)}>Reopen stage {stage}</Button>}
+      </div> : inMenu ? <RowMenu label={`Actions for ${stageByNo(stage).title}`} items={[{
+        label: 'Reopen stage', icon: RotateCcw, onSelect: () => setEditing(true), disabledReason: disabled ? 'Reopening is unavailable' : undefined,
+      }]} /> : <Button variant="secondary" size="sm" disabled={disabled} icon={<RotateCcw className="h-4 w-4" />} onClick={() => setEditing(true)}>Reopen stage {stage}</Button>}
   </div>
 }
 

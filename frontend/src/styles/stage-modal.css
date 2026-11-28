@@ -315,6 +315,9 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
 .sm-monitor-answers > .sm-reopen { padding: 0; border: 0; }
 .sm-monitor-row:has(.sm-reopen textarea) .sm-monitor-answers { grid-column: 1 / -1; }
 .sm-monitor-answers > .sm-reopen:has(textarea) { flex-basis: 100%; }
+.sm-result-stack { display: grid; justify-items: start; gap: 4px; }
+.sm-result-stack:empty { display: none; }
+.sm-interview-date { font-size: 13px; color: var(--text-muted); }
 .sm-monitor-row time { text-align: right; }
 .sm-timeline .sm-step .sm-node { top: 32px; transform: translateY(-50%); }
 .sm-step > .sm-embedded { margin-top: 8px; }
