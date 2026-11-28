@@ -305,6 +305,8 @@ def _stage2(d: dict) -> Evaluation:
 
 
 def _stage3(d: dict) -> Evaluation:
+    if d.get("scheduled") == "yes" and not d.get("date"):
+        return _need("Interview date")
     return _ok("Scheduled") if d.get("scheduled") == "yes" else _ok("Completed manually")
 
 
@@ -312,8 +314,8 @@ def _stage3(d: dict) -> Evaluation:
 # Fit). Every other answer stops them here, and an unanswered stage cannot be moved at all. The prompt is the one sentence
 # the API and the stage screen give when the choice has not been made.
 DECISION_STAGES = {
-    4: ("Interview result", "Choose the interview result, Selected or Rejected, before moving this candidate."),
-    5: ("Offer letter result", "Choose the offer letter result, Agreed, Declined or Not received, before moving this candidate."),
+    4: ("Interview result", "Choose the interview result, Selected or Not Selected, before moving this candidate."),
+    5: ("Offer letter result", "Choose the offer letter result, Agreed or Not Agreed, before moving this candidate."),
     MEDICAL_STAGE: ("Medical result", "Choose the medical result, Fit or Unfit, before moving this candidate."),
 }
 
@@ -407,6 +409,8 @@ def _validated(stage: int, evaluate: Callable[[dict], Evaluation]):
             clean = validate_payload(stage, data, options)
         except ValidationError as exc:
             return _need(*(f"{' / '.join(map(str, item['loc']))}: {item['msg']}" for item in exc.errors()))
+        if stage == TICKET_STAGE and clean.get("ticketStatus") == "pending" and clean.get("stop") == "declined":
+            return _close("stage_declined", "Declined", "Declined")
         if clean.get("stop"):
             return _stopped(stage, clean["stop"])  # an explicit stop wins over the stage's own answers
         return evaluate(clean)

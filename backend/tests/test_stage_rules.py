@@ -98,7 +98,7 @@ def test_feedback_only_stage_move_never_invents_documents_results_or_dates(stage
 
 
 @pytest.mark.parametrize(("stage", "data", "outcome"), [
-    (3, {"scheduled": "yes"}, "Scheduled"),
+    (3, {"scheduled": "yes", "date": "2026-11-02"}, "Scheduled"),
     (4, {"result": "selected"}, "Selected"),
     (5, {"result": "agreed"}, "Agreed"),
     (6, {"collected": "yes"}, "Collected"),
@@ -251,3 +251,8 @@ def test_google_review_is_optional_and_the_visa_stage_still_accepts_a_legacy_tic
     # The tick no longer belongs to the visa stage, but a value saved there earlier is still accepted.
     assert validate_payload(10, {"arrived": "yes", "googleReview": True}) == {"arrived": "yes", "googleReview": True}
     assert stage_by_no(10).evaluate({"arrived": "yes"}).outcome == "Arrived"
+
+
+def test_interview_date_and_declined_ticket_reply():
+    assert not stage_by_no(3).evaluate({"scheduled": "yes"}).can_complete
+    assert stage_by_no(13).evaluate({"ticketStatus": "pending", "stop": "declined"}).closes == "stage_declined"

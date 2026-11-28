@@ -264,6 +264,7 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
+      if (d.scheduled === 'yes' && !d.date) return { canComplete: false, missing: ['Interview date'], outcome: '' }
       return manual(d.scheduled === 'yes' ? 'Scheduled' : undefined)
     },
   },
@@ -277,7 +278,7 @@ export const STAGES: StageDef[] = [
     decision: {
       field: 'result',
       prompt: 'Interview result',
-      message: 'Choose the interview result, Selected or Rejected, before moving this candidate.',
+      message: 'Choose the interview result, Selected or Not Selected, before moving this candidate.',
       fields: ['result'],
       advances: ['selected'],
     },
@@ -321,7 +322,7 @@ export const STAGES: StageDef[] = [
     decision: {
       field: 'result',
       prompt: 'Offer letter result',
-      message: 'Choose the offer letter result, Agreed, Declined or Not received, before moving this candidate.',
+      message: 'Choose the offer letter result, Agreed or Not Agreed, before moving this candidate.',
       fields: ['result'],
       advances: ['agreed'],
     },
@@ -731,6 +732,7 @@ for (const definition of STAGES) {
     if (definition.no === ADVANCE_STAGE && data.serviceChargeTotal != null && data.serviceChargeTotal !== '' && data.amount != null && data.amount !== '' && Number(data.amount) > Number(data.serviceChargeTotal)) invalid.push('Total service charge cannot be less than the advance')
     if (definition.no === MEDICAL_STAGE && data.result === 'unfit' && data.reapplying === 'yes' && data.retestDate && data.appliedDate && data.retestDate < data.appliedDate) invalid.push('New medical date must be on or after the previous medical date')
     if (!invalid.length && data.stop != null && data.stop !== '') {
+      if (definition.no === 13 && data.ticketStatus === 'pending' && data.stop === 'declined') return { canComplete: true, missing: [], closes: { reason: 'stage_declined', label: 'Declined' }, outcome: 'Declined' }
       const exit = stopExits(definition.no).find((item) => item.value === data.stop)
       return exit
         ? { canComplete: true, missing: [], closes: { reason: exit.reason, label: exit.closure }, outcome: exit.outcome }

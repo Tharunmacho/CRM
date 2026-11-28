@@ -254,10 +254,11 @@ function greenStageAnswer(stage: number, answer: string, data?: Record<string, u
 
 function stageAnswer(stage: typeof STAGES[number], data: Record<string, unknown>, outcome = ''): string {
   const stop = stage.stops?.find(option => option.value === data.stop)
-  if (stop) return stop.label
+  if (stop && data.stop !== 'declined') return stop.label
   const pair = stageReplyPairs[stage.no]
   const saved = pair?.choices.find(([, value]) => data[pair.field] === value)
   if (saved) return saved[0]
+  if (stop) return stop.label
   if (stage.no <= 3) {
     const primary = stage.fields.find(field => field.type === 'radio')
     const selected = primary?.options?.find(option => option.value === data[primary.name])
@@ -624,16 +625,11 @@ function CurrentStage({
     }
   }
 
-  // Short fields (Yes/No, date, time, choices) sit side by side on a 12-column grid; long ones take the whole row.
   const pair = stageReplyPairs[def.no]
-  const shownFields = def.fields.filter((f) => f.name !== 'feedback' && f.name !== pair?.field && !(def.no === ADVANCE_STAGE && f.name === 'collected') && !(def.no === ADVANCE_STAGE && f.name === 'advanceStatus') && fieldVisible(f, data))
-  // The choice that decides the stage is asked outright, above the feedback; only the rest is an optional detail.
-  const decisionFields = shownFields.filter((f) => def.decision?.fields.includes(f.name))
-  const visibleFields = shownFields.filter((f) => !def.decision?.fields.includes(f.name))
+  const visibleFields = def.fields.filter(field =>
+    (def.no === 3 && data.scheduled === 'yes' && field.name === 'date') ||
+    (def.no === TOTAL_STAGES && data.ticketStatus === 'received' && ['travelDate', 'file'].includes(field.name)))
   const fieldSpan = fieldSpans(visibleFields)
-  const decisionMain = decisionFields.find((f) => f.name === def.decision?.field)
-  const decisionExtras = decisionFields.filter((f) => f !== decisionMain)
-  const decisionSpan = fieldSpans(decisionExtras)
 
   return (
     <div>
@@ -660,58 +656,16 @@ function CurrentStage({
           )}
         </header>
 
-        {def.decision && (decisionMain || decisionExtras.length > 0) && (
-          <div className="sm-decision">
-            {decisionMain && <DecisionChoice def={def} field={decisionMain} value={data[decisionMain.name] as string | undefined} onChange={(value) => set(decisionMain.name, value)}
-              disabled={!canWork || busy || completed} />}
-            {decisionExtras.length > 0 && (
-              <div className="sm-form sm-decision-more">
-                {decisionExtras.map((f, index) => (
-                  <div key={f.name} className={`sm-c${decisionSpan[index]}`}>
-                    <StageFieldInput field={f} value={data[f.name]} onChange={(v) => set(f.name, v)} disabled={!canWork || busy || completed}
-                      applicationId={app.id} versions={[]} stage={app.currentStage} onUploaded={onUploaded} onUploading={() => {}} />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
         <div className="sm-feedback">
           {canWork && <StageReplies key={`${store.me?.id}:${def.no}`} userId={store.me!.id} stage={def.no} disabled={busy || completed}
             status={pair ? data[pair.field] : undefined} feedback={data.feedback} onSelect={(field, value) => {
-              setData(previous => ({ ...previous, [field]: value, stop: undefined,
+              setData(previous => ({ ...previous, [field]: value, stop: pair?.choices[1][1] === value ? 'declined' : undefined,
                 ...(field === 'advanceStatus' ? { collected: value === 'collected' ? 'yes' : 'no' } : {}) }))
               setDirty(true)
             }} onChoose={applyReply} />}
-          <details open={Boolean(data.feedback) || undefined}>
-            <summary>{data.feedback ? 'Feedback' : 'Add feedback (optional)'}</summary>
-            <StageFieldInput field={def.fields.find((field) => field.name === 'feedback')!} value={data.feedback} onChange={(value) => set('feedback', value)} disabled={!canWork || busy || completed} applicationId={app.id} versions={[]} stage={app.currentStage} onUploaded={onUploaded} onUploading={() => {}} />
-          </details>
         </div>
 
-        {(!pair || Boolean(data.stop)) && def.stops && def.stops.length > 0 && (
-          <div className="sm-stop">
-            <Field label="Not going ahead with this candidate?">
-              <div className="sm-decision-row" role="group" aria-label="Stop this candidate here" data-name="stop">
-                {def.stops.map((option) => {
-                  const on = data.stop === option.value
-                  const off = !canWork || busy || completed
-                  return (
-                    <button key={option.value} type="button" disabled={off} aria-pressed={on} onClick={() => set('stop', on ? undefined : option.value)}
-                      className={cn('sm-decision-opt', on && 'is-on is-stop', off && 'cursor-not-allowed opacity-60')}>
-                      {option.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </Field>
-          </div>
-        )}
-
-        <details className="sm-stage-details">
-          <summary>Details</summary>
-          <div className="sm-form">
+        {visibleFields.length > 0 && <div className="sm-form sm-feedback">
           {visibleFields.map((f, index) => (
             <div key={f.name} className={`sm-c${fieldSpan[index]}`}>
               <StageFieldInput
@@ -727,8 +681,7 @@ function CurrentStage({
               />
             </div>
           ))}
-          </div>
-        </details>
+        </div>}
 
         {attempted && result.missing.length > 0 && (
           <p className="sm-still">
@@ -748,7 +701,7 @@ function CurrentStage({
               disabled={!canWork || busy || uploading || completed || refreshRequired || !ownerActive}
               icon={result.closes ? <CircleSlash className="h-4 w-4" /> : <Check className="h-4 w-4" />}
             >
-              {busy ? 'Saving…' : result.repeats ? 'Save feedback and plan another medical' : result.closes ? 'Save and close order' : def.no === STAGES.length ? 'Save and mark Deployed' : 'Save and move'}
+              {busy ? 'Saving…' : result.repeats ? 'Save feedback and plan another medical' : result.closes ? data.stop === 'declined' ? 'Save as declined' : 'Save and close order' : def.no === STAGES.length ? 'Save and mark Deployed' : 'Save and move'}
             </Button>
           </div>
         </footer>
@@ -804,36 +757,6 @@ function CurrentStage({
         </section>
       )}
     </div>
-  )
-}
-
-/**
- * The outcome of a decision stage as clear, equal buttons. Only the positive answer moves the candidate on; choosing any
- * other answer says plainly that they stop here. Feedback is asked for either way (it sits right below).
- */
-function DecisionChoice({ def, field, value, onChange, disabled }: {
-  def: ReturnType<typeof stageByNo>
-  field: StageField
-  value: string | undefined
-  onChange: (value: string) => void
-  disabled?: boolean
-}) {
-  const decision = def.decision!
-  return (
-    <Field label={field.label} required>
-      <div className="sm-decision-row" role="group" aria-label={field.label} data-name={field.name}>
-        {(field.options ?? []).map((option) => {
-          const on = value === option.value
-          const goes = decision.advances.includes(option.value)
-          return (
-            <button key={option.value} type="button" disabled={disabled} aria-pressed={on} onClick={() => onChange(option.value)}
-              className={cn('sm-decision-opt', on && 'is-on', on && (goes ? 'is-go' : 'is-stop'), disabled && 'cursor-not-allowed opacity-60')}>
-              {option.label}
-            </button>
-          )
-        })}
-      </div>
-    </Field>
   )
 }
 

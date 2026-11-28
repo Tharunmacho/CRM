@@ -4,16 +4,19 @@ import { Button, Input } from '@/shared/ui/primitives'
 type ReplyValue = string | boolean
 interface ReplyPair { field: string; choices: [string, ReplyValue][] }
 export const stageReplyPairs: Record<number, ReplyPair | undefined> = {
+  1: { field: 'result', choices: [['Shortlisted', 'passed'], ['Not Shortlisted', 'failed']] },
+  2: { field: 'forwarded', choices: [['Forwarded', 'yes'], ['Not Forwarded', 'no']] },
+  3: { field: 'scheduled', choices: [['Scheduled', 'yes'], ['Not Scheduled', 'no']] },
   4: { field: 'result', choices: [['Selected', 'selected'], ['Not Selected', 'rejected']] },
   5: { field: 'result', choices: [['Agreed', 'agreed'], ['Not Agreed', 'declined']] },
-  6: { field: 'advanceStatus', choices: [['Received', 'collected'], ['Pending', 'pending']] },
-  7: { field: 'collected', choices: [['Received', 'yes'], ['Pending', 'no']] },
+  6: { field: 'advanceStatus', choices: [['Received', 'collected'], ['Not Received', 'pending']] },
+  7: { field: 'collected', choices: [['Received', 'yes'], ['Not Received', 'no']] },
   8: { field: 'result', choices: [['Fit', 'fit'], ['Unfit', 'unfit']] },
-  9: { field: 'pccStatus', choices: [['Received', 'received'], ['Pending', 'pending']] },
+  9: { field: 'pccStatus', choices: [['Received', 'received'], ['Not Received', 'pending']] },
   10: { field: 'arrived', choices: [['Received', 'yes'], ['Not Received', 'no']] },
-  11: { field: 'googleReview', choices: [['Received', true], ['Pending', false]] },
-  12: { field: 'done', choices: [['Received', 'yes'], ['Pending', 'no']] },
-  13: { field: 'ticketStatus', choices: [['Received', 'received'], ['Pending', 'pending']] },
+  11: { field: 'googleReview', choices: [['Received', true], ['Not Received', false]] },
+  12: { field: 'done', choices: [['Received', 'yes'], ['Not Received', 'no']] },
+  13: { field: 'ticketStatus', choices: [['Received', 'received'], ['Not Received', 'pending']] },
 }
 
 function readReplies(key: string): string[] {
