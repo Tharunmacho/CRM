@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Dialog } from '@/shared/ui/overlay'
-import { Trash2 } from 'lucide-react'
+import { RowMenu } from '@/shared/ui/table'
+import { Plus, Trash2 } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Input, Select } from '@/shared/ui/primitives'
 import { sectionKeys, sections, type SectionKey } from './organiser'
@@ -58,8 +59,11 @@ export function DailyWorksheet() {
   const [editing, setEditing] = useState<SectionKey | null>(null)
   const [draft, setDraft] = useState<Column[]>([])
   const [fieldError, setFieldError] = useState('')
-  function editFields(section: SectionKey) {
-    setDraft(fields(section))
+  const [focusIndex, setFocusIndex] = useState(0)
+  function editFields(section: SectionKey, add = false) {
+    const existing = fields(section)
+    setFocusIndex(add ? existing.length : 0)
+    setDraft(add ? [...existing, { key: crypto.randomUUID(), name: '' }] : existing)
     setFieldError('')
     setEditing(section)
   }
@@ -122,8 +126,13 @@ export function DailyWorksheet() {
         <div className="td-section-band">
           <h3><span className="td-section-number">{index + 1}</span>{sections[section].label}</h3>
           <div className="td-sheet-tools">
-            <Button type="button" size="sm" variant="ghost" onClick={() => editFields(section)}>Edit fields</Button>
-          {section !== 'review'  && <Button type="button" variant="ghost" onClick={() => setRows(previous => [...previous, blank(section)])}>+ Row</Button>}
+            <button type="button" className="td-add-field" disabled={fields(section).length >= 12} onClick={() => editFields(section, true)}>
+              <Plus size={15} aria-hidden="true" /> Add field
+            </button>
+            <RowMenu label={sections[section].label + ' actions'} items={[
+              { label: 'Edit fields', onSelect: () => editFields(section) },
+              ...(section === 'review' ? [] : [{ label: 'Add row', onSelect: () => setRows(previous => [...previous, blank(section)]) }]),
+            ]} />
           </div>
         </div>
         {rows.filter(row => row.section === section).map((row, rowIndex) => <div className={'td-sheet-row td-sheet-' + section} key={row.id}>
@@ -154,7 +163,7 @@ export function DailyWorksheet() {
       footer={<><Button type="button" onClick={() => setEditing(null)}>Cancel</Button><Button type="button" variant="primary" onClick={applyFields}>Save fields</Button></>}>
       <div className="grid gap-2">
         {draft.map((field, index) => <div className="flex items-center gap-2" key={field.key}>
-          <Input autoFocus={index === 0} aria-label={'Field name ' + (index + 1)} maxLength={60} value={field.name}
+          <Input autoFocus={index === focusIndex} aria-label={'Field name ' + (index + 1)} maxLength={60} value={field.name}
             onChange={event => {
               const name = event.currentTarget.value
               setDraft(previous => previous.map(item => item.key === field.key ? { ...item, name } : item))
