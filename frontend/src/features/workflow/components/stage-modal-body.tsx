@@ -57,6 +57,7 @@ import { refreshSilently, refreshUntil } from '@/shared/state/refresh-retry'
 import { useCandidateDocuments } from '@/features/candidates/use-candidate-documents'
 import { SlaMeter, StageRail } from './stage-rail'
 import { agentName } from '@/features/candidates/data-bank-search'
+import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
 import { StageReplies } from './stage-replies'
 import '@/styles/candidate-v2.css'
 import '@/styles/stage-modal.css'
@@ -113,6 +114,8 @@ export function StageModal({
       .catch(() => { if (current) setReopenings([]) })
     return () => { current = false }
   }, [embedded, open, applicationId, reopenCount])
+  const cand = app ? store.candidate(app.candidateId) : undefined
+  const canWork = canWorkCandidate(store.me, cand)
   const [files, setFiles] = useState<ApplicationFile[]>([])
   const [fileError, setFileError] = useState(false)
   const [fileRetry, setFileRetry] = useState(0)
@@ -128,15 +131,13 @@ export function StageModal({
     let live = true
     setFiles([])
     setFileError(false)
-    // The files of a stage are the assigned recruiter's to open (the server refuses anyone else); nothing to fetch for a read-only visitor.
-    if (!app || !store.me || store.me.id !== store.candidate(app.candidateId)?.ownerId) return
+    if (!canWork) return
     api.get<ApplicationFile[]>(`/files?entity_type=application&entity_id=${encodeURIComponent(applicationId)}`)
       .then((rows) => { if (live) setFiles((current) => [...rows, ...current.filter((file) => !rows.some((row) => row.id === file.id))]) })
       .catch(() => { if (live) setFileError(true) })
     return () => { live = false }
-  }, [embedded, applicationId, open, fileRetry])
+  }, [embedded, applicationId, open, fileRetry, canWork])
 
-  const cand = app ? store.candidate(app.candidateId) : undefined
   const order = app ? store.order(app.orderId) : undefined
   const client = order ? store.company(order.companyId) : undefined
   const designation = order ? store.designation(order.designationId) : undefined
@@ -167,8 +168,7 @@ export function StageModal({
   }
   const owner = store.user(cand.ownerId)
 
-  const canWork = !!store.me && store.me.id === cand.ownerId
-  const readOnlyReason = owner ? `Stage entry is assigned to ${owner.name}.` : 'Assign a recruiter to enter stage feedback.'
+  const readOnlyReason = workRefusal(store.me, cand, owner?.name)
   const effective = app.stages.filter((record) => !record.reopenedReason)
   const live = app.status === 'active' ? app.currentStage : null
 
