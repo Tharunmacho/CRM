@@ -201,6 +201,9 @@ def tracking_payload(application, stage_rows: list, names: dict[str, str], tz: Z
                        date=record.completed_at.astimezone(tz).date().isoformat() if record.completed_at else None)
             if record.completed_by:
                 row["completedBy"] = {"id": record.completed_by, "name": names.get(record.completed_by, "Former team member")}
+        if key == "interview_scheduling":
+            schedule = (application.draft if current else record.data if record else None) or {}
+            row["date"] = schedule.get("date") if schedule.get("scheduled") != "no" and not schedule.get("stop") else None
         if current:
             # Being worked now: a first attempt, a reopened stage, or a repeat after "Unfit: reapplying".
             row["status"] = "in_progress"
