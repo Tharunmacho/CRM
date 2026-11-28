@@ -1264,8 +1264,38 @@ def record_call(candidate_id: str, body: CallIn, db: Session = Depends(get_db), 
 
 # -------------------------------------------------------------------- todos
 
+TodoSection = Literal["meetings", "interviews", "calls", "recruitment", "payables", "receivables", "deployment", "reminders", "review"]
+
+
+class TodoFieldIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    section: TodoSection
+    label: str = Field(min_length=1, max_length=60)
+
+
+@router.get("/todo-fields/{section}")
+def todo_fields(section: TodoSection, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
+    from app.db.models import FormOption
+    return list(db.scalars(select(FormOption.label).where(FormOption.category == f"todo:{section}").order_by(FormOption.label)))
+
+
+@router.post("/todo-fields")
+def add_todo_field(body: TodoFieldIn, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
+    from sqlalchemy.dialects.postgresql import insert
+    from app.db.models import FormOption
+    from hashlib import sha256
+    label = " ".join(body.label.split())
+    category = f"todo:{body.section}"
+    key = sha256(label.casefold().encode()).hexdigest()[:60]
+    db.execute(insert(FormOption).values(category=category, value=key, label=label).on_conflict_do_nothing(
+        index_elements=["category", "value"]))
+    saved = db.scalar(select(FormOption.label).where(FormOption.category == category, FormOption.value == key))
+    db.commit()
+    return saved
+
+
 class TodoIn(BaseModel):
-    section: Literal["meetings", "interviews", "calls", "recruitment", "payables", "receivables", "deployment", "reminders", "review"] | None = None
+    section: TodoSection | None = None
     details: dict[str, str] | None = Field(default=None, max_length=12)
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")

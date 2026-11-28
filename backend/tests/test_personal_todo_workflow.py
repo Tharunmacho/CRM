@@ -73,3 +73,11 @@ def test_manual_organiser_details_survive_updates_and_legacy_clients(workspace, 
     assert result.json()["details"] == {"Amount": "2500", "Currency": "INR"}
     assert history_client.patch(url, json={"done": True}).json()["section"] == "payables"
     assert history_client.patch(url, json={**payload, "section": "invalid"}).status_code == 422
+
+def test_reusable_fields_are_section_specific(workspace, history_client):
+    for label in ("Meeting room", "meeting room"):
+        response = history_client.post("/api/todo-fields", json={"section": "meetings", "label": label})
+        assert response.status_code == 200, response.text
+        assert response.json() == "Meeting room"
+    assert history_client.get("/api/todo-fields/meetings").json() == ["Meeting room"]
+    assert history_client.get("/api/todo-fields/calls").json() == []

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { format } from 'date-fns'
 import { CalendarClock, Link2, ListChecks } from 'lucide-react'
 import { api } from '@/shared/api/client'
@@ -6,6 +6,7 @@ import { cn } from '@/shared/lib/cn'
 import { useStore } from '@/shared/state/crm-store'
 import type { Priority, TodoItem } from '@/shared/model/types'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
+import { SuggestInput } from '@/shared/ui/suggest-input'
 import { Dialog } from '@/shared/ui/overlay'
 import { FormSection } from '@/shared/ui/form-section'
 import { DatePicker } from '@/shared/ui/date-picker'
@@ -43,6 +44,42 @@ export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { on
   const [titleError, setTitleError] = useState('')
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }))
 
+  const [custom, setCustom] = useState<Partial<Record<SectionKey, string[]>>>(() => {
+    const key = sectionKey(item?.section)
+    return { [key]: Object.keys(item?.details ?? {}).filter(label => !(sections[key].fields as readonly string[]).includes(label)) }
+  })
+  const [picker, setPicker] = useState(false)
+  const [fieldName, setFieldName] = useState('')
+  const [catalog, setCatalog] = useState<string[]>([])
+  const labels = [...config.fields, ...(custom[form.section] ?? [])]
+  useEffect(() => {
+    if (!picker) return
+    let active = true
+    setCatalog([])
+    api.get<string[]>(`/todo-fields/${form.section}`, { fresh: true })
+      .then(names => { if (active) setCatalog(names) })
+      .catch(() => { if (active) setError('Could not load saved field names.') })
+    return () => { active = false }
+  }, [picker, form.section])
+
+  const addField = async (name: string) => {
+    const label = name.trim().replace(/\s+/g, ' ')
+    if (!label || busy) return
+    if (labels.some(existing => existing.toLowerCase() === label.toLowerCase())) {
+      setError('This field is already in the entry.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const saved = await api.post<string>('/todo-fields', { section: form.section, label })
+      setCustom(previous => ({ ...previous, [form.section]: [...(previous[form.section] ?? []), saved] }))
+      setPicker(false)
+      setFieldName('')
+    } catch { setError('Could not add the field. Try again.') }
+    finally { setBusy(false) }
+  }
+
   const recordOptions = useMemo(() => {
     const designations = new Map(store.designations.map((d) => [d.id, d.title]))
     const companies = new Map(store.companies.map((c) => [c.id, c.name]))
@@ -74,7 +111,7 @@ export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { on
     const payload = {
       title: form.title.trim(),
       section: form.section,
-      details: Object.fromEntries(config.fields.filter(label => form.details[label]?.trim()).map(label => [label, form.details[label].trim()])),
+      details: Object.fromEntries(labels.filter(label => form.details[label]?.trim()).map(label => [label, form.details[label].trim()])),
       notes: form.notes.trim() || undefined,
       dueAt: due.toISOString(),
       priority: form.priority,
@@ -108,7 +145,7 @@ export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { on
       <fieldset disabled={busy} className="td-form">
         <Section icon={<ListChecks size={16} />} title="Entry">
           <Field label="Section" className="sm:col-span-2">
-            <Select value={form.section} onChange={event => set('section', event.target.value as SectionKey)}>
+            <Select value={form.section} onChange={event => { set('section', event.target.value as SectionKey); setPicker(false); setFieldName('') }}>
               {sectionKeys.map(key => <option key={key} value={key}>{sections[key].label}</option>)}
             </Select>
           </Field>
@@ -122,12 +159,22 @@ export function TodoDialog({ onClose, item, initialSection = 'reminders' }: { on
 
             />
           </Field>
-          {config.fields.map(label => <Field key={label} label={label}>
+          {labels.map(label => <Field key={label} label={label}>
             <Input value={form.details[label] ?? ''} maxLength={1000} onChange={event => {
               const value = event.target.value
               setForm(previous => ({ ...previous, details: { ...previous.details, [label]: value } }))
             }} />
           </Field>)}
+          {labels.length < 12 && <div className="sm:col-span-2">
+            {picker ? <div className="flex flex-wrap items-end gap-2">
+              <Field label="Field name" className="min-w-0 flex-1">
+                <SuggestInput autoFocus value={fieldName} maxLength={60} onChange={setFieldName}
+                  options={catalog.filter(name => !labels.includes(name))} />
+              </Field>
+              <Button disabled={!fieldName.trim() || busy} onClick={() => void addField(fieldName)}>Add</Button>
+              <Button variant="ghost" onClick={() => { setPicker(false); setFieldName('') }}>Cancel</Button>
+            </div> : <Button onClick={() => setPicker(true)}>Add field</Button>}
+          </div>}
           <Field label="Notes" hint="Optional" className="sm:col-span-2">
             <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
           </Field>
