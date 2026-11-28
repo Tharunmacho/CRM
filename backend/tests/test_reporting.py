@@ -176,7 +176,7 @@ def test_late_stage_labels_identify_work_still_due_not_deployment(dataset):
     dataset["applications"][0]["created_at"] = NOW
     dashboard = dashboard_data(dataset, ADMIN, now=NOW)
     report = report_data(dataset, ADMIN, FILTERS, now=NOW)
-    expected = ["Visa arrival", "Google review", "Visa stamping", "Air ticket"]
+    expected = ["Visa", "Google review", "Visa stamping", "Air ticket"]
     assert [row["label"] for row in dashboard["pipeline"][9:]] == expected
     assert [row["label"] for row in report["pipeline"][9:]] == expected
     assert [row["label"] for row in report["pipeline"][5:9]] == ["Advance payment", "Passport", "Medical", "PCC"]

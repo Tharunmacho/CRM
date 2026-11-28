@@ -1,7 +1,7 @@
 ﻿"""Typed draft contracts and completion rules for the thirteen stages.
 
 Order: 1 Prescreening, 2 Forwarded, 3 Interview scheduling, 4 Interview result, 5 Offer letter, 6 Advance payment, 7 Passport, 8 Medical,
-9 PCC, 10 Visa arrival, 11 Google review, 12 Visa stamping, 13 Air ticket. (PCC was split out of Medical by migration 0048; migration 0056
+9 PCC, 10 Visa, 11 Google review, 12 Visa stamping, 13 Air ticket. (PCC was split out of Medical by migration 0048; migration 0056
 moved Advance and Passport ahead of Medical and made the Google review its own stage after the visa arrival.)
 """
 from __future__ import annotations
@@ -214,7 +214,7 @@ SCHEMAS = [Prescreen, Forward, InterviewSchedule, InterviewResult, Offer, Advanc
            Pcc, VisaArrival, GoogleReview, VisaStamping, Ticket]
 FILE_FIELDS = {5: ("file",), 6: ("receipt",), 7: ("copy",), 9: ("file",), 10: ("file",), 11: ("file",), 12: ("file",), 13: ("file",)}
 # The stage numbers other code names, in one place. History: PCC became a stage with migration 0048; migration 0056 put Advance (6) and Passport (7)
-# ahead of Medical (8) and PCC (9), and inserted the Google review (11) between Visa arrival and Visa stamping.
+# ahead of Medical (8) and PCC (9), and inserted the Google review (11) between Visa and Visa stamping.
 ADVANCE_STAGE, PASSPORT_STAGE, MEDICAL_STAGE, PCC_STAGE, VISA_STAGE, REVIEW_STAGE, STAMPING_STAGE, TICKET_STAGE = 6, 7, 8, 9, 10, 11, 12, 13
 
 
@@ -431,7 +431,7 @@ _DEFINITIONS = [
     ("passport", "Passport", "Collect original passport", True, False, _passport),
     ("medical", "Medical", "Complete the medical", True, True, _medical),
     ("pcc", "PCC", "Collect the police clearance (PCC)", True, False, _pcc),
-    ("visa_arrival", "Visa arrival", "Follow up the visa", True, False, _visa_arrival),
+    ("visa_arrival", "Visa", "Follow up the visa", True, False, _visa_arrival),
     ("google_review", "Google review", "Get the Google review", True, False, _google_review),
     ("visa_stamping", "Visa stamping", "Get the visa stamped", True, False, _visa_stamping),
     ("air_ticket", "Air ticket", "Book the air ticket", True, False, _ticket),

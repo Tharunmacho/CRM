@@ -15,7 +15,7 @@ test('the workflow has thirteen stages, in order, with the advance at 6, Medical
   assert.deepEqual(STAGES.map((stage) => stage.key), ['prescreening', 'forwarded', 'interview_scheduling', 'interview_result', 'offer_letter', 'advance',
     'passport', 'medical', 'pcc', 'visa_arrival', 'google_review', 'visa_stamping', 'air_ticket'])
   assert.deepEqual(STAGES.map((stage) => stage.title), ['Prescreening', 'Forwarded to client', 'Interview scheduling', 'Interview result', 'Offer letter', 'Advance payment',
-    'Passport', 'Medical', 'PCC', 'Visa arrival', 'Google review', 'Visa stamping', 'Air ticket'])
+    'Passport', 'Medical', 'PCC', 'Visa', 'Google review', 'Visa stamping', 'Air ticket'])
   assert.equal(new Set(STAGES.map((stage) => stage.taskTitle)).size, 13, 'every stage names its own task')
   assert.equal(stageByNo(6).taskTitle, 'Collect the advance')
   assert.equal(stageByNo(7).taskTitle, 'Collect original passport')
@@ -43,7 +43,7 @@ test('the Google review stage is optional: it completes with or without the revi
   assert.equal(run({ googleReview: true }).closes, undefined)
   assert.equal(review.evaluate({ googleReview: true }).canComplete, true, 'feedback is optional')
   assert.ok(!stageByNo(10).fields.some((field) => field.name === 'googleReview'), 'the visa stage has no Google review field')
-  assert.equal(stageByNo(10).title, 'Visa arrival')
+  assert.equal(stageByNo(10).title, 'Visa')
 })
 
 test('Medical keeps only the medical fields and PCC has only the PCC fields, both rendered from the config like every stage', () => {

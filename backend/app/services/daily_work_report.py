@@ -145,7 +145,7 @@ METRICS: tuple[tuple[str, str, str], ...] = (
     ("offers", "Offer letters received",
      "Offer letter stage recorded as Agreed or Declined in the period (a letter was received). 'Not received' is not counted."),
     ("visas", "Visas received",
-     "Visa arrival stage completed as arrived in the period. 'Visa rejected' is not counted."),
+     "Visa stage completed as arrived in the period. 'Visa rejected' is not counted."),
     ("travelled", "Workers travelled",
      "Air ticket stage completed in the period, which deploys the candidate and gives the Traveller ID. "
      "'Not travelling' is not counted."),

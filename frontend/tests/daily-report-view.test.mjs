@@ -443,7 +443,7 @@ test('the reminder is a small component on Tasks and the Dashboard, reading /min
 
 // ------------------------------------------------------------------------------ Task progress by stage, Lead sheet by status, the attendance day
 
-const STAGE_LABELS = ['Prescreening', 'Forwarded', 'Interview scheduling', 'Interview result', 'Offer letter', 'Advance payment', 'Passport', 'Medical', 'PCC', 'Visa arrival', 'Google review', 'Visa stamping', 'Air ticket']
+const STAGE_LABELS = ['Prescreening', 'Forwarded', 'Interview scheduling', 'Interview result', 'Offer letter', 'Advance payment', 'Passport', 'Medical', 'PCC', 'Visa', 'Google review', 'Visa stamping', 'Air ticket']
 
 test('stageProgress: 13 rows numbered like "1 · Prescreening", now / completed / stopped, shares of the candidates now at a stage, and a totals row', () => {
   const totals = [{ no: 0, key: 'none', label: 'Not on an order yet', count: 4 }, ...STAGE_LABELS.map((label, i) => ({ no: i + 1, key: 's' + (i + 1), label, count: i === 0 ? 6 : i === 12 ? 10 : 0 }))]

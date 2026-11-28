@@ -204,7 +204,7 @@ def test_the_workflow_has_thirteen_stages_in_order():
     assert [stage.no for stage in STAGES] == list(range(1, 14))
     assert [stage.key for stage in STAGES] == ["prescreening", "forwarded", "interview_scheduling", "interview_result", "offer_letter", "advance",
                                               "passport", "medical", "pcc", "visa_arrival", "google_review", "visa_stamping", "air_ticket"]
-    assert [stage.title for stage in STAGES][5:11] == ["Advance payment", "Passport", "Medical", "PCC", "Visa arrival", "Google review"]
+    assert [stage.title for stage in STAGES][5:11] == ["Advance payment", "Passport", "Medical", "PCC", "Visa", "Google review"]
     assert [stage.task_title for stage in STAGES][5:9] == ["Collect the advance", "Collect original passport", "Complete the medical", "Collect the police clearance (PCC)"]
     assert len({stage.task_title for stage in STAGES}) == 13
     assert stage_by_no(8).repeatable and not stage_by_no(9).repeatable

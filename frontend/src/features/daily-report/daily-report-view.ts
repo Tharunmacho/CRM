@@ -358,7 +358,7 @@ export function stageSummary(report: DailyReport): { inProgress: number; notOnOr
 /** The 13 stages by number, used only when the server sent no label. */
 export const STAGE_NAMES: readonly string[] = [
   'Prescreening', 'Forwarded', 'Interview scheduling', 'Interview result', 'Offer letter', 'Advance payment', 'Passport',
-  'Medical', 'PCC', 'Visa arrival', 'Google review', 'Visa stamping', 'Air ticket',
+  'Medical', 'PCC', 'Visa', 'Google review', 'Visa stamping', 'Air ticket',
 ]
 export interface StageProgressRow {
   no: number

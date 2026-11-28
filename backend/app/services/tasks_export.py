@@ -10,7 +10,7 @@ ones with a stage waiting, then the furthest along; a candidate in both lists ap
 * DOT: the date of travel (the air-ticket stage's travel date, `travelDate` of the row) in the same format, blank until the candidate has one.
 * Agency: the recorded agency returned with the Tasks row.
 * Advance: the client tracker's Advance cell (`advance_text.advance_cell` over the stage-9 record); blank when none.
-* Stage: "Stage 10 - Visa arrival", or "Initial call" before a stage starts.
+* Stage: "Stage 10 - Visa", or "Initial call" before a stage starts.
 * Today shows times for calls and stage movement, or the latest note time on a notes-only day.
 * Remark: the newest remark on the row (what the Remarks select holds; typed notes are never a remark).
 * Notes: ALL the candidate's notes (typed in the NOTES column), newest first, one per line: "11:40 Asha - text" for today, "18 Nov 09:15 Asha - text" for an earlier day.

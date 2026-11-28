@@ -100,7 +100,7 @@
       {
         "key": "visas",
         "label": "Visas received",
-        "definition": "Visa arrival stage completed as arrived.",
+        "definition": "Visa stage completed as arrived.",
         "value": 1,
         "previous": 0,
         "changePct": null,
@@ -542,7 +542,7 @@
         {
           "no": 10,
           "key": "stage10",
-          "label": "Visa arrival",
+          "label": "Visa",
           "count": 1
         },
         {

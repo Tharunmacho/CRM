@@ -596,7 +596,7 @@ export const STAGES: StageDef[] = [
   {
     no: 10,
     key: 'visa_arrival',
-    title: 'Visa arrival',
+    title: 'Visa',
     taskTitle: 'Follow up the visa',
     summary: 'Record the visa once it arrives.',
     closer: false,

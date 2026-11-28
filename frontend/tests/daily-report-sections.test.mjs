@@ -66,7 +66,7 @@ const text = html => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").repla
 const tileLabels = html => [...html.matchAll(/class="dwb-stat-label">([^<]*)</g)].map(m => m[1])
 
 /** The server's thirteen-stage answer: candidates now at each stage (0 = not on an order yet) and, next to it, the period's flow per stage. */
-const NAMES = ['Prescreening', 'Forwarded', 'Interview scheduling', 'Interview result', 'Offer letter', 'Advance payment', 'Passport', 'Medical', 'PCC', 'Visa arrival', 'Google review', 'Visa stamping', 'Air ticket']
+const NAMES = ['Prescreening', 'Forwarded', 'Interview scheduling', 'Interview result', 'Offer letter', 'Advance payment', 'Passport', 'Medical', 'PCC', 'Visa', 'Google review', 'Visa stamping', 'Air ticket']
 const NOW = [5, 15, 9, 5, 3, 1, 0, 2, 0, 1, 0, 0, 4, 0] // stage 0, then 1 to 13
 const withStages = () => ({
   ...report,
