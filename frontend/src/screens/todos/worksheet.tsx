@@ -131,11 +131,12 @@ export function DailyWorksheet() {
             </button>
             <RowMenu label={sections[section].label + ' actions'} items={[
               { label: 'Edit fields', onSelect: () => editFields(section) },
-              ...(section === 'review' ? [] : [{ label: 'Add row', onSelect: () => setRows(previous => [...previous, blank(section)]) }]),
+              ...(section === 'review' && rows.some(row => row.section === section) ? [] : [{ label: 'Add row', onSelect: () => setRows(previous => [...previous, blank(section)]) }]),
             ]} />
           </div>
         </div>
-        {rows.filter(row => row.section === section).map((row, rowIndex) => <div className={'td-sheet-row td-sheet-' + section} key={row.id}>
+        {rows.filter(row => row.section === section).map((row, rowIndex) => <div className="td-row-shell" key={row.id}>
+          <div className={'td-sheet-row td-sheet-' + section} id={'todo-row-' + row.id}>
           {fields(section).map(({key: label, name}) => label === 'Time' ? <div className="td-clock-cell" key={label}>
             <span className={rowIndex && fields(section).length <= 6 ? 'td-repeat-label' : undefined}>{name} (IST)</span>
             <div className="td-clock" role="group" aria-label={name + ' in Indian Standard Time'}>
@@ -154,6 +155,15 @@ export function DailyWorksheet() {
             </Select> : <Input type={label.endsWith('date') ? 'date' : 'text'} value={row.values[label] || ''}
               maxLength={label === sections[section].title ? 300 : 1000} onChange={e => change(row, label, e.target.value)} />}
           </label>)}
+          </div>
+          <div className="td-row-actions">
+            <RowMenu label={sections[section].label + ' row ' + (rowIndex + 1) + ' actions'} items={[
+              { label: 'Edit row', onSelect: () => {
+                document.getElementById('todo-row-' + row.id)?.querySelector<HTMLElement>('input, select, button')?.focus()
+              } },
+              { label: 'Delete row', tone: 'danger', onSelect: () => setRows(previous => previous.filter(entry => entry.id !== row.id)) },
+            ]} />
+          </div>
         </div>)}
       </section>)}
       {error && <p role="alert">{error}</p>}
