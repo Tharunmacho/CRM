@@ -463,7 +463,7 @@ function ReopenStage({ app, stage, disabled, onBusyChange, beforeReopen, onStage
     {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
     {saved ? <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(() => setError('We could not refresh. Please try again.'))}>Refresh</Button>
       : editing ? <div className="space-y-3">
-        <p className="text-[13px] leading-5 text-ink-600">Admin only. This starts stage {stage} again, sets aside the results of any later stages, and replaces the task that is open now. Earlier records and files stay on record. Reopening a deployment also changes the order's deployed count.</p>
+        <p className="text-[13px] leading-5 text-ink-600">This starts stage {stage} again, sets aside the results of any later stages, and replaces the task that is open now. Earlier records and files stay on record. Reopening a deployment also changes the order's deployed count.</p>
         <Field label="Reason for reopening" required><Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={2000} disabled={busy || disabled} placeholder="What needs to be corrected?" /></Field>
         <div className="flex flex-wrap gap-2"><Button variant="primary" disabled={busy || disabled || !reason.trim()} onClick={() => void reopen()}>{busy ? 'Reopening…' : `Reopen stage ${stage}`}</Button><Button disabled={busy || disabled} onClick={() => { setEditing(false); setError('') }}>Cancel</Button></div>
       </div> : <Button variant="secondary" size="sm" disabled={disabled} icon={<RotateCcw className="h-4 w-4" />} onClick={() => setEditing(true)}>Reopen stage {stage}</Button>}
@@ -958,7 +958,7 @@ function ClosedRow({ app, canReopen = false, disabled = false, onRecorded, onDon
         ? 'The candidate was removed from this order (or moved to another job) and its open tasks were cancelled. They are on the Tasks list again and can be matched to another order.'
         : tab === 'Declined'
           ? 'The candidate is on the Declined tab of the Tasks page and in All, and can be offered other orders.'
-          : 'The candidate is on the Rejected tab of the Tasks page and in All, and can be matched to another order.'} Finished stages and files are above.{canReopen ? ` Reopen ${stageTitle} to continue.` : ''} An admin can also reopen a finished stage, and must give a reason.</p>
+          : 'The candidate is on the Rejected tab of the Tasks page and in All, and can be matched to another order.'} Finished stages and files are above.{canReopen ? ` Reopen ${stageTitle} to continue.` : ''} Admins and MDs can reopen a finished stage by giving a reason.</p>
       {canReopen && <div className="mt-3"><ReopenApplication app={app} stageTitle={stageTitle} disabled={disabled} onRecorded={onRecorded} onDone={onDone} /></div>}
     </div>
   </section>
