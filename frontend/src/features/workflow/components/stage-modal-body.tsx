@@ -216,16 +216,13 @@ export function StageModal({
               const title = latest && !negative && stage.key === 'prescreening' ? 'Prescreened' : stage.title
               return <li key={stage.no} data-sm-stage={stage.no} className={cn('sm-step', current ? 'is-current' : negative ? 'is-closed' : latest ? 'is-done' : 'is-upcoming')}>
                 <span className="sm-node" aria-hidden="true">{latest && !negative ? <Check className="h-4 w-4" /> : stage.no}</span>
-                <div className="sm-card flex flex-wrap items-center justify-between gap-2 px-5 py-4">
+                <div className="sm-card sm-monitor-row">
                   <b>{title}</b>
-                  <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
-                    {latest && <Badge tone={negative ? 'stamp' : 'green'} variant="dot">
-                      {current ? 'Recorded' : negative ? 'Closed' : 'Completed'}
-                      {answer && <> &middot; {answer}</>}
-                    </Badge>}
-                    {current && <Badge tone="navy" variant="dot">In progress{draftAnswer && <> &middot; {draftAnswer}</>}</Badge>}
-                    {latest?.completedAt && <time className="text-right tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
+                  <div className="sm-monitor-answers">
+                    {answer && <Badge tone={stage.no <= 3 ? 'green' : negative ? 'stamp' : 'neutral'}>{answer}</Badge>}
+                    {current && <Badge tone={draftAnswer && stage.no <= 3 ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
                   </div>
+                  {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
                 </div>
               </li>
             })}
@@ -239,6 +236,11 @@ export function StageModal({
 function stageAnswer(stage: typeof STAGES[number], data: Record<string, unknown>, outcome = ''): string {
   const stop = stage.stops?.find(option => option.value === data.stop)
   if (stop) return stop.label
+  if (stage.no <= 3) {
+    const primary = stage.fields.find(field => field.type === 'radio')
+    const selected = primary?.options?.find(option => option.value === data[primary.name])
+    if (selected) return selected.label
+  }
   const decision = stage.fields.find(field => field.name === stage.decision?.field)
   const selected = decision?.options?.find(option => option.value === data[decision.name])
   if (selected) return selected.label
@@ -252,7 +254,7 @@ function stageAnswer(stage: typeof STAGES[number], data: Record<string, unknown>
     const choice = field.options?.find(option => option.value === data[field.name])
     if (choice) return ['yes', 'no'].includes(choice.value) ? `${field.label}: ${choice.label}` : choice.label
   }
-  return typeof data.feedback === 'string' ? data.feedback.trim() : ''
+  return stage.no > 3 && typeof data.feedback === 'string' ? data.feedback.trim() : ''
 }
 
 const NEGATIVE_OUTCOMES = ['Failed', 'Rejected', 'Declined', 'Not received', 'Unfit', 'Not forwarded']
