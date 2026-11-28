@@ -127,7 +127,13 @@ export function DailyWorksheet() {
         <label>Date<Input type="date" required value={date} onChange={event => setChosenDate(event.target.value || null)} /></label>
       </header>
       {sectionKeys.map((section, index) => <section key={section}>
-        <h3>{index + 1}. {sections[section].label}</h3>
+        <div className="td-section-band">
+          <h3>{index + 1}. {sections[section].label}</h3>
+          <div className="td-sheet-tools">
+            <Button type="button" size="sm" variant="ghost" onClick={() => editFields(section)}>Edit fields</Button>
+          {section !== 'review'  && <Button type="button" variant="ghost" onClick={() => setRows(previous => [...previous, blank(section)])}>+ Row</Button>}
+          </div>
+        </div>
         {rows.filter(row => row.section === section).map((row, rowIndex) => <div className={'td-sheet-row td-sheet-' + section} key={row.id}>
           {fields(section).map(({key: label, name}) => label === 'Time' ? <div className="td-clock-cell" key={label}>
             <span className={rowIndex && fields(section).length <= 6 ? 'td-repeat-label' : undefined}>{fieldHeading(section, label, name + ' (IST)')}</span>
@@ -148,10 +154,6 @@ export function DailyWorksheet() {
               maxLength={label === sections[section].title ? 300 : 1000} onChange={e => change(row, label, e.target.value)} />}
           </label>)}
         </div>)}
-        <div className="td-sheet-tools">
-          <Button type="button" size="sm" variant="ghost" onClick={() => editFields(section)}>Edit fields</Button>
-        {section !== 'review'  && <Button type="button" variant="ghost" onClick={() => setRows(previous => [...previous, blank(section)])}>+ Row</Button>}
-        </div>
       </section>)}
       {error && <p role="alert">{error}</p>}
       <Button type="submit" variant="primary" disabled={busy || !rows.some(row => row.touched)}>Save organiser</Button>
