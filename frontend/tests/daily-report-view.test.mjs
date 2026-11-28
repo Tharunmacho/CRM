@@ -558,7 +558,7 @@ test('"Stage by stage": stages 1 to 13 with waiting, a share and a total row, an
   assert.equal(v.buildStageTable(taskReport, 'a').total.waiting, 4)
 })
 
-// ------------------------------------------------------------------------------ who is listed: recruiters and the MD, never the Administrator account
+// ------------------------------------------------------------------------------ who is listed: recruiters only
 
 const withRole = (id, name, role) => ({ id, name, role })
 const peopleReport = {
@@ -570,26 +570,26 @@ const peopleReport = {
   },
 }
 
-test('reportPeople keeps every recruiter and the MD and drops the Administrator account', () => {
-  assert.deepEqual(v.reportPeople(peopleReport.staff).map(r => r.name), ['Mahesh', 'Zoya', 'Anil'])
+test('reportPeople keeps recruiters and excludes owners', () => {
+  assert.deepEqual(v.reportPeople(peopleReport.staff).map(r => r.name), ['Zoya', 'Anil'])
   assert.deepEqual(v.reportPeople([{ id: 'x', name: 'No role' }]).map(r => r.id), ['x'])
-  assert.deepEqual([...v.HIDDEN_REPORT_ROLES], ['admin'])
+  assert.deepEqual([...v.HIDDEN_REPORT_ROLES], ['admin', 'manager', 'md'])
 })
 
-test('Task report: the Administrator is not a row, the MD and recruiters are, and every total adds up from the rows shown', () => {
+test('Task report: owners are excluded, and every total adds up from the rows shown', () => {
   const matrix = v.buildStageMatrix(peopleReport)
-  assert.deepEqual(matrix.rows.map(r => r.name), ['Anil', 'Mahesh', 'Zoya'])
+  assert.deepEqual(matrix.rows.map(r => r.name), ['Anil', 'Zoya'])
   assert.equal(matrix.rows.some(r => r.id === 'adm' || r.id === 'other'), false) // the Administrator's candidates are not folded into "Other"
-  assert.equal(matrix.total.total, 3 + 4 + 2)
+  assert.equal(matrix.total.total, 4 + 2)
   assert.equal(matrix.total['0'], 1)
-  assert.equal(matrix.total['1'], 3)
+  assert.equal(matrix.total['1'], 1)
   const table = v.buildStageTable(peopleReport)
-  assert.equal(table.total.waiting, 8) // the matrix total (9) less the No order column (1)
-  assert.equal(table.rows[0].waiting, 3)
-  assert.equal(table.rows[0].share, 38)
-  assert.equal(v.buildStageMatrix(peopleReport, 'md').rows.length, 1)
+  assert.equal(table.total.waiting, 5) // the matrix total (6) less the No order column (1)
+  assert.equal(table.rows[0].waiting, 1)
+  assert.equal(table.rows[0].share, 20)
+  assert.equal(v.buildStageMatrix(peopleReport, 'md').rows.length, 0)
   assert.equal(v.buildStageMatrix(peopleReport, 'adm').rows.length, 0) // not on the filter either
-  assert.equal(v.shownOverdue(peopleReport), 2 + 1 + 1) // the tile adds up the rows shown, not the server's 10
+  assert.equal(v.shownOverdue(peopleReport), 1 + 1) // the tile adds up the rows shown, not the server's 10
   assert.equal(v.shownOverdue({ staff: [], tasks: peopleReport.tasks }), 10)
   assert.equal(v.shownOverdue({ staff: [] }), null)
 })

@@ -83,7 +83,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Date, DateTime, String, and_, case, cast, exists, extract, false, func, literal, or_, select, text, union_all, update
 from sqlalchemy.orm import aliased
 
-from app.core.roles import ROLE_LABELS
+from app.core.roles import ADMIN_LEVEL_VALUES, ROLE_LABELS
 from app.db import models as m
 from app.db.models import LEAD_STATUSES
 from app.domain.stages import MEDICAL_STAGE, STAGES, STOP_EXITS, STOP_OUTCOMES, TICKET_STAGE, TOTAL_STAGES, VISA_STAGE
@@ -633,7 +633,7 @@ def classify(raw: str | None, follow_up: bool) -> str:
 
 # The stage's own stopping exits give the reason its words ("Rejected at interview", "Offer declined"); the older negative answers have these.
 LEGACY_EXIT_LABELS = {"Not forwarded": "Not forwarded to the client", "Not received": "Offer letter not received", "Unfit": "Medically unfit"}
-HIDDEN_ROLES = frozenset({"admin"})   # the Administrator account runs the system: it is no row of a management report
+HIDDEN_ROLES = ADMIN_LEVEL_VALUES  # Admin and MD are owners in recruiter reports.
 
 
 def exit_label(no: int, outcome: str) -> str:

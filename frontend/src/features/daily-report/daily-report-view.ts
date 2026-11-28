@@ -422,15 +422,15 @@ export function matrixStages(report: Pick<DailyReport, 'stages' | 'stageFlow'>):
   return Array.from({ length: STAGE_NAMES.length }, (_, i) => ({ no: i + 1, short: STAGE_SHORT[i], name: label(i + 1) }))
 }
 
-/** Roles that are never a row of a report tab: the Administrator account runs the system, it does not hold candidates or leads (the MD does show). */
-export const HIDDEN_REPORT_ROLES: ReadonlySet<string> = new Set(['admin'])
-/** The people a report tab lists as rows and in its recruiter filter: every Recruiter and the MD, not the Administrator account. */
+/** Roles that are never a row of a report tab: Admin and MD are owners. */
+export const HIDDEN_REPORT_ROLES: ReadonlySet<string> = new Set(['admin', 'manager', 'md'])
+/** The people a report tab lists as rows and in its recruiter filter: recruiters only. */
 export function reportPeople<T extends { role: string }>(rows: readonly T[]): T[] {
   return rows.filter(row => !HIDDEN_REPORT_ROLES.has(String(row.role ?? '').trim().toLowerCase()))
 }
 
 /**
- * The Task report's main table: ONE ROW PER PERSON (recruiters and the MD, alphabetical), a "not on an order" column, the 13 stages and a total,
+ * The Task report's main table: ONE ROW PER PERSON (recruiters, alphabetical), a "not on an order" column, the 13 stages and a total,
  * counting the candidates each person holds now (`stages.perStaff`). `staff` narrows it to one person ('' for everyone). Figures of people who
  * are not in the staff list at all (a former employee) are kept together in an "Other" row. The Administrator's own figures are not a row and
  * not in the Total, so the Total row always equals the sum of the rows shown.
@@ -474,7 +474,7 @@ export function periodTitle(period: { from: string; to: string; allTime?: boolea
 export interface WorkDoneRow { id: string; name: string; cells: Record<string, number>; total: number; lost: number }
 export interface WorkDoneMatrix { stages: MatrixStage[]; rows: WorkDoneRow[]; total: { cells: Record<string, number>; total: number; lost: number } }
 /**
- * The Task report's MAIN table: what each person DID in the chosen period, one row per person (recruiters and the MD, alphabetical), the stage records
+ * The Task report's MAIN table: what each person DID in the chosen period, one row per person (recruiters, alphabetical), the stage records
  * they completed at each of the 13 stages, a Total and the "stopped or lost" ones. It comes from `taskInsight.workDone`, the rows behind the two cards, so
  * the Total row equals "Stages completed" and the last column "Stopped or lost". `staff` narrows it to one person ('' for everyone). A person the report
  * does not list (a former employee) is kept together in an "Other" row. Null when the server sent no work-done reading.
