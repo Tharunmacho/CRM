@@ -62,7 +62,6 @@ import {
 import { FileDrop, type StoredFile } from '@/shared/ui/file-drop'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { refreshSilently, refreshUntil } from '@/shared/state/refresh-retry'
-import { PersonAvatar } from './person-avatar'
 import { useCandidateDocuments } from '@/features/candidates/use-candidate-documents'
 import { SlaMeter, StageRail } from './stage-rail'
 import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
@@ -362,14 +361,15 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
   const designation = store.designation(order.designationId)!
   const owner = store.user(cand.ownerId)
   const { documents: candidateDocuments, loading: documentsLoading } = useCandidateDocuments(cand)
-  const photo = newestFileVersions(candidateDocuments.find(document => document.key === 'photo')?.versions ?? [])[0]
   const clearance = candidateDocuments.find(slot => slot.key === 'emigration')
   const clearanceFile = newestFileVersions(clearance?.versions ?? [])[0]
   const clearanceRecorded = clearanceFile || clearance?.uploaded || clearance?.fileUploaded || clearance?.manualStatus?.uploaded
-  const facts: [string, typeof User, string][] = [
-    ['Company name', Building2, client.name],
+  const referrer = agentName(cand)
+  const referringLabel = /^care\s*india(?:\s+overseas)?(?:\s+(?:pvt\.?|private)\s*(?:ltd\.?|limited))?$/i.test(referrer) ? 'CareIndia' : referrer
+  const facts: [string, typeof User, string, string?][] = [
+    ['Company name', Building2, client.name, order.country?.trim() || 'Not recorded'],
     ['Job position', Briefcase, designation.title],
-    ['Referring agent', User, agentName(cand) || 'Not recorded'],
+    ['Referring agent', User, referringLabel || 'Not recorded'],
     ['Recruiter', User, owner?.name ?? 'Not assigned'],
     ['Passport number', BookUser, cand.passportNo || 'Not recorded'],
     ['Passport expiry date', BookUser, cand.passportExpiry ? dateLabel(cand.passportExpiry) : 'Not recorded'],
@@ -383,17 +383,20 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
     <>
       <header className="sm-head">
         <div className="sm-head-main">
-          <PersonAvatar name={cand.name} photoUrl={photo?.url} size={56} />
           <div className="sm-id">
             <h3 className="sm-name" title={cand.name}>{cand.name}</h3>
-            <p className="sm-sub"><span>Contact number</span><b className="tnum">{cand.phone ? formatPhone(cand.phone, homeDigits(store.settings.homeCallingCode)) : 'Not recorded'}</b></p>
+            {cand.phone && <p className="sm-sub"><b className="tnum">{formatPhone(cand.phone, homeDigits(store.settings.homeCallingCode))}</b></p>}
           </div>
           <div className="sm-head-side">
             <Badge tone={statusTone} variant="dot">{statusLabel}</Badge>
           </div>
         </div>
         <dl className="sm-facts">
-          {facts.map(([label, Icon, value]) => <div key={label}><dt><Icon className="h-3.5 w-3.5" aria-hidden="true" />{label}</dt><dd title={value}>{value}</dd></div>)}
+          {facts.map(([label, Icon, value, country]) => <div key={label}>
+            <dt><Icon className="h-3.5 w-3.5" aria-hidden="true" />{label}</dt>
+            <dd title={value}>{value}</dd>
+            {country && <><dt className="mt-2">Country</dt><dd title={country}>{country}</dd></>}
+          </div>)}
         </dl>
         <div className="sm-progress">
           <div className="sm-progress-line">
