@@ -2,33 +2,25 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import {
-  AlertCircle, CalendarCheck2, CheckCheck, Check, Clock3, Pencil,
+  AlertCircle, CheckCheck, Check, Clock3, Pencil,
   RefreshCw, Trash2,
 } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
-import { isSameDay } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
 import type { TodoItem } from '@/shared/model/types'
-import { Badge, EmptyState, PageHeader, Panel, PanelHeader } from '@/shared/ui/display'
-import { sections, sectionKeys, sectionKey, type SectionKey } from './organiser'
-import { Button, Checkbox, Select } from '@/shared/ui/primitives'
-import { Dialog, Tabs } from '@/shared/ui/overlay'
+import { Badge, PageHeader, Panel } from '@/shared/ui/display'
+import { sections, sectionKey } from './organiser'
+import { Button, Checkbox } from '@/shared/ui/primitives'
+import { Dialog } from '@/shared/ui/overlay'
 import { useDeadlineClock, useWorkspaceRead } from '@/features/staff/use-workspace-read'
 import { DailyWorksheet } from './worksheet'
 import { TodoDialog } from './todo-dialog'
 import {
   Flag, LINK_KINDS, LinkIcon, dayDate, dayLabel, groupByDay, lateText, linkIdOf, linkKindOf,
-  untilText, type TabKey,
+  untilText,
 } from './todo-meta'
 import '@/styles/todo-v2.css'
-
-const EMPTY: Record<TabKey, string> = {
-  today: 'Nothing due today',
-  upcoming: 'Nothing scheduled ahead',
-  overdue: 'Nothing overdue',
-  done: 'No completed entries',
-}
 
 const PRIORITY_TONE = { high: 'amber', normal: 'neutral', low: 'green' } as const
 
@@ -36,31 +28,9 @@ export default function TodoPage() {
   const store = useStore()
   const todoRead = useWorkspaceRead()
   const clock = useDeadlineClock()
-  const [section, setSection] = useState<SectionKey | ''>('')
-  const [tab, setTab] = useState<TabKey>('today')
   const [dialog, setDialog] = useState<{ item: TodoItem | null } | null>(null)
-
-  const mine = useMemo(
-    () => store.todos.filter((t) => t.ownerId === store.me.id && (!section || sectionKey(t.section) === section)),
-    [store.todos, store.me.id, section],
-  )
-
-  const buckets = useMemo(() => {
-    const now = new Date(clock)
-    const open = mine.filter((t) => !t.done)
-    return {
-      today: open.filter((t) => isSameDay(t.dueAt, now) && new Date(t.dueAt) >= now),
-      upcoming: open.filter((t) => new Date(t.dueAt) > now && !isSameDay(t.dueAt, now)),
-      overdue: open.filter((t) => new Date(t.dueAt) < now),
-      done: mine.filter((t) => t.done),
-    }
-  }, [mine, clock])
-
-  const groups = useMemo(() => {
-    // Finished work shows newest first; everything else is soonest first.
-    const rows = [...buckets[tab]].sort((a, b) => tab === 'done' ? +new Date(b.dueAt) - +new Date(a.dueAt) : +new Date(a.dueAt) - +new Date(b.dueAt))
-    return groupByDay(rows)
-  }, [buckets, tab])
+  const groups = useMemo(() => groupByDay(store.todos.filter(item => item.ownerId === store.me.id)
+    .sort((a, b) => +new Date(b.dueAt) - +new Date(a.dueAt))), [store.todos, store.me.id])
   const openDialog = (item: TodoItem | null = null) => setDialog({ item })
 
   if (todoRead.loading || todoRead.error) return <div className="todo-screen td">
@@ -95,36 +65,11 @@ export default function TodoPage() {
       />
 
       <DailyWorksheet />
-      <div className="td-organiser">
+      {groups.length > 0 && <details className="td-organiser td-saved">
+        <summary>My entries</summary>
         <Panel flush className="td-list-panel">
-          <PanelHeader
-            title="My entries"
-            action={<Select aria-label="Filter by section" value={section} onChange={event => setSection(event.target.value as SectionKey | '')}>
-              <option value="">All sections</option>
-              {sectionKeys.map(key => <option key={key} value={key}>{sections[key].label}</option>)}
-            </Select>}
-          />
-          <Tabs
-            tabs={[
-              { key: 'today', label: 'Today' },
-              { key: 'upcoming', label: 'Upcoming' },
-              { key: 'overdue', label: 'Overdue' },
-              { key: 'done', label: 'Done' },
-            ]}
-            active={tab}
-            onChange={(k) => setTab(k as TabKey)}
-          />
-
-          {groups.length === 0 ? (
-            <div className="td-empty">
-              <EmptyState
-                icon={<CalendarCheck2 size={22} strokeWidth={1.6} />}
-                title={EMPTY[tab]}
-              />
-            </div>
-          ) : (
             <div className="td-scroll">
-              <ol className="td-timeline" aria-label={`${tab} to-dos`}>
+              <ol className="td-timeline" aria-label="Saved entries">
                 {groups.map((g) => (
                   <li key={g.key} className="td-day">
                     <h3 className="td-day-head">
@@ -138,12 +83,11 @@ export default function TodoPage() {
                 ))}
               </ol>
             </div>
-          )}
         </Panel>
 
-      </div>
+      </details>}
 
-      {dialog && <TodoDialog key={dialog.item?.id || 'new'} item={dialog.item} initialSection={section || 'reminders'} onClose={() => setDialog(null)} />}
+      {dialog && <TodoDialog key={dialog.item?.id || 'new'} item={dialog.item} onClose={() => setDialog(null)} />}
     </div>
   )
 }
