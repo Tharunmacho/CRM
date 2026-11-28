@@ -123,6 +123,8 @@ export function StageModal({
   const [dirty, setDirty] = useState(false)
   const [pending, setPending] = useState(false)
   const [reopening, setReopening] = useState(false)
+  const [selectedHistory, setSelectedHistory] = useState<number | null>(null)
+  useEffect(() => { setSelectedHistory(null) }, [applicationId, open, app?.currentStage])
 
   useEffect(() => { reportDirty?.(dirty); return () => reportDirty?.(false) }, [dirty, reportDirty])
   useEffect(() => { reportBusy?.(pending || reopening); return () => reportBusy?.(false) }, [pending, reopening, reportBusy])
@@ -224,7 +226,11 @@ export function StageModal({
               return <li key={stage.no} data-sm-stage={stage.no} className={cn('sm-step', current ? 'is-current' : negative ? 'is-closed' : latest ? 'is-done' : 'is-upcoming')}>
                 <span className="sm-node" aria-hidden="true">{latest && !negative ? <Check className="h-4 w-4" /> : stage.no}</span>
                 <div className="sm-card sm-monitor-row">
-                  <div><b>{title}</b>
+                  <div>{latest && !current ? <button type="button" className="sm-history-select"
+                    aria-expanded={selectedHistory === stage.no} aria-controls={`sm-history-${stage.no}`}
+                    onClick={() => setSelectedHistory(selectedHistory === stage.no ? null : stage.no)}>
+                    <b>{title}</b><span aria-hidden="true">{selectedHistory === stage.no ? '\u25B4' : '\u25BE'}</span>
+                  </button> : <b>{title}</b>}
                     {interviewDate && <div className="text-sm">Interview date: <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${schedule.time.slice(0, 5)}`}</time></div>}
                   </div>
                   <div className="sm-monitor-answers">
@@ -240,6 +246,11 @@ export function StageModal({
                         onRecorded={onStageRecorded} onDone={onStageChanged} />}
                   </div>
                 </div>
+                {latest && !current && <div id={`sm-history-${stage.no}`} hidden={selectedHistory !== stage.no}>
+                  {selectedHistory === stage.no && <div className="sm-card sm-inline-history">
+                    <CompletedStage record={latest} files={files} app={app} />
+                  </div>}
+                </div>}
                 {current && canWork && <div className="sm-embedded">
                   {!owner?.active && <p className="sm-note">Assign an active recruiter before moving this stage. You can still save a draft.</p>}
                   {fileError && <button type="button" className="underline" onClick={() => setFileRetry(value => value + 1)}>Retry documents</button>}

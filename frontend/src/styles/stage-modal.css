@@ -306,6 +306,12 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
 
 .sm-monitor-row { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(65%); align-items: center; gap: 12px; min-height: 64px; padding: 12px 20px; overflow-wrap: anywhere; }
 .sm-monitor-answers { justify-content: flex-end; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; min-width: 0; }
+.sm-monitor-row { position: relative; }
+.sm-history-select { display: inline-flex; align-items: center; gap: 8px; text-align: start; }
+.sm-history-select::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.sm-history-select:focus-visible::after { outline: 2px solid currentColor; outline-offset: -2px; }
+.sm-history-select span { color: var(--text-muted); }
+.sm-monitor-answers > :is(.sm-reopen, button) { position: relative; z-index: 1; }
 .sm-monitor-answers > .sm-reopen { padding: 0; border: 0; }
 .sm-monitor-row:has(.sm-reopen textarea) .sm-monitor-answers { grid-column: 1 / -1; }
 .sm-monitor-answers > .sm-reopen:has(textarea) { flex-basis: 100%; }
