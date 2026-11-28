@@ -29,7 +29,7 @@ export function DashboardTrackerCard() {
   return <section ref={holder} className="dt-card" aria-label="Client tracker">
     <header className="dt-head">
       <span className="dt-icon"><Route size={20} strokeWidth={1.9} /></span>
-      <div><h2>Client tracker</h2><p>Every placement by client, from offer to air ticket</p></div>
+      <div><h2>Client tracker</h2></div>
     </header>
     {near ? <TrackerBody /> : <div className="dt-note" aria-busy="true">Loading the tracker</div>}
   </section>

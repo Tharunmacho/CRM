@@ -45,7 +45,7 @@ export function LeadLogSheet({ lead, version, onClose }: { lead: Lead | null; ve
   }, [id, version])
   if (!lead) return null
   return (
-    <Sheet open onClose={onClose} title={`Log · ${lead.name || 'Lead'}`} description="Every call, note, status change and assignment, newest first." width="md">
+    <Sheet open onClose={onClose} title={`Log · ${lead.name || 'Lead'}`} width="md">
       <div className="ld-drawer">
         {error && <p className="ld-alert" role="alert"><AlertTriangle size={16} aria-hidden="true" /><span>{error}</span></p>}
         {!error && (items ? <LeadTimeline items={items} /> : <p className="ld-hint" role="status">Loading…</p>)}

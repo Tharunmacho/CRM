@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle,
   BookUser,
   Briefcase,
   Building2,
   Check,
-  CheckCircle2,
   CircleDot,
   CircleSlash,
-  ListChecks,
   Lock,
   MessageSquarePlus,
   RotateCcw,
@@ -345,7 +342,7 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
           </div>
         )}
         {def.fields
-          .filter((f) => fieldVisible(f, data) && data[f.name] != null)
+          .filter((f) => fieldVisible(f, data) && data[f.name] != null && data[f.name] !== '')
           .map((f) => (
             <div key={f.name} className={cn('sm-fact', (f.type === 'file' || f.type === 'textarea') && 'is-wide')}>
               <dt>{f.label}</dt>
@@ -360,9 +357,7 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
           ))}
       </dl>
 
-      {!record.data.feedback && <p className="sm-hint">No stage feedback was recorded for this earlier attempt.</p>}
 
-      <p className="sm-hint">Saved attempts cannot be changed. If an admin reopens the stage, these details and files stay on record.</p>
     </section>
   )
 }
@@ -557,12 +552,12 @@ function CurrentStage({
       : result.closes ? `stop here and close this order for the candidate (${result.closes.label}). This candidate will not go to the next stage`
       : def.no < STAGES.length ? `move to stage ${def.no + 1}: ${stageByNo(def.no + 1).title}`
       : 'mark this candidate as Deployed'
-    if (!window.confirm(`Save your feedback for ${def.title} and ${destination}?`)) return
+    if (!window.confirm(`Confirm ${def.title} and ${destination}?`)) return
     setBusy(true)
     setError(''); setConflict(null)
     try {
       // The server validates and records exactly these values in one transaction.
-      await api.post(`/applications/${app.id}/complete`, { data: { ...data, feedback: String(data.feedback).trim() }, lock_version: lockVersion })
+      await api.post(`/applications/${app.id}/complete`, { data: { ...data, feedback: String(data.feedback ?? '').trim() || undefined }, lock_version: lockVersion })
       if (!store.isCurrentSession()) return
       // The stage is recorded: a list behind this window (Tasks) re-reads NOW, not after the whole workspace has been downloaded again below,
       // so a candidate who was rejected or declined leaves the Current process list while the person is still reading "Saved".
@@ -585,8 +580,6 @@ function CurrentStage({
   const decisionMain = decisionFields.find((f) => f.name === def.decision?.field)
   const decisionExtras = decisionFields.filter((f) => f !== decisionMain)
   const decisionSpan = fieldSpans(decisionExtras)
-  const ready = result.canComplete && !result.closes && !result.repeats
-  const checkState = result.canComplete ? (result.closes ? 'is-closes' : 'is-ready') : ''
 
   return (
     <div>
@@ -605,7 +598,6 @@ function CurrentStage({
           <div className="min-w-0">
             <p className="sm-current-label"><CircleDot className="h-3.5 w-3.5" aria-hidden="true" />Current stage · {def.no} of {STAGES.length}</p>
             <h3>{def.title}</h3>
-            {!compact && <p>{def.summary}</p>}
           </div>
           {task && !compact && (
             <div className="sm-sla">
@@ -614,24 +606,10 @@ function CurrentStage({
           )}
         </header>
 
-        {(!compact || attempted) && <div className={cn('sm-check', checkState)} aria-live="polite">
-          <span className="sm-check-icon" aria-hidden="true">{result.closes ? <AlertTriangle className="h-4 w-4" /> : ready || result.repeats ? <CheckCircle2 className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />}</span>
-          <div className="min-w-0">
-            <b>{result.canComplete ? 'Ready to save feedback and move' : result.missing.includes('Stage feedback') ? 'Write feedback before moving this stage' : 'Fix this before moving this stage'}</b>
-            {result.missing.length > 0
-              ? <ul>{result.missing.map(item => <li key={item}>{item}</li>)}</ul>
-              : <p>{result.repeats ? 'This saves the medical result and sets up the next medical task.' : result.closes ? `This closes the order for this candidate: ${result.closes.label}. Work done so far stays on record.` : def.no < STAGES.length ? `Next: stage ${def.no + 1}, ${stageByNo(def.no + 1).title}. A new task is created when you finish this stage.` : 'This finishes the deployment and adds one to the order’s filled openings.'}</p>}
-          </div>
-        </div>}
-
         {def.decision && decisionMain && (
           <div className="sm-decision">
-            <DecisionChoice def={def} field={decisionMain} value={data[decisionMain.name] as string | undefined} onChange={(value) => {
-                const options = decisionMain.options ?? []
-                const chosen = options.find(option => option.value === value)
-                if (chosen) applyReply(chosen.label, { [decisionMain.name]: value }, options.map(option => option.label))
-              }}
-              disabled={!canWork || busy || completed} stopping={!!result.closes} repeating={!!result.repeats} />
+            <DecisionChoice def={def} field={decisionMain} value={data[decisionMain.name] as string | undefined} onChange={(value) => set(decisionMain.name, value)}
+              disabled={!canWork || busy || completed} />
             {decisionExtras.length > 0 && (
               <div className="sm-form sm-decision-more">
                 {decisionExtras.map((f, index) => (
@@ -650,13 +628,15 @@ function CurrentStage({
             status={data.advanceStatus} onChoose={(reply, status) => status
               ? applyReply(reply, { advanceStatus: status }, ['Advance payment received.', 'Advance payment not received.'])
               : applyReply(reply)} />}
-          <StageFieldInput field={def.fields.find((field) => field.name === 'feedback')!} value={data.feedback} onChange={(value) => set('feedback', value)} disabled={!canWork || busy || completed} applicationId={app.id} versions={[]} stage={app.currentStage} onUploaded={onUploaded} onUploading={() => {}} />
-          {!compact && <p className="sm-hint">Only you move the stage. Missing documents will stay pending in the document checklist.</p>}
+          <details open={Boolean(data.feedback) || undefined}>
+            <summary>{data.feedback ? 'Feedback' : 'Add feedback (optional)'}</summary>
+            <StageFieldInput field={def.fields.find((field) => field.name === 'feedback')!} value={data.feedback} onChange={(value) => set('feedback', value)} disabled={!canWork || busy || completed} applicationId={app.id} versions={[]} stage={app.currentStage} onUploaded={onUploaded} onUploading={() => {}} />
+          </details>
         </div>
 
         {def.stops && def.stops.length > 0 && (
           <div className="sm-stop">
-            <Field label="Not going ahead with this candidate?" hint="Choose how it ends. Feedback is still needed, and it is saved with the outcome.">
+            <Field label="Not going ahead with this candidate?">
               <div className="sm-decision-row" role="group" aria-label="Stop this candidate here" data-name="stop">
                 {def.stops.map((option) => {
                   const on = data.stop === option.value
@@ -669,10 +649,6 @@ function CurrentStage({
                   )
                 })}
               </div>
-              {data.stop != null && data.stop !== '' && result.closes && (
-                <p className="sm-decision-note is-stop" role="status"><CircleSlash className="h-4 w-4" aria-hidden="true" />
-                  This candidate will not go to the next stage. The order closes for them and they appear on the Declined or Rejected tab of the Tasks page, and in All.</p>
-              )}
             </Field>
           </div>
         )}
@@ -698,13 +674,6 @@ function CurrentStage({
           </div>
         </details>
 
-        {def.closer && !def.decision && (!compact || result.closes) && (
-          <p className="sm-form-note">
-            <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-            <span>If this stage ends with a closing result, the order closes for the candidate. They appear on the Declined or Rejected tab of the Tasks page, and in All, and can be matched to another order.</span>
-          </p>
-        )}
-
         {attempted && result.missing.length > 0 && (
           <p className="sm-still">
             Still needed: {result.missing.join(', ')}.
@@ -712,9 +681,6 @@ function CurrentStage({
         )}
 
         <footer className="sm-foot">
-          <span className="sm-foot-meta">
-            {compact ? 'Feedback stays in this stage’s history.' : <>Save draft keeps your feedback here. {result.closes ? 'Save and close records your feedback and closes the order.' : 'Save and move records your feedback and advances only after you confirm.'}{def.repeatable && ' This stage can be done again.'}</>}
-          </span>
           <div className="sm-foot-actions">
             {uploading ? <span role="status" className="sm-unsaved">Uploading files…</span> : dirty && <span className="sm-unsaved">Changes not saved</span>}
             <Button variant="secondary" onClick={save} disabled={!canWork || !dirty || busy || uploading || completed || refreshRequired}>
@@ -767,7 +733,6 @@ function CurrentStage({
                 {remarkBusy ? 'Saving…' : 'Add note'}
               </Button>
             </div>
-            <p className="sm-hint">Notes show the time they were added and cannot be changed or deleted. Add one every day for each open task.</p>
 
             {remarks.length > 0 && (
               <ul className="sm-remarks-list">
@@ -790,19 +755,16 @@ function CurrentStage({
  * The outcome of a decision stage as clear, equal buttons. Only the positive answer moves the candidate on; choosing any
  * other answer says plainly that they stop here. Feedback is asked for either way (it sits right below).
  */
-function DecisionChoice({ def, field, value, onChange, disabled, stopping, repeating }: {
+function DecisionChoice({ def, field, value, onChange, disabled }: {
   def: ReturnType<typeof stageByNo>
   field: StageField
   value: string | undefined
   onChange: (value: string) => void
   disabled?: boolean
-  stopping: boolean
-  repeating: boolean
 }) {
   const decision = def.decision!
-  const next = def.no < STAGES.length ? stageByNo(def.no + 1) : null
   return (
-    <Field label={field.label} required hint={field.help}>
+    <Field label={field.label} required>
       <div className="sm-decision-row" role="group" aria-label={field.label} data-name={field.name}>
         {(field.options ?? []).map((option) => {
           const on = value === option.value
@@ -815,15 +777,6 @@ function DecisionChoice({ def, field, value, onChange, disabled, stopping, repea
           )
         })}
       </div>
-      {value && (stopping || repeating) && (
-        <p className="sm-decision-note is-stop" role="status"><CircleSlash className="h-4 w-4" aria-hidden="true" />
-          {repeating ? 'This candidate will not go to the next stage until the medical result is Fit.' : 'This candidate will not go to the next stage. The order closes for them and they appear on the Declined or Rejected tab of the Tasks page, and in All.'}</p>
-      )}
-      {value && !stopping && !repeating && decision.advances.includes(value) && next && (
-        <p className="sm-decision-note is-go" role="status"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-          This candidate goes on to stage {next.no}, {next.title}.</p>
-      )}
-      {!value && <p className="sm-decision-note">{decision.message}</p>}
     </Field>
   )
 }
@@ -877,7 +830,7 @@ function StageFieldInput({
   switch (field.type) {
     case 'radio':
       return (
-        <Field label={field.label} hint={field.help} required={field.required}>
+        <Field label={field.label} required={field.required}>
           <RadioRow
             name={field.name}
             value={value as string}
@@ -889,7 +842,7 @@ function StageFieldInput({
       )
     case 'select':
       return (
-        <Field label={field.label} hint={field.help} required={field.required}>
+        <Field label={field.label} required={field.required}>
           <Select
             value={selectedValue}
             onChange={(e) => {
@@ -912,7 +865,7 @@ function StageFieldInput({
       )
     case 'textarea':
       return (
-        <Field label={field.label} hint={field.help} required={field.required}>
+        <Field label={field.label} required={field.required}>
           <Textarea
             value={(value as string) ?? ''}
             placeholder={field.placeholder}
@@ -927,7 +880,6 @@ function StageFieldInput({
       return (
         <FileDrop
           label={field.required ? `${field.label} (required)` : field.label}
-          help={field.help}
           value={value as StoredFile | null}
           versions={versions}
           uploaderName={(id) => store.user(id)?.name || 'Former team member'}
@@ -964,13 +916,13 @@ function StageFieldInput({
       )
     case 'date':
       return (
-        <Field label={field.label} hint={field.help} required={field.required}>
+        <Field label={field.label} required={field.required}>
           <DatePicker value={(value as string) ?? ''} onChange={onChange} disabled={disabled} />
         </Field>
       )
     default:
       return (
-        <Field label={field.label} hint={field.help} required={field.required}>
+        <Field label={field.label} required={field.required}>
           <Input
             type={field.type === 'number' ? 'number' : field.type === 'time' ? 'time' : 'text'}
             ident={field.ident}

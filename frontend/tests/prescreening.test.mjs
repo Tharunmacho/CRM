@@ -17,11 +17,11 @@ test('Prescreening needs no client or job: save, decline and reject bodies never
   assert.deepEqual(pre.prescreenBody('decline', '   '), { action: 'decline' }, 'a reason is optional')
 })
 
-test('only "move to next stage" carries the job, and it is blocked until client, job AND feedback are there (client + job from stage 2)', () => {
+test('only "move to next stage" carries the job, and it is blocked until client and job are there (client + job from stage 2)', () => {
   assert.deepEqual(pre.prescreenBody('forward', 'Passed.', 'order-1'), { action: 'forward', feedback: 'Passed.', orderId: 'order-1' })
   assert.equal(pre.forwardBlocker({ clientId: '', orderId: '', feedback: 'x' }), pre.STAGE_2_LOCK_TEXT)
   assert.equal(pre.forwardBlocker({ clientId: 'c1', orderId: '', feedback: 'x' }), pre.STAGE_2_LOCK_TEXT, 'a client alone is not enough: the job is what matters')
-  assert.equal(pre.forwardBlocker({ clientId: 'c1', orderId: 'o1', feedback: '   ' }), pre.NEED_FEEDBACK)
+  assert.equal(pre.forwardBlocker({ clientId: 'c1', orderId: 'o1', feedback: '   ' }), '')
   assert.equal(pre.forwardBlocker({ clientId: 'c1', orderId: 'o1', feedback: 'Passed.' }), '', 'ready')
   assert.match(pre.STAGE_2_LOCK_TEXT, /required from stage 2/)
 })
@@ -79,7 +79,7 @@ test('the form shows the Prescreening panel when there is no job, wires "Move to
   const panel = await read('features/application-form/components/prescreening-panel.tsx')
   assert.match(panel, /\/prescreen`/, 'every action goes through the one prescreen endpoint')
   for (const text of ['Save feedback', 'Not interested (decline)', 'Reject (not suitable)', 'Move to next stage']) assert.ok(panel.includes(text), text)
-  assert.match(panel, /forwardBlocker\(\{ clientId, orderId, feedback \}\)/, 'Move to next stage is disabled until client, job and feedback are there')
+  assert.match(panel, /forwardBlocker\(\{ clientId, orderId, feedback \}\)/, 'Move to next stage is disabled until client and job are there')
   assert.match(panel, /liveInterval\(load, 20_000, \['candidates', 'applications', 'tasks'\]/, 'a colleague\'s change shows without a refresh')
   assert.match(panel, /typed\.current/, 'a live read never overwrites what the person is typing')
   assert.doesNotMatch(panel, /Data Bank/)

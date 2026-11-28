@@ -43,7 +43,7 @@ export function RecordAudit({ kind, id, onClose }: { kind: 'client' | 'company' 
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [kind, id, retry])
-  return <Sheet open onClose={onClose} title="Change history" description="The last 100 changes and file uploads.">
+  return <Sheet open onClose={onClose} title="Change history">
     <DialogMark />
     {loading ? <p role="status" className="cl-audit-state">Loading history…</p>
       : error ? <div role="alert" className="cl-audit-state is-error space-y-3"><p>{error}</p><Button onClick={() => setRetry((value) => value + 1)}>Try again</Button></div>

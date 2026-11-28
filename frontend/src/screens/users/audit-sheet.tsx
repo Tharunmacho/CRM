@@ -49,12 +49,12 @@ export function AuditHistory({ user, onClose }: { user: User; onClose: () => voi
     } catch (err) { setError(failureText(err)) }
     finally { setLoading(false) }
   }
-  return <Sheet open onClose={onClose} title={'History · ' + user.name} description="Changes made to this account and things this person did, newest first." width="lg">
+  return <Sheet open onClose={onClose} title={'History · ' + user.name} width="lg">
     <div className="uv uv-audit">
       <div className="uv-target"><UserAvatar name={user.name} /><div><p>{user.name}</p><span>{user.email}</span></div><RolePill role={user.role} /></div>
       {error && <div role="alert" className="uv-error">{error}<div className="mt-2"><Button size="sm" onClick={() => data.items.length ? void more() : setRetry((v) => v + 1)}>{data.items.length ? 'Try again' : 'Reload history'}</Button></div></div>}
       {loading && data.items.length === 0 && <div role="status" className="uv-skeleton-list" aria-label="Loading history">{[0, 1, 2, 3].map((i) => <span key={i} className="sk" />)}</div>}
-      {!loading && !error && data.items.length === 0 && <EmptyState title="No activity recorded yet" description="Changes and actions will show here." />}
+      {!loading && !error && data.items.length === 0 && <EmptyState title="No activity recorded yet" />}
       {data.items.length > 0 && <ol className="uv-timeline">{data.items.map((row) => {
         const actor = row.actorId ? store.user(row.actorId)?.name || 'Unknown user' : 'System'
         const self = row.entityType !== 'user'

@@ -53,7 +53,6 @@ export function AgencyDialog({ agency, onClose, onSaved }: { agency?: ReferenceA
 
   return <Dialog open onClose={close} width="lg" scroll="inside"
     title={creating ? 'New agency' : 'Edit agency'}
-    description="An agency that refers candidates to you."
     icon={<span className="cs-dlg-chip"><Users size={22} strokeWidth={1.9} /></span>}
     footer={<><Button variant="ghost" disabled={saving} onClick={close}>Cancel</Button><Button variant="primary" type="submit" form="agency-form" disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button></>}>
     <DialogMark />

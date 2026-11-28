@@ -27,7 +27,7 @@ export default function StaffDetailPage() {
 
   return <div className="staff-directory-workspace staff-detail-workspace">
     <Link to={back} className="staff-back-link"><ArrowLeft size={16} />Back to recruiter directory</Link>
-    <PageHeader title={employee?.name ?? 'Employee details'} description="The work they have now, whether they get new candidates, and the work they finished." actions={<>{canSeeAttendance && <Link className="staff-link-button" to={attendance}><CalendarDays size={16} />Attendance</Link>}<Button disabled={loading || refreshing} icon={<RefreshCw size={16} className={loading || refreshing ? 'animate-spin' : ''} />} onClick={refresh}>{loading || refreshing ? 'Refreshing…' : 'Refresh'}</Button></>} />
+    <PageHeader title={employee?.name ?? 'Employee details'} actions={<>{canSeeAttendance && <Link className="staff-link-button" to={attendance}><CalendarDays size={16} />Attendance</Link>}<Button disabled={loading || refreshing} icon={<RefreshCw size={16} className={loading || refreshing ? 'animate-spin' : ''} />} onClick={refresh}>{loading || refreshing ? 'Refreshing…' : 'Refresh'}</Button></>} />
     <DirectoryFeedback loading={loading && !view} error={error} retry={refresh} stale={!!view} />
     {result && !employee && <Panel flush><EmptyState title="Employee not found" description="We cannot find this employee in your list. Go back to the recruiter directory and pick someone else." action={<Link className="staff-link-button" to={back}>Back to recruiter directory</Link>} /></Panel>}
     {employee && view && <>
@@ -36,7 +36,7 @@ export default function StaffDetailPage() {
         <div className="staff-profile-contact"><span className="staff-profile-label">Contact</span><a href={`mailto:${employee.email}`}><Mail size={15} />{employee.email}</a>{employee.phone && <a href={`tel:${employee.phone}`}><Phone size={15} />{employee.phone}</a>}</div>
         <div className="staff-profile-availability"><span className="staff-profile-label">New candidates</span><AvailabilityBadge employee={employee} />{employee.availability.status === 'paused' && <small>You can still give them candidates by hand.</small>}</div>
       </Panel>
-      <div className="staff-section-title"><div><h2>Current workload</h2><p>The work they have right now. It does not depend on the dates below.</p></div><DirectoryUpdated generatedAt={view.generatedAt} timezone={view.timezone} /></div>
+      <div className="staff-section-title"><div><h2>Current workload</h2></div><DirectoryUpdated generatedAt={view.generatedAt} timezone={view.timezone} /></div>
       <SummaryCards items={[
         { label: 'Assigned candidates', value: <Link to={candidateLink(employee.id)} aria-label={`View ${employee.assignedCandidates} assigned candidates`}>{employee.assignedCandidates}<ArrowUpRight size={18} /></Link>, detail: 'Candidates they look after', icon: Users },
         { label: 'Initial calls pending', value: <Link to={taskLink(employee.id, 'initial')} aria-label={`View ${employee.initialCallsPending} initial calls pending`}>{employee.initialCallsPending}<ArrowUpRight size={18} /></Link>, detail: 'Waiting for the first call', icon: Phone },

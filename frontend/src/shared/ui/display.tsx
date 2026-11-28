@@ -71,7 +71,6 @@ export function PageHeader({
     <header className="workspace-page-header mb-5">
       <div className="workspace-page-header-row flex flex-wrap items-end justify-between gap-3">
         <div className="workspace-heading-copy min-w-0">
-          {eyebrow && <p className="workspace-eyebrow">{eyebrow}</p>}
           <h1 className="text-h1 font-semibold text-ink">{title}</h1>
         </div>
         {actions && <div className="workspace-header-actions flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}

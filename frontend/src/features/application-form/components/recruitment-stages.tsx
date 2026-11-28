@@ -3,9 +3,8 @@ import { cn } from '@/shared/lib/cn'
 import { TOTAL_STAGES } from '@/shared/workflow/stages'
 import { Select } from '@/shared/ui/primitives'
 import { formatFormDate, STAGE_NAMES } from '../form-model'
-import { PROCESS_EMPTY_LINE, stageRows, stagesDoneText } from '../process-stages'
+import { stageRows, stagesDoneText } from '../process-stages'
 import { prescreenRows, type PrescreenState } from '../prescreening'
-import { closedFootnote } from '@/features/workflow/reopen-application'
 import type { ApplicationFormData } from '../types'
 
 type StageForm = Pick<ApplicationFormData, 'tracking' | 'application' | 'documents' | 'deployment'>
@@ -44,9 +43,8 @@ export function RecruitmentStages({ form, canOpen, onOpen, selectedStage, prescr
         <div><Route aria-hidden="true" /><h3 id="af-process-title">Recruitment stages</h3></div>
         {form.application && <span className="af-stage-total">{stagesDoneText(rows)}</span>}
       </div>
-      <p className="af-stage-instruction">Choose a stage to view its feedback.</p>
       <div className="af-stage-mobile-picker">
-        <label htmlFor="af-stage-picker">Stage and feedback</label>
+        <label htmlFor="af-stage-picker">Stage</label>
         <Select id="af-stage-picker" aria-label="Choose recruitment stage" value={String(current)} disabled={!form.application || !canOpen} onChange={(event) => onOpen(Number(event.target.value))}>
           {rows.map((row) => <option key={row.stage} value={row.stage} disabled={!row.openable}>{row.stage}. {row.name}{row.key === 'current' ? ' · In progress' : row.key === 'done' ? ' · Completed' : row.key === 'failed' ? ' · Closed' : ''}</option>)}
         </Select>
@@ -66,7 +64,6 @@ export function RecruitmentStages({ form, canOpen, onOpen, selectedStage, prescr
           </li>
         ))}
       </ol>
-      <p className="af-stage-footnote">{form.application ? closedFootnote(form.application.status) ?? 'Documents are tracked separately and do not block stage changes.' : PROCESS_EMPTY_LINE}</p>
     </section>
   )
 }

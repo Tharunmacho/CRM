@@ -41,10 +41,10 @@ export function CandidateAssignmentHistory({ candidateId }: { candidateId: strin
   return <>
     <Button size="sm" className="ml-auto" icon={<History size={16} />} onClick={() => setOpen(true)}>History</Button>
     <Dialog open={open} onClose={() => setOpen(false)} title="Recruiter history"
-      description="Each time the recruiter changed: who changed it, and why. Older changes may not be listed.">
+     >
       {error && <p role="alert" className="mb-4 text-sm text-stamp-700">{error} <button className="underline" onClick={() => page?.nextBefore ? void more() : setRevision((value) => value + 1)}>Try again</button></p>}
       {!page && loading && <p role="status" className="text-sm text-ink-500">Loading history…</p>}
-      {page?.items.length === 0 && <EmptyState title="The recruiter has not changed" description="Future changes, including cover when a recruiter is absent, will show up here." />}
+      {page?.items.length === 0 && <EmptyState title="The recruiter has not changed" />}
       <ol className="space-y-4">{page?.items.map((entry) => <li key={entry.id} className="rounded-xl border border-rule p-4">
         <p className="text-sm font-medium text-ink">{entry.fromName} → {entry.toName}</p>
         <p className="mt-2 whitespace-pre-wrap text-sm text-ink-600">{entry.reason || 'No reason given'}</p>

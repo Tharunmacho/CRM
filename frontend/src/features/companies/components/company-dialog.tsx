@@ -72,7 +72,6 @@ export function CompanyDialog({ company, clientId, onClose }: { company?: Compan
   }
   const latest = versions[0] ?? (company?.agreement ? { ...company.agreement, sizeKb: 0 } : null)
   return <Dialog open onClose={close} width="lg" scroll="inside" title={company ? 'Edit company' : savedId ? 'Finish uploading the agreement' : 'New company'}
-    description="Each company belongs to a client. Its agreement and orders stay together."
     footer={<><Button variant="ghost" disabled={saving} onClick={close}>{savedId && error ? 'Close and finish later' : 'Cancel'}</Button><Button type="submit" form="company-form" variant="primary" disabled={saving}>{saving ? 'Saving…' : 'Save company'}</Button></>}>
     <DialogMark />
     {error && <p role="alert" className="client-form-error">{error}</p>}

@@ -192,7 +192,7 @@ function TaskList() {
   const onTimeRate = closed.length ? Math.round((onTime / closed.length) * 100) : null
 
   if (!taskReadReady || (historyDay && (historyLoading || historyError))) return <div className="tk">
-    <PageHeader title="Tasks" description="Each stage a candidate reaches becomes a task with a 48-hour limit." />
+    <PageHeader title="Tasks" />
     <section className="tk-panel tk-state" aria-busy={!taskReadError && !historyError}>
       {taskReadError || historyError ? <>
         <TriangleAlert size={22} aria-hidden="true" />
@@ -234,7 +234,6 @@ function TaskList() {
     <div className="tk">
       <PageHeader
         title="Tasks"
-        description="Each time a candidate moves to a new stage, a task is created with a 48-hour limit. The task closes when that stage is finished. Add one remark a day to every open task."
         actions={<>
           <Button variant="primary" disabled={!nextUp} onClick={() => nextUp && openTask(nextUp)} title={nextUp ? `Open the task closest to its deadline: ${nextName}` : 'No open tasks'}>
             <Sparkles size={15} aria-hidden="true" />Open next task<ArrowRight size={15} aria-hidden="true" />
@@ -275,7 +274,6 @@ function TaskList() {
         <div className="tk-panel-head">
           <div className="tk-panel-title">
             <h2>{view.title}</h2>
-            <p>{view.description}</p>
           </div>
           <SearchInput value={query} onChange={setQuery} placeholder="Search candidate, order or task" className="tk-search" />
         </div>

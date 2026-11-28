@@ -20,7 +20,6 @@ export interface PrescreenInfo {
 
 export const STAGE_2_LOCK_TEXT = 'Client and job are required from stage 2'
 export const NEED_CLIENT_AND_JOB = 'Choose the client and the job: they are required from stage 2.'
-export const NEED_FEEDBACK = 'Write feedback before moving the candidate to the next stage.'
 
 /** The chip beside the stage title. */
 export function prescreenChip(state: PrescreenState): { label: string; tone: 'idle' | 'busy' | 'bad' } {
@@ -35,13 +34,12 @@ export function prescreenLine(state: PrescreenState): string {
   if (state === 'declined') return 'The candidate said no. They are on the Declined tab of the Tasks page. Record a Yes call to bring them back.'
   if (state === 'rejected') return 'The candidate was rejected. They are on the Rejected tab of the Tasks page. Record a Yes call to bring them back.'
   if (state === 'in_progress') return 'Feedback is saved. Decline, reject, or move the candidate to the next stage when you are ready.'
-  return 'Prescreening needs no client or job. Write your feedback, then decline, reject, or move the candidate to the next stage.'
+  return 'Prescreening needs no client or job. Decline, reject, or move the candidate to the next stage.'
 }
 
 /** Why "Move to next stage" cannot be pressed yet, or an empty string when it can. Client and job come first: they are the stage 2 rule. */
 export function forwardBlocker(input: { clientId: string; orderId: string; feedback: string }): string {
   if (!input.clientId || !input.orderId) return STAGE_2_LOCK_TEXT
-  if (!input.feedback.trim()) return NEED_FEEDBACK
   return ''
 }
 

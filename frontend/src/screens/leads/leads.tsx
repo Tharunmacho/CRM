@@ -256,7 +256,6 @@ export default function LeadsPage() {
     <div className="db ld">
       <PageHeader
         title="Lead sheet"
-        description="People who responded to your ads. Call them, collect their updated resume, and turn them into candidates."
         actions={(
           <>
 

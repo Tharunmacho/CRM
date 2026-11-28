@@ -85,7 +85,6 @@ export function MapToOrderDialog({
       onClose={close}
       width="lg"
       title={`Match ${cand.name} to an order`}
-      description="Matching starts stage 1 (prescreening) and creates the prescreening task."
       footer={
         <>
           <Button variant="ghost" disabled={saving} onClick={close}>

@@ -19,7 +19,7 @@ export function ChartCard({ title, hint, legend, summary, empty, emptyHint, insi
   title: string; hint?: string; legend?: Series[]; summary: string; empty?: boolean; emptyHint?: string; insight?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string
 }) {
   return <figure className={`rv-card rv-chart ${className}`} aria-label={`${title}. ${summary}`}>
-    <figcaption><span className="rv-cap"><strong>{title}</strong>{hint && <span>{hint}</span>}</span>{actions}</figcaption>
+    <figcaption><span className="rv-cap"><strong>{title}</strong></span>{actions}</figcaption>
     {legend && <Legend items={legend} />}
     {empty
       ? <div className="rv-chart-empty" role="status"><strong>Nothing to show yet</strong><p>{emptyHint ?? 'No data for this period. Choose a longer date range or clear a filter.'}</p></div>

@@ -68,7 +68,6 @@ export function ConnectMailbox({ address = '', provider: initial, providers = []
   }
   const ready = !!email.trim() && !unavailable && (oauth || (!!password && (provider === 'zoho' || (!!imapHost.trim() && !!smtpHost.trim()))))
   return <Dialog open onClose={() => { if (!busy) finish() }} title={reconnecting ? 'Reconnect mailbox' : 'Connect a mailbox'} width="lg" scroll="inside" appearance="clean"
-    description="Connect as many mailboxes as you need. Mail from every account appears together in one inbox."
     footer={<><Button className="flex-1 sm:flex-none" disabled={busy} onClick={finish}>Cancel</Button><Button className="flex-1 sm:flex-none" icon={<Mail size={17} />} variant="primary" type="submit" form="connect-mailbox" disabled={busy || !ready}>{busy ? (oauth ? 'Opening sign-in…' : 'Connecting…') : oauth ? `Continue with ${PROVIDER_LABEL[provider]}` : 'Connect mailbox'}</Button></>}>
     <form id="connect-mailbox" onSubmit={(event) => { event.preventDefault(); void submit() }} className="ui-fs-stack">
       {error && <div ref={errorRef} role="alert" tabIndex={-1} className="rounded-control border border-stamp-100 bg-white p-4 text-sm text-stamp-700"><p className="mb-1 font-semibold">{(error.includes('MAIL_TOKEN_ENCRYPTION_KEY') || /not set up on this server/i.test(error)) ? 'Setup needed on the server' : 'We could not connect the mailbox'}</p><p className="break-words">{error}</p>{signInHint(error, provider) && <p className="mt-2 text-xs text-ink-500">{signInHint(error, provider)}</p>}</div>}
@@ -106,7 +105,7 @@ export function ConnectMailbox({ address = '', provider: initial, providers = []
           <Field className="min-w-0" label="Port"><Select value={smtpPort} onChange={(event) => setSmtpPort(event.target.value)}><option value="587">587 · STARTTLS</option><option value="465">465 · SSL</option></Select></Field></div>
         <p className="mt-3 text-xs text-ink-500">Connections are always encrypted. Turn on IMAP access in your mail provider's settings first.</p>
       </fieldset>}
-      <div className="rounded-control border border-rule-soft bg-white p-4"><Switch checked={auto} disabled={busy} onChange={setAuto} label="Create candidates from new attachments" description="New resumes are read and sent for review. You can change this for each mailbox at any time." /></div>
+      <div className="rounded-control border border-rule-soft bg-white p-4"><Switch checked={auto} disabled={busy} onChange={setAuto} label="Create candidates from new attachments" /></div>
     </form>
   </Dialog>
 }

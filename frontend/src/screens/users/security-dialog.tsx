@@ -38,7 +38,6 @@ export function SecurityDialog({ user, kind, onClose }: { user: User; kind: 'pas
     <PasswordOnce name={user.name} email={user.email} password={done} />
   </Dialog>
   return <Dialog open onClose={close} width="md" title={kind === 'password' ? 'Reset password' : 'Sign out everywhere'}
-    description="Account security"
     footer={<><Button disabled={busy} variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" type="submit" form="security-form" disabled={busy}>{busy ? 'Saving…' : kind === 'password' ? 'Reset password' : 'Sign out everywhere'}</Button></>}>
     <form id="security-form" noValidate className="ui-form-stack" onSubmit={(event) => { event.preventDefault(); void submit() }}>
       <div className="uv-target"><UserAvatar name={user.name} /><div><p>{user.name}</p><span>{user.email}</span></div></div>

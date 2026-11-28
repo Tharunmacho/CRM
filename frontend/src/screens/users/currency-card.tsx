@@ -62,11 +62,10 @@ export function CurrencyCard({ editable, defaultOrder, defaultAdvance }: { edita
   ]
   return <Panel flush className="uv-panel as-currencies tb-blue ops-fit ops-currencies">
     <PanelHead id="as-currencies-title" title="Currencies"
-      description="The currencies offered on orders and for the advance payment. Switch one off to stop offering it; orders and payments that already use it keep it."
       actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} disabled={!editable} onClick={() => { setError(''); setEditing('new') }}>Add currency</Button>} />
     {error && <p role="alert" className="uv-error as-inline">{error}</p>}
     <DataTable compact stackBelow={1024} pageSize={50} rows={sorted} columns={columns} rowKey={(c) => c.code} rowClassName={(c) => c.active ? undefined : 'uv-row-off'}
-      empty={<EmptyState title="No currencies yet" description="Add the currencies your orders are priced in." />} />
+      empty={<EmptyState title="No currencies yet" />} />
     {editing && <CurrencyDialog key={editing === 'new' ? 'new' : editing.code} item={editing === 'new' ? null : editing} existing={rows}
       onClose={() => setEditing(null)} onSaved={afterChange} />}
     {deleting && <DeleteDialog key={deleting.code} item={deleting} onClose={() => setDeleting(null)} onDeleted={afterChange} />}

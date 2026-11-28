@@ -10,7 +10,8 @@ from test_database_naming import schema_database  # noqa: F401
 
 
 @pytest.mark.parametrize("feedback", [None, "", "  \n\t  "])
-def test_feedback_is_required_even_when_stage_details_are_present(workflow, feedback):
+@pytest.mark.parametrize("use_draft", [True, False])
+def test_feedback_is_optional_when_stage_details_are_present(workflow, feedback, use_draft):
     env = workflow
     app_id = mapped(env)
     details = {"result": "passed", "remarks": "Legacy detail is not transition feedback"}
@@ -19,14 +20,16 @@ def test_feedback_is_required_even_when_stage_details_are_present(workflow, feed
     saved = save(env, app_id, details)
     assert saved.status_code == 200, saved.text
     lock = saved.json()["lockVersion"]
-    # Both completing a saved draft and submitting a final payload enforce the same rule.
-    for body in ({"lock_version": lock}, {"lock_version": lock, "data": details}):
-        response = env.client.post(f"/api/applications/{app_id}/complete", json=body)
-        assert response.status_code == 422 and response.json()["detail"]["missing"] == ["Feedback"]
+    body = {"lock_version": lock}
+    if not use_draft:
+        body["data"] = details
+    response = env.client.post(f"/api/applications/{app_id}/complete", json=body)
+    assert response.status_code == 200, response.text
     with env.sessions() as db:
         app = db.get(Application, app_id)
-        assert app.current_stage == 1 and app.lock_version == lock
-        assert not db.scalar(select(ApplicationStage.id).where(ApplicationStage.application_id == app_id))
+        assert app.current_stage == 2 and app.lock_version == lock + 1
+        record = db.scalar(select(ApplicationStage).where(ApplicationStage.application_id == app_id))
+        assert not (record.data.get("feedback") or "").strip()
         assert db.scalar(select(func.count()).select_from(Task).where(Task.application_id == app_id, Task.completed_at.is_(None))) == 1
 
 
@@ -53,9 +56,6 @@ def test_first_twelve_stages_accept_feedback_only_but_deployment_requires_ticket
         # A duplicate submit cannot complete the next stage using the same feedback.
         repeated = env.client.post(f"/api/applications/{app_id}/complete", json=body)
         assert repeated.status_code == 409
-        if stage < 13:
-            next_without_feedback = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": version(env, app_id)})
-            assert next_without_feedback.status_code == 422
     # A final-stage note is not evidence of travel.  The actual ticket and
     # travel date are required before this candidate can become deployed.
     blocked = env.client.post(f"/api/applications/{app_id}/complete", json={
@@ -95,12 +95,11 @@ def test_saving_feedback_never_moves_stage_and_reopening_preserves_history_witho
     })
     assert reopened.status_code == 200, reopened.text
     assert "feedback" not in env.client.get(f"/api/applications/{app_id}/draft").json()["draft"]
-    refused = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": version(env, app_id)})
-    assert refused.status_code == 422
-    complete(env, app_id, {"feedback": "Candidate reconfirmed after correction"})
+    finished = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": version(env, app_id)})
+    assert finished.status_code == 200, finished.text
     with env.sessions() as db:
         records = list(db.scalars(select(ApplicationStage).where(ApplicationStage.application_id == app_id).order_by(ApplicationStage.attempt)))
-        assert [row.data["feedback"] for row in records] == ["Original stage feedback", "Candidate reconfirmed after correction"]
+        assert [row.data.get("feedback") for row in records] == ["Original stage feedback", None]
         assert records[0].reopened_reason == "Need to confirm the candidate's new details"
         assert records[1].reopened_reason is None
 

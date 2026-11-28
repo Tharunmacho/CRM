@@ -104,15 +104,16 @@ def test_rejecting_without_a_job_puts_the_candidate_on_rejected_at_once(pre):
     assert "u100" in tabs(pre)["current"] and tabs(pre)["rejected"] == []
 
 
-def test_forwarding_needs_the_client_job_and_feedback_and_names_the_reason(pre):
+def test_forwarding_needs_the_client_job_but_feedback_is_optional(pre):
     owned_candidates(pre, 1)
     as_user(pre, "asha")
     no_job = act(pre, "u100", "forward", feedback="Passed prescreening.")
     assert no_job.status_code == 422 and "required from stage 2" in no_job.json()["detail"]
     assert act(pre, "u100", "forward", orderId="", feedback="Passed prescreening.").status_code == 422
+    assert placements(pre, "u100") == [] and "u100" in tabs(pre)["current"]
     no_feedback = act(pre, "u100", "forward", orderId="order")
-    assert no_feedback.status_code == 422 and "feedback" in no_feedback.json()["detail"].lower()
-    assert placements(pre, "u100") == [] and "u100" in tabs(pre)["current"]   # a refused forward changes nothing
+    assert no_feedback.status_code == 200, no_feedback.text
+    assert no_feedback.json()["currentStage"] == 2
 
 
 def test_forwarding_completes_stage_one_and_leaves_the_placement_on_stage_two_with_its_task(pre):

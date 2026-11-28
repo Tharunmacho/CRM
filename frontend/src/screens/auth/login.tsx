@@ -95,7 +95,6 @@ function PlacementJourney() {
   return (
     <div className="lg-journey" aria-hidden="true">
       <div className="lg-j-head">
-        <span className="lg-j-tag"><Workflow size={14} />How a placement moves</span>
         <span className="lg-j-count">{arrived ? 'Deployed' : `Stage ${shown} of ${total}`}</span>
       </div>
 
@@ -138,7 +137,6 @@ function PlacementJourney() {
       <div className="lg-j-now">
         <span className="lg-j-token"><Plane size={16} /></span>
         <div className="lg-j-now-text">
-          <small>{arrived ? 'Example journey complete' : 'Example journey'}</small>
           <strong key={arrived ? 'done' : current?.key} className="lg-j-title">{arrived ? 'First day abroad' : current?.title}</strong>
         </div>
         <ol className="lg-tracker">
@@ -206,28 +204,16 @@ export default function LoginPage() {
       </header>
 
       <section className="lg-story" aria-label={`${agency.name} placement desk`}>
-        <p className="lg-kicker"><span className="lg-kicker-dot" aria-hidden="true" />Overseas placement desk</p>
-
-        <div className="lg-story-copy">
-          <h1>Get every candidate <em>placed abroad,</em> one clear step at a time.</h1>
-          <p>Follow each person from the first call to the first day at work, with your clients, orders and documents in one place.</p>
-        </div>
-
         <PlacementJourney />
         <ol className="lg-sr">{STAGES.map((stage) => <li key={stage.key}>{stage.title}</li>)}</ol>
 
-        <ul className="lg-values">
-          <li><Workflow size={16} aria-hidden="true" />{STAGES.length} tracked stages</li>
-          <li><Briefcase size={16} aria-hidden="true" />Clients and orders together</li>
-          <li><Globe2 size={16} aria-hidden="true" />Placements across the Gulf</li>
-        </ul>
+
       </section>
 
       <section className="lg-access" aria-label="Sign in to your workspace">
         <form className="lg-card" onSubmit={submit} noValidate>
           <header className="lg-heading">
-            <h2>Sign in</h2>
-            <p>Welcome back. Pick up your candidates, orders and tasks where you left them.</p>
+            <h1 className="text-2xl font-semibold">Sign in</h1>
           </header>
 
           {loadError && !error && (

@@ -13,7 +13,7 @@ export function SectionCard({ icon: Icon, title, subtitle, action, id, className
     <section id={id} className={cn('afp-card', className)}>
       <header className="afp-card-head">
         <span className="afp-card-icon" aria-hidden="true"><Icon /></span>
-        <div className="afp-card-title"><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>
+        <div className="afp-card-title"><h2>{title}</h2></div>
         {action && <div className="afp-card-action">{action}</div>}
       </header>
       <div className="afp-card-body">{children}</div>

@@ -127,7 +127,6 @@ function FileTable({ plan, name, state, busy, open, actions }: { plan: ImportPla
   return (
     <div className="ic-files-block">
       <h4 className="ic-files-title">Files</h4>
-      <p className="ic-files-caption">{FILES_CAPTION}</p>
       <div className="ic-files-wrap">
         <table className="ic-files">
           <thead><tr><th>File</th><th>Treated as</th><th>Belongs to</th><th>Will be saved as</th></tr></thead>

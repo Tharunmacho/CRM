@@ -24,7 +24,7 @@ function BoardHead({ title, hint, selected, onSelect, children, solo }: {
 }) {
   return (
     <div className="dw-panel-head dwb-head">
-      <div><h2><Users size={16} aria-hidden="true" /> {title}</h2><p>{hint}</p></div>
+      <div><h2><Users size={16} aria-hidden="true" /> {title}</h2></div>
       <div className="dwb-head-tools">
         {children}
         {!solo && <button type="button" className={cn('tk-chip', selected === 'all' && 'is-active')} aria-pressed={selected === 'all'} onClick={() => onSelect('all')}>All recruiters</button>}

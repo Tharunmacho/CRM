@@ -90,7 +90,6 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
       open
       onClose={() => { if (!busy) onClose() }}
       title={item ? 'Edit to-do' : 'Add a to-do'}
-      description="Only you see this item. You get a reminder in the notification bell when it is due."
       footer={
         <>
           <Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button>

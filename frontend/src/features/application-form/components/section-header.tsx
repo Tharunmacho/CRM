@@ -20,7 +20,6 @@ export function SectionHeader({ icon, title, hint, chip, id, compact }: {
       <span className="af-sh-tile" aria-hidden="true">{icon}</span>
       <div className="af-sh-title">
         <h2 id={id}>{title}</h2>
-        {hint && <p>{hint}</p>}
       </div>
       {chip && <div className="af-sh-chip">{chip}</div>}
     </header>

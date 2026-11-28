@@ -63,7 +63,7 @@ export function AttachmentPreview({ file, onClose }: { file: PreviewFile; onClos
   const type = kind(file.name)
   const office = useOfficePreview(file.url, type === 'office')
   const cannotShow = (reason: string) => <div className="ix-preview-none"><FileTile name={file.name} size="lg" /><p>{reason}</p><span>Download it to open it on your computer.</span></div>
-  return <Dialog open onClose={onClose} title={file.name} description="Preview of the email attachment" width="xl" scroll="inside"
+  return <Dialog open onClose={onClose} title={file.name} width="xl" scroll="inside"
     footer={<><Button onClick={onClose}>Close</Button><a href={download}><Button variant="primary" icon={<Download size={16} />}>Download</Button></a></>}>
     <div className="ix-preview">
       {type === 'pdf' && <iframe title={file.name} src={href} className="ix-preview-frame" />}

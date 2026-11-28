@@ -26,7 +26,7 @@ export function InvoiceSettingsPanel({ onSaved, onClose }: { onSaved: () => void
     finally { setBusy(false) }
   }
   return <section className="af-invoice-settings" aria-label="Billing settings">
-    <header><div><h4>Billing settings</h4><p>These details appear on new invoices. Issued invoices keep their original details.</p></div><Button variant="ghost" size="sm" disabled={busy} onClick={onClose} icon={<X />}>Close</Button></header>
+    <header><div><h4>Billing settings</h4></div><Button variant="ghost" size="sm" disabled={busy} onClick={onClose} icon={<X />}>Close</Button></header>
     {error && <p className="af-note is-error" role="alert">{error}{!state && <Button size="sm" onClick={() => setRetry((value) => value + 1)}>Retry</Button>}</p>}
     {!draft ? !error && <p role="status">Loading billing settings…</p> : <>
       {state?.missing.length ? <p className="af-invoice-hint">Complete: {state.missing.map(billingFieldLabel).join(', ')}.</p> : null}

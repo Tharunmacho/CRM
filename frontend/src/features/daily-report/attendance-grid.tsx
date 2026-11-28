@@ -88,7 +88,7 @@ export function DailyRecord({ employee, person, zone, today }: { employee: Emplo
   return <div className="am-rec">
     <dl className="am-facts">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd className="tnum">{value}</dd></div>)}</dl>
     {!rows.length
-      ? <div className="rm-state" role="status"><p className="rm-state-title">No records in this month</p><p>Records start with the first check-in, leave or fix.</p></div>
+      ? <div className="rm-state" role="status"><p className="rm-state-title">No records in this month</p></div>
       : <div className="rm-scroll am-rec-scroll" role="region" aria-label={`Daily record of ${employee.name}`} tabIndex={0}><table className="rm-table am-rec-table" aria-label={`Daily record of ${employee.name}`}>
         <thead><tr>
           <th scope="col" className="is-left">Date</th><th scope="col">Day</th><th scope="col">Status</th><th scope="col">Shift</th>

@@ -123,9 +123,7 @@ export function RemarkPanel({ task, onReassign, onReset }: { task: Task; onReass
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="tk-remarks-note">No remarks yet. Each remark shows when it was added and cannot be changed or deleted.</p>
-        )}
+        ) : null}
       </div>
     </div>
   )

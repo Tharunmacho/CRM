@@ -236,7 +236,6 @@ export default function MappedCandidatesPage() {
     <div className="db mc">
       <PageHeader
         title="Matched candidates"
-        description="Candidates who are matched to an order. Open one to work on its 13 stages, from prescreening to deployment."
       />
 
       <KpiCards

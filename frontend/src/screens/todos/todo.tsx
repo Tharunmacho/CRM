@@ -74,7 +74,7 @@ export default function TodoPage() {
   const openDialog = (item: TodoItem | null = null, title = '') => setDialog({ item, title })
 
   if (todoRead.loading || todoRead.error) return <div className="todo-screen td">
-    <PageHeader title="To-do List" description="Plan your day and keep track of your follow-ups." />
+    <PageHeader title="To-do List" />
     {todoRead.error ? (
       <Panel className="td-state"><div className="td-state-body">
         <AlertCircle size={20} aria-hidden="true" />
@@ -96,7 +96,6 @@ export default function TodoPage() {
     <div className="todo-screen td">
       <PageHeader
         title="To-do List"
-        description="Plan your day and keep track of your follow-ups."
         actions={
           <>
             <Button icon={<RefreshCw />} onClick={todoRead.refresh}>Refresh list</Button>

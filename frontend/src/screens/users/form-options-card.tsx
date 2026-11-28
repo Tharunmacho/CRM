@@ -61,7 +61,6 @@ export function FormOptionsCard({ editable }: { editable: boolean }) {
 
   return <Panel flush className="uv-panel as-categories as-options">
     <PanelHead id="as-options-title" title="Form options"
-      description="The choices people pick from on the candidate form: interest levels, service charges, marital status, job duration, best time to contact, source and more. Changes show on every open form straight away."
       actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} disabled={!canEdit || !meta || meta.fixedValues} onClick={() => { setError(''); setEditing('new') }}>Add option</Button>} />
     {data && <div className="as-opt-tabs" role="tablist" aria-label="Lists">
       {data.order.map((key) => <button key={key} type="button" role="tab" aria-selected={key === category} className={key === category ? 'is-on' : ''} onClick={() => { setCategory(key); setError('') }}>{data.meta[key]?.label ?? key}</button>)}
@@ -71,7 +70,7 @@ export function FormOptionsCard({ editable }: { editable: boolean }) {
     {meta && meta.allowCustom && <p role="status" className="as-notice as-inline as-opt-note">This list is a set of suggestions. Documents and people can still enter their own wording.</p>}
     {error && <p role="alert" className="uv-error as-inline">{error}</p>}
     {!data && !error && <p className="as-inline uv-note">Loading the lists…</p>}
-    {data && rows.length === 0 && <EmptyState title="Nothing in this list yet" description="Add the first option." />}
+    {data && rows.length === 0 && <EmptyState title="Nothing in this list yet" />}
     {rows.length > 0 && <ul className="as-cats" aria-labelledby="as-options-title">
       {rows.map((row, index) => {
         const tone = toneStyle(row.tone)

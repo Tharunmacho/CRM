@@ -90,7 +90,7 @@ export function WeeklyOff({ settings, timezone, busy, disabled, onChange }: { se
   }
   return <Panel flush className="att-card">
     <CardHead title="Choose your weekly off" meta="You can plan this week and the next three. To take Friday off, choose it before the Thursday deadline. Sunday then becomes a working day." />
-    {!settings.weeklyOff.length ? <EmptyState title="No weeks to choose" description="Weeks you can choose will show here when planning opens." /> : <ul className="att-weeks">{settings.weeklyOff.map((week) => {
+    {!settings.weeklyOff.length ? <EmptyState title="No weeks to choose" /> : <ul className="att-weeks">{settings.weeklyOff.map((week) => {
       const choosable = ['friday', 'sunday'].includes(week.day)
       return <li key={week.weekStart}>
         <div><strong>Week of {range(week.weekStart)}</strong><p className="att-help">{week.approvedRequestId ? 'Approved weekly off swap' : week.canChange ? `Change by ${stamp(week.deadline, timezone)}` : 'This week can no longer be changed'}</p></div>
@@ -115,6 +115,6 @@ export function CorrectionHistory({ adjustments, timezone }: { adjustments: Atte
   ]
   return <Panel flush className="att-card">
     <CardHead title="Changes made to attendance" meta="Every change is saved with who made it, when, and why." />
-    {!adjustments.length ? <EmptyState title="No changes this month" description="Changes to attendance will show here." /> : <DataTable compact stackBelow={1280} rows={adjustments} columns={columns} rowKey={(row) => row.id} pageSize={50} />}
+    {!adjustments.length ? <EmptyState title="No changes this month" /> : <DataTable compact stackBelow={1280} rows={adjustments} columns={columns} rowKey={(row) => row.id} pageSize={50} />}
   </Panel>
 }

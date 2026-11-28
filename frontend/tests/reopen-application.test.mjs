@@ -82,7 +82,7 @@ test('the Tasks row menu opens the monitor without a reopen action', async () =>
   assert.doesNotMatch(table, /\.\.\.\(row\.applicationId && closed && work \? \[\{ label: 'Reopen application', icon: RotateCcw, onSelect: \(\) => onOpen\(row\) \}\] : \[\]\)/)
 })
 
-test('the application form footnote uses the closed wording', async () => {
+test('the stage picker has no explanatory footnote', async () => {
   const stages = await code('../src/features/application-form/components/recruitment-stages.tsx')
-  assert.match(stages, /closedFootnote\(form\.application\.status\) \?\? 'Documents are tracked separately/)
+  assert.doesNotMatch(stages, /af-stage-footnote/)
 })

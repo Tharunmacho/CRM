@@ -90,7 +90,6 @@ export function IgnoredNumbers() {
 
   return <Panel className="wa-ignore">
     <PanelHeader title="Numbers to ignore" meta={items ? `${items.length} ${items.length === 1 ? 'number' : 'numbers'}` : undefined} />
-    <p className="wa-ignore-intro">Add the numbers of staff, agents, clients or anyone who should never become a candidate. Their files are kept as Skipped (not read) and they get no automatic reply. You can still write to them yourself.</p>
     <form className="wa-ignore-form" onSubmit={(event) => void add(event)} noValidate>
       <Field label="Phone number" hint="Add the country code for a number outside your own country, for example +44 7700 900123." error={formError}>
         <Input type="tel" inputMode="tel" autoComplete="off" maxLength={40} value={number} placeholder="+91 98765 43210"

@@ -27,7 +27,6 @@ from app.domain.stages import stage_by_no, validate_payload
 from app.services.candidate_call import NEGATIVE_ANSWERS, apply_call
 
 REQUIRED_FROM_STAGE_2 = "Choose the client and the job: they are required from stage 2."
-FEEDBACK_REQUIRED = "Write feedback before moving the candidate to the next stage."
 ON_A_JOB = "This candidate is already on a job. Open the job's stages to continue."
 SAVE_AUDIT = "Saved prescreening feedback"
 FORWARD_AUDIT = "Forwarded from candidate prescreening"
@@ -105,8 +104,6 @@ def forward(db, user: User, candidate_id: str, order_id: str | None, feedback: s
     if not (order_id or "").strip():
         raise HTTPException(422, REQUIRED_FROM_STAGE_2)
     text = (feedback or "").strip()
-    if not text:
-        raise HTTPException(422, FEEDBACK_REQUIRED)
     # A repeated click (or a retried request) of an action that already succeeded answers with what it did, and writes nothing.
     again = db.scalars(select(Application).where(
         Application.candidate_id == candidate_id, Application.order_id == order_id,
@@ -124,7 +121,7 @@ def forward(db, user: User, candidate_id: str, order_id: str | None, feedback: s
 
     # Stage 1 is COMPLETED with the feedback, in the shape the stage window writes, so the history shows "Prescreening: Passed".
     definition = stage_by_no(1)
-    data = validate_payload(1, {"feedback": text, "result": "passed"})
+    data = validate_payload(1, {"feedback": text or None, "result": "passed"})
     evaluation = definition.evaluate(data, None)
     db.add(ApplicationStage(
         application_id=app.id, stage=1, attempt=1, data=data, outcome=evaluation.outcome, completed_by=user.id, completed_at=at,

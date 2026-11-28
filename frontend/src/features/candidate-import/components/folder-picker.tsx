@@ -84,7 +84,6 @@ export function FolderPicker({ onFiles, rootName, summary, hasFolder, noCandidat
       {hidden}
       <span className="ic-drop-icon" aria-hidden="true"><FolderUp /></span>
       <h2>Choose a folder</h2>
-      <p className="ic-drop-help">Pick the folder with your candidates' documents. We sort the files into one candidate each, and you check them before anything is saved.</p>
       <div className="ic-drop-actions">
         <Button variant="primary" icon={<FolderOpen />} onClick={() => input.current?.click()} disabled={busy}>Choose a folder</Button>
         {droppable && <span className="ic-drop-or">or drag a folder here</span>}

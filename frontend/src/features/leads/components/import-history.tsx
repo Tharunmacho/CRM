@@ -90,7 +90,7 @@ export function ImportHistory({ supervisor, canAdmin, onViewBatch, refreshKey, o
   let content
   if (loading && !data) content = <p role="status" className="ld-loading">Loading uploads…</p>
   else if (error && !data) content = <EmptyState title="We could not load the uploads" description={error} action={<Button variant="primary" onClick={() => void load()}>Try again</Button>} />
-  else if (!data || data.items.length === 0) content = <EmptyState title="No uploads yet" description="When you upload a lead sheet it is listed here, with how many leads were new, duplicates or invalid." action={onUpload ? <Button variant="primary" onClick={onUpload}>Upload leads</Button> : undefined} />
+  else if (!data || data.items.length === 0) content = <EmptyState title="No uploads yet" action={onUpload ? <Button variant="primary" onClick={onUpload}>Upload leads</Button> : undefined} />
   else content = <>
     {error && <p role="alert" className="db-alert">{error}</p>}
     {boxWidth > 0 && boxWidth < 800 ? <ul className="ld-upload-cards" aria-label="Uploads">

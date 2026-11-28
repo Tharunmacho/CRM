@@ -67,7 +67,7 @@ export function RemarkTemplatesCard({ editable }: { editable: boolean }) {
   const list = items ? sortTemplates(items) : []
   return <Panel flush className="uv-panel as-categories as-rt">
     <PanelHead id="as-rt-title" title="Remark templates"
-      description="The ready-made remarks recruiters pick in the Remarks column of the Tasks list. Switch one off to stop offering it; remarks already written with it stay. The order here is the order in the dropdown." />
+      />
     {error && <p role="alert" className="uv-error as-inline">{error}</p>}
     <form className="as-rt-add" noValidate onSubmit={(event) => void add(event)} aria-label="Add a remark template">
       <div className="as-rt-add-field">
@@ -79,7 +79,7 @@ export function RemarkTemplatesCard({ editable }: { editable: boolean }) {
     </form>
     <p className="as-rt-note" role="status" aria-live="polite">{note}</p>
     {!items ? <p className="as-inline uv-note">Loading the templates…</p>
-      : list.length === 0 ? <EmptyState title="No remark templates yet" description="Add the short remarks your recruiters use most." />
+      : list.length === 0 ? <EmptyState title="No remark templates yet" />
         : <ul className="as-cats as-rt-list" aria-labelledby="as-rt-title">
           {list.map((item, index) => <li key={item.id} className={item.active ? 'as-cat as-rt-row' : 'as-cat as-rt-row is-off'}>
             {editing?.id === item.id ? (

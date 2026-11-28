@@ -31,7 +31,6 @@ export function FillCardShell({ no, icon: Icon, title, hint, missing, counts, as
         <span className="aff-tile" aria-hidden="true"><Icon /></span>
         <div className="aff-card-title">
           <h2 id={`af-fill-title-${no}`}>{title}</h2>
-          {hint && <p>{hint}</p>}
         </div>
         <div className="aff-card-aside">
           {aside}

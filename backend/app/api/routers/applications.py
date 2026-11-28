@@ -479,8 +479,6 @@ def complete_stage(application_id: str, body: CompleteIn,
             db, app, body.data if body.data is not None else app.draft or {},
             require_bytes=app.current_stage == TOTAL_STAGES,
         )
-        if not data.get("feedback", "").strip():
-            raise HTTPException(422, {"message": "Write feedback before saving and moving this stage.", "missing": ["Feedback"]})
         definition = stage_by_no(app.current_stage)
         result = definition.evaluate(data, _stage_options(db, app.current_stage))
         if not result.can_complete:

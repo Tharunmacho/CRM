@@ -169,7 +169,6 @@ function AcknowledgementPanel({ sourceKind, channelId, channelLabel, canManage }
         </div> : <p className="text-sm text-ink-500">An administrator can preview and change this acknowledgement.</p>}
         <div className="border-t border-rule-soft pt-4">
           <h3 className="text-sm font-semibold">Recent confirmations</h3>
-          <p className="mt-1 text-xs text-ink-500">Latest 20 eligible receipt decisions. Provider acceptance is shown separately from confirmed delivery in WhatsApp conversations.</p>
           {!data.attempts.length && <p className="mt-3 text-sm text-ink-500">No confirmations yet. New successful intake appears here after acknowledgements are enabled.</p>}
           <div className="mt-3 space-y-3">{data.attempts.map((row) => <div key={row.id} className="rounded-control border border-rule-soft p-3">
             <div className="flex flex-wrap items-center justify-between gap-2"><span className="break-all text-sm font-medium">{row.recipient || 'Sender unavailable'}</span><span className="rounded-full bg-field px-2 py-1 text-xs">{LABELS[row.status]}</span></div>

@@ -460,9 +460,7 @@ function Topbar({ onMenu, menuRef, menuAlert }: { onMenu: () => void; menuRef: R
           <Menu size={20} />{menuAlert && <i className="topbar-menu-dot" aria-hidden="true" />}
         </button>
         <div className="topbar-hello">
-          <h2 className="topbar-welcome" title={`Welcome back, ${me.name}`}>
-            <span className="welcome-long">Welcome back</span><span className="welcome-short">Hi</span>, {firstName}
-          </h2>
+          <span className="topbar-welcome" title={me.name}>{firstName}</span>
           {roleText.toLowerCase() !== firstName.toLowerCase() && <p className="topbar-role">{roleText}</p>}
         </div>
       </div>

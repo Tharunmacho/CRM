@@ -334,7 +334,6 @@ export default function OrderDetailPage() {
           <EmptyState
             icon={<Users size={30} strokeWidth={1.4} />}
             title="No candidates matched yet"
-            description="Search the Data Bank and match candidates to this job. Once matched, you can work on their stages."
             action={<Button variant="primary" icon={<Link2 className="h-4 w-4" />} disabled={!canMatch} onClick={() => setMatching(true)}>Match candidates</Button>}
           />
         ) : visibleApps.length === 0 ? (

@@ -1,4 +1,4 @@
-import { ArrowRight, Lock, Save, ThumbsDown, UserX } from 'lucide-react'
+import { ArrowRight, Save, ThumbsDown, UserX } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
@@ -8,7 +8,7 @@ import { Dialog } from '@/shared/ui/overlay'
 import { Button, Field, Select, Textarea } from '@/shared/ui/primitives'
 import { jobOptionText, jobUnavailableReason } from '../form-model'
 import {
-  STAGE_2_LOCK_TEXT, forwardBlocker, jobChoices, prescreenBody, prescreenChip, prescreenFailure, prescreenLine,
+  forwardBlocker, jobChoices, prescreenBody, prescreenChip, prescreenFailure,
   type PrescreenAction, type PrescreenInfo,
 } from '../prescreening'
 import type { AssignmentClientOption } from '../types'
@@ -85,19 +85,20 @@ export function PrescreeningPanel({ candidateId, canWork, clients, onChanged, on
         <div><small>Stage 1 of 13</small><h3 id="af-prescreen-title">Prescreening</h3></div>
         <span className={cn('af-prescreen-chip', chip.tone === 'busy' && 'is-busy', chip.tone === 'bad' && 'is-bad')} role="status">{chip.label}</span>
       </div>
-      <p className="af-prescreen-line">{prescreenLine(state)}</p>
       {error && <p className="af-prescreen-error" role="alert">{error}</p>}
 
       <div className="af-prescreen-box">
-        <Field label="Feedback" hint="Saved with the candidate; it becomes the stage 1 feedback when you move on.">
+        <details open={Boolean(feedback) || undefined}>
+          <summary>{feedback ? 'Feedback' : 'Add feedback (optional)'}</summary>
+        <Field label="Feedback">
           <Textarea value={feedback} maxLength={10000} disabled={!writable || Boolean(busy)} placeholder="What did you learn from this candidate?"
             onChange={(event) => { typed.current = true; setFeedback(event.target.value) }} />
         </Field>
-        <div className="af-prescreen-actions">
           <Button icon={<Save className="h-4 w-4" />} disabled={!writable || Boolean(busy) || !feedback.trim()} onClick={() => void send('save', feedback)}>
             {busy === 'save' ? 'Saving…' : 'Save feedback'}
           </Button>
-          <span className="af-prescreen-spacer" aria-hidden="true" />
+        </details>
+        <div className="af-prescreen-actions">
           <Button icon={<UserX className="h-4 w-4" />} disabled={!writable || Boolean(busy)} onClick={() => { setReason(feedback); setClosing('decline') }}>Not interested (decline)</Button>
           <Button icon={<ThumbsDown className="h-4 w-4" />} disabled={!writable || Boolean(busy)} onClick={() => { setReason(feedback); setClosing('reject') }}>Reject (not suitable)</Button>
         </div>
@@ -105,7 +106,6 @@ export function PrescreeningPanel({ candidateId, canWork, clients, onChanged, on
 
       <div className="af-prescreen-forward">
         <h4>Move to next stage</h4>
-        <p className="af-prescreen-locked"><Lock className="h-4 w-4" aria-hidden="true" />Stages 2 to 13 are locked. {STAGE_2_LOCK_TEXT}.</p>
         <div className="af-prescreen-pickers">
           <div>
             <label htmlFor="af-prescreen-client">Client</label>

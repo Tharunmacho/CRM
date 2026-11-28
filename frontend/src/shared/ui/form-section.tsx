@@ -29,7 +29,6 @@ export function FormSection({
         {icon && <span className="ui-fs-icon" aria-hidden="true">{icon}</span>}
         <div className="ui-fs-title">
           <h3>{title}</h3>
-          {hint && <p>{hint}</p>}
         </div>
       </header>
       <div className={cn('ui-fs-grid', cols === 2 && 'is-two', cols === 3 && 'is-three')}>{children}</div>

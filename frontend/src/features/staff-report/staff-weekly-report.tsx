@@ -146,7 +146,7 @@ export function StaffWeeklyBody({ weekly, staffId, onOpenStaff }: { weekly: Staf
       ]} />
 
       <section className="rv-card sw-card" aria-label="Questions to ask">
-        <header className="sw-head"><div><h3>Questions to ask</h3><p>Where the records show something to follow up. Select a name for the detail.</p></div><span className="sw-count">{highlights.length}</span></header>
+        <header className="sw-head"><div><h3>Questions to ask</h3></div><span className="sw-count">{highlights.length}</span></header>
         {highlights.length === 0
           ? <p className="sw-empty">Nothing stands out in this period.</p>
           : <ul className="sw-flags">{highlights.map(item => <li key={item.id} className={`is-${item.severity}`}>
@@ -156,7 +156,7 @@ export function StaffWeeklyBody({ weekly, staffId, onOpenStaff }: { weekly: Staf
       </section>
 
       <section className="rv-card sw-card" aria-label="Recruiters">
-        <header className="sw-head"><div><h3>Recruiters</h3><p>One row per person. Select a row to see every day and every candidate.</p></div></header>
+        <header className="sw-head"><div><h3>Recruiters</h3></div></header>
         {rows.length === 0 ? <p className="sw-empty">No recruiter accounts to report on.</p> : <div className="sw-scroll"><table className="sw-table sw-staff">
           <thead><tr>{COLUMNS.map(column => <Fragment key={column.key}>
             <th aria-sort={sort.key === column.key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'} title={column.title}>
@@ -167,11 +167,11 @@ export function StaffWeeklyBody({ weekly, staffId, onOpenStaff }: { weekly: Staf
         </table></div>}
         <details className="sw-how"><summary>How the score is worked out</summary>
           <ul>{data.formula.lines.map(line => <li key={line}>{line}</li>)}</ul>
-          <p>75 and over is shown green, 50 to 74 amber, below 50 red. It is a prompt for a conversation, not a verdict: check the parts and the days first.</p></details>
+          </details>
       </section>
 
       {leadSheet && <section className="rv-card sw-card" aria-label="Lead sheet by recruiter">
-        <header className="sw-head"><div><h3>Lead sheet</h3><p>Leads handed to each person and what they did with them in this period. Lead follow-up counts as an optional 10% of the score, only for people who had leads assigned.</p></div></header>
+        <header className="sw-head"><div><h3>Lead sheet</h3></div></header>
         <div className="sw-scroll"><table className="sw-table sw-leads">
           <thead><tr>{LEAD_COLUMNS.map(column => <th key={column.label} className={column.key === 'name' ? undefined : 'num'} aria-sort={column.key && sort.key === column.key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined} title={column.title}>
             {column.key ? <button type="button" onClick={() => sortBy(column.key as SortKey)}>{column.label}{sort.key === column.key && (sort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}</button> : column.label}</th>)}</tr></thead>
@@ -180,7 +180,7 @@ export function StaffWeeklyBody({ weekly, staffId, onOpenStaff }: { weekly: Staf
       </section>}
 
       <section className="rv-card sw-card" aria-label="Stages by recruiter">
-        <header className="sw-head"><div><h3>Stage by stage</h3><p>Each cell: candidates waiting in that stage now, and in brackets how many moved out of it in this period.</p></div></header>
+        <header className="sw-head"><div><h3>Stage by stage</h3></div></header>
         <div className="sw-scroll"><table className="sw-table sw-matrix">
           <thead><tr><th>Recruiter</th>{data.funnel.map(stage => <th key={stage.stage} className="num" title={stage.label}><span>{stage.stage}</span><small>{stage.label}</small></th>)}</tr></thead>
           <tbody>{rows.map(row => <tr key={row.id}>
@@ -193,7 +193,7 @@ export function StaffWeeklyBody({ weekly, staffId, onOpenStaff }: { weekly: Staf
       </section>
 
       <section className="rv-card sw-card" aria-label="Team funnel">
-        <header className="sw-head"><div><h3>Team funnel</h3><p>Every candidate placed on an order, owned by recruiters, counted at the furthest stage reached. The percentage is how many of the previous stage went on.</p></div></header>
+        <header className="sw-head"><div><h3>Team funnel</h3></div></header>
         <ol className="sw-funnel">{data.funnel.map(stage => <li key={stage.stage}>
           <span className="sw-fname"><b>{stage.stage}</b>{stage.label}</span>
           <span className="sw-ftrack" aria-hidden="true"><i style={{ width: `${funnelWidth(stage.reached, data.funnel[0]?.reached ?? 0)}%` }} /></span>

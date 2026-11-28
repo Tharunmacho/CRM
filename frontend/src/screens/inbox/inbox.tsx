@@ -452,7 +452,7 @@ export default function InboxScreen() {
                 </section>
               </div>
               <footer className="mb-reply-bar">{currentRole === 'drafts' ? <Button disabled={busy || !canOperate} icon={<Pencil size={14} />} onClick={() => createDraft('edit_draft', open)}>Edit draft</Button> : <><Button disabled={busy || !canOperate} icon={<Reply size={14} />} onClick={() => createDraft('reply', open)}>Reply</Button><Button disabled={busy || !canOperate} icon={<ReplyAll size={14} />} onClick={() => createDraft('reply_all', open)}>Reply all</Button><Button disabled={busy || !canOperate} icon={<Send size={14} />} onClick={() => createDraft('forward', open)}>Forward</Button></>}</footer>
-            </> : <EmptyState icon={<MailOpen size={22} />} title="Choose an email" description="Open a message to read it, reply, or turn its attachment into a candidate." />}</section>
+            </> : <EmptyState icon={<MailOpen size={22} />} title="Choose an email" />}</section>
           </>}
         </div>
       </div></div>
@@ -464,7 +464,7 @@ export default function InboxScreen() {
     <Dialog open={newFolder} onClose={() => { if (!busy) setNewFolder(false) }} title="New folder" description={`Create a folder in ${account?.address ?? 'this mailbox'}. Everyone who uses this mailbox will see it.`} width="sm" footer={<><Button disabled={busy} onClick={() => setNewFolder(false)}>Cancel</Button><Button variant="primary" disabled={busy || !folderName.trim() || !liveMailbox} onClick={() => void perform('new-folder', async () => { const result = await api.post<{ folders: MailFolder[] }>(`/inbox/accounts/${accountId}/folders`, { name: folderName.trim() }); setFolders(result.folders); selectFolder(folderName.trim()); setNewFolder(false) }, 'Folder is ready.')}>{busy ? 'Creating…' : 'Create folder'}</Button></>}>
       <Field label="Folder name" required><Input value={folderName} maxLength={255} onChange={(event) => setFolderName(event.target.value)} autoFocus /></Field>{inbox.actionError && <p role="alert" className="mt-3 text-sm text-stamp-700">{inbox.actionError}</p>}
     </Dialog>
-    <Dialog open={managing && admin} onClose={() => { if (!busy) setManaging(false) }} title="Your mailboxes" description="Connect as many mailboxes as you need, and choose how each one handles candidate documents." width="lg" footer={<><Button icon={<Plus size={15} />} disabled={busy} onClick={() => setConnect({ address: '' })}>Connect mailbox</Button><Button variant="primary" disabled={busy} onClick={() => setManaging(false)}>Done</Button></>}>
+    <Dialog open={managing && admin} onClose={() => { if (!busy) setManaging(false) }} title="Your mailboxes" width="lg" footer={<><Button icon={<Plus size={15} />} disabled={busy} onClick={() => setConnect({ address: '' })}>Connect mailbox</Button><Button variant="primary" disabled={busy} onClick={() => setManaging(false)}>Done</Button></>}>
       <div className="mb-acct-dialog">{accounts.map((item) => {
         const live = isLiveAccount({ ...item, connectionStatus: 'connected' })
         const state = accountState(item)

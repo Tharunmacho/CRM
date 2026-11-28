@@ -41,7 +41,7 @@ test('the Google review stage is optional: it completes with or without the revi
   assert.equal(run({ googleReview: true, file }).outcome, 'Obtained')
   assert.equal(run({ file }).outcome, 'Obtained')
   assert.equal(run({ googleReview: true }).closes, undefined)
-  assert.equal(review.evaluate({ googleReview: true }).canComplete, false, 'no feedback')
+  assert.equal(review.evaluate({ googleReview: true }).canComplete, true, 'feedback is optional')
   assert.ok(!stageByNo(10).fields.some((field) => field.name === 'googleReview'), 'the visa stage has no Google review field')
   assert.equal(stageByNo(10).title, 'Visa arrival')
 })
@@ -53,7 +53,7 @@ test('Medical keeps only the medical fields and PCC has only the PCC fields, bot
   const pcc = stageByNo(9)
   assert.deepEqual(pcc.fields.find((field) => field.name === 'pccStatus').options.map((option) => option.value), ['received', 'pending'])
   assert.equal(pcc.fields.find((field) => field.name === 'file').type, 'file')
-  assert.equal(pcc.fields.find((field) => field.name === 'feedback').required, true)
+  assert.equal(pcc.fields.find((field) => field.name === 'feedback').required, false)
   assert.ok(pcc.fields.filter((field) => field.name !== 'feedback').every((field) => field.required === false), 'a PCC detail is never a gate')
   assert.equal(pcc.decision, undefined)
   assert.equal(pcc.closer, true)
@@ -66,7 +66,7 @@ test('PCC records Received, Pending or a manual move, and needs only the feedbac
   assert.equal(run({ pccStatus: 'pending' }).outcome, 'PCC pending')
   assert.equal(run({ pccStatus: 'received', pccAppliedDate: '2026-11-01', pccReceivedDate: '2026-11-10', file }).canComplete, true)
   for (const data of [{ pccStatus: 'done' }, { pccStatus: 'received', pccReceivedDate: '2026-02-30' }, { file: 'fake.pdf' }]) assert.equal(run(data).canComplete, false, JSON.stringify(data))
-  assert.equal(stageByNo(9).evaluate({ pccStatus: 'received' }).canComplete, false, 'no feedback')
+  assert.equal(stageByNo(9).evaluate({ pccStatus: 'received' }).canComplete, true, 'feedback is optional')
   for (const result of [run({}), run({ pccStatus: 'pending' })]) {
     assert.equal(result.closes, undefined)
     assert.equal(result.repeats, undefined)
@@ -100,9 +100,9 @@ test('the first twelve stages can be moved manually except the three decisions, 
   assert.equal(stageByNo(13).evaluate({ feedback, file, travelDate: '2026-11-15' }).outcome, 'Booked')
 })
 
-test('every stage requires new written feedback even when every other detail is filled', () => {
+test('every stage rejects malformed or oversized optional feedback', () => {
   for (let stage = 1; stage <= TOTAL_STAGES; stage++) {
-    for (const value of [undefined, null, '', '   ', {}, 123, 'x'.repeat(10001)]) {
+    for (const value of [{}, 123, 'x'.repeat(10001)]) {
       const result = stageByNo(stage).evaluate({ feedback: value, file })
       assert.equal(result.canComplete, false, `stage ${stage}, feedback ${String(value).slice(0, 20)}`)
       assert.ok(result.missing.some((message) => message.startsWith('Stage feedback')))
@@ -155,12 +155,11 @@ test('a decision stage cannot be moved until the choice is made, whatever else i
   }
 })
 
-test('every choice on a decision stage still needs written feedback', () => {
+test('a valid decision can be recorded without written feedback', () => {
   for (const [stage, data] of decisions) {
     for (const value of [undefined, '', '   ']) {
       const result = stageByNo(stage).evaluate({ feedback: value, ...data })
-      assert.equal(result.canComplete, false, `stage ${stage} ${data.result}`)
-      assert.ok(result.missing.some((message) => message.startsWith('Stage feedback')))
+      assert.equal(result.canComplete, true, `stage ${stage} ${data.result}`)
     }
   }
 })
@@ -235,8 +234,7 @@ test('every stage offers a stopping exit that closes the application and needs f
       assert.equal(result.canComplete, true, `stage ${stage} ${value}`)
       assert.ok(result.closes?.reason && result.closes.label && result.outcome, `stage ${stage} ${value}`)
       assert.equal(result.repeats, undefined)
-      // Feedback is required for the exit too.
-      assert.equal(def.evaluate({ stop: value }).canComplete, false, `stage ${stage} ${value} without feedback`)
+      assert.equal(def.evaluate({ stop: value }).canComplete, true, `stage ${stage} ${value} without feedback`)
     }
   }
 })

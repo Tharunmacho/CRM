@@ -704,16 +704,16 @@ for (const definition of STAGES) {
   // Staff decide when to move. Documents and stage details are optional; the
   // feedback explains that decision and stays in the completed stage record.
   definition.fields = [
-    { name: 'feedback', label: 'Stage feedback', type: 'textarea', required: true,
-      placeholder: 'What happened at this stage, and why are you moving it?',
+    { name: 'feedback', label: 'Stage feedback', type: 'textarea', required: false,
+      placeholder: 'Add a note about this stage',
       help: 'Saved with your name and date in this stage\'s history.' },
     ...definition.fields.map((field) => ({ ...field, required: field.name === definition.decision?.field || ['reason', 'retestDate'].includes(field.name) })),
   ]
   const evaluate = definition.evaluate
   definition.evaluate = (data) => {
     const invalid: string[] = []
-    if (typeof data.feedback !== 'string' || !data.feedback.trim()) invalid.push('Stage feedback')
-    else if (data.feedback.trim().length > 10000) invalid.push('Stage feedback: use 10,000 characters or fewer')
+    if (data.feedback != null && typeof data.feedback !== 'string') invalid.push('Stage feedback')
+    else if (typeof data.feedback === 'string' && data.feedback.trim().length > 10000) invalid.push('Stage feedback: use 10,000 characters or fewer')
     for (const field of definition.fields) {
       const value = data[field.name]
       if (value == null || value === '') continue

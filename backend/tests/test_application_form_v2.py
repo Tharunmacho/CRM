@@ -901,12 +901,12 @@ def test_one_missing_document_does_not_block_and_later_upload_does_not_change_st
         assert db.get(Candidate, "candidate").status.value == "deployed"
 
 
-def test_all_required_documents_do_not_replace_written_feedback_for_deployment(desk):
+def test_profile_documents_do_not_replace_stage_ticket_and_travel_date_for_deployment(desk):
     app_id, version = at_final_stage(desk)
     attach_required_documents(desk, "candidate")
     cleared = save(desk, app_id, {})
     refused = finish(desk, app_id, cleared.json()["lockVersion"])
-    assert refused.status_code == 422 and refused.json()["detail"]["missing"] == ["Feedback"]
+    assert refused.status_code == 422 and refused.json()["detail"]["missing"] == ["Air ticket", "Travel date"]
     with desk.sessions() as db:
         assert db.get(Application, app_id).status == ApplicationStatus.active
 

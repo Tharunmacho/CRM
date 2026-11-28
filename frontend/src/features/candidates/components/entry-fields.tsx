@@ -25,7 +25,6 @@ export function FormSection({ id, icon: Icon, title, subtitle, aside, children }
         <span className="ac-tile" aria-hidden><Icon size={17} /></span>
         <div className="ac-sec-title">
           <h2>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
         </div>
         {aside && <div className="ac-sec-aside">{aside}</div>}
       </header>

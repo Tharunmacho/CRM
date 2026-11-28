@@ -54,7 +54,7 @@ class StageInput(BaseModel):
     # Drafts may be incomplete, but submitted values must have the correct type.
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    # Optional while drafting; the transition API requires fresh written feedback.
+    # Optional in drafts and completed stage records.
     feedback: str | None = Field(default=None, max_length=10000)
     # The stopping exit every stage offers: instead of moving on, the application closes here (see STOP_EXITS for what each stage allows).
     stop: Literal["rejected", "declined", "not_possible", "not_available", "not_paid", "visa_rejected", "refused", "not_travelling", "not_cleared"] | None = None
@@ -117,7 +117,7 @@ class Medical(StageInput):
 
 class Pcc(StageInput):
     # Police clearance certificate (stage 9). `pccStatus` is the explicit answer: Received, or Pending (applied for, not in hand yet).
-    # Nothing here is required beyond the feedback, like Passport: the copy and the dates are optional details.
+    # These details are optional, like Passport: the copy and the dates are optional details.
     pccStatus: Literal["received", "pending"] | None = None
     pccAppliedDate: Date | None = None
     pccReceivedDate: Date | None = None
@@ -355,7 +355,7 @@ def _medical(d: dict) -> Evaluation:
 
 
 def _pcc(d: dict) -> Evaluation:
-    # PCC: a Pending certificate is a legitimate thing to record and move on with; nothing is required beyond the feedback.
+    # PCC: a Pending certificate is a legitimate thing to record and move on with; no note is required.
     if d.get("pccStatus") == "pending":
         return _ok("PCC pending")
     return _ok("Received") if d.get("pccStatus") == "received" else _ok("Completed manually")
@@ -366,7 +366,7 @@ def _passport(d: dict) -> Evaluation:
 
 
 def _advance(d: dict) -> Evaluation:
-    # Nothing here is required beyond the feedback: a Pending advance is a legitimate thing to record and move on with.
+    # These details are optional: a Pending advance is a legitimate thing to record and move on with.
     if d.get("advanceStatus") == "pending":
         return _ok("Advance pending")
     return _ok("Collected") if d.get("collected") == "yes" else _ok("Completed manually")

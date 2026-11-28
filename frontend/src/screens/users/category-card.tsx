@@ -37,12 +37,11 @@ export function CategoryCard({ editable }: { editable: boolean }) {
   const sorted = sortedCategories(rows)
   return <Panel flush className="uv-panel as-categories">
     <PanelHead id="as-categories-title" title="Job categories"
-      description="The categories you can pick on a job title. Switch one off to stop offering it; job titles that already use it keep it."
       actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} disabled={!canEdit} onClick={() => { setError(''); setEditing('new') }}>Add category</Button>} />
     {store.settings.categoriesEditable === false && <p role="status" className="uv-warn as-notice as-inline">The job category list is not available yet. The database update that adds it has not been applied, so job titles suggest the categories already in use.</p>}
     {error && <p role="alert" className="uv-error as-inline">{error}</p>}
     {sorted.length === 0
-      ? <EmptyState title="No categories yet" description="Add the kinds of work your employers hire for, for example Construction or Hospitality." />
+      ? <EmptyState title="No categories yet" />
       : <ul className="as-cats" aria-labelledby="as-categories-title">
         {sorted.map((item) => <li key={item.id} className={item.active ? 'as-cat' : 'as-cat is-off'}>
           <span className="as-cat-name">{item.name}</span>

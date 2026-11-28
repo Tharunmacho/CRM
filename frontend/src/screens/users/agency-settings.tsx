@@ -79,7 +79,7 @@ export function AgencySettingsTab() {
       <form className="as-form" noValidate onSubmit={(event) => { event.preventDefault(); void save() }} aria-label="Agency profile and defaults">
         <fieldset disabled={!editable || saving} className="as-fields">
           <Panel flush className="uv-panel">
-            <PanelHead id="as-name-title" title="Agency name" description="How your agency is named across the CRM." />
+            <PanelHead id="as-name-title" title="Agency name" />
             <div className="as-body as-grid" role="group" aria-labelledby="as-name-title">
               <Field label="Agency name" required error={errors.name} hint="Shown on the sign-in page, the sidebar and the browser tab.">
                 <Input value={form.name} maxLength={120} autoComplete="organization" onChange={(e) => set('name', e.target.value)} />
@@ -109,7 +109,7 @@ export function AgencySettingsTab() {
           </Panel>
 
           <Panel flush className="uv-panel">
-            <PanelHead id="as-ack-title" title="Acknowledgement text" description="The starting text for automatic replies." />
+            <PanelHead id="as-ack-title" title="Acknowledgement text" />
             <div className="as-body" role="group" aria-labelledby="as-ack-title">
               <Field label="Default acknowledgement text" required error={errors.acknowledgementText} hint="Used when you turn on automatic replies for a mailbox or WhatsApp number. You still preview and confirm it for each one.">
                 <Textarea rows={4} value={form.acknowledgementText} maxLength={2000} onChange={(e) => set('acknowledgementText', e.target.value)} />

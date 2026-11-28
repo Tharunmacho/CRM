@@ -48,7 +48,6 @@ export const BatchProgress = memo(function BatchProgress({ batch, imported, fail
         <span className="ic-batch-icon" aria-hidden="true"><Check strokeWidth={3} /></span>
         <div>
           <h2>{imported === 1 ? 'The candidate is imported' : `${imported} candidates are imported`}{failed > 0 ? `, ${failed} failed` : ''}</h2>
-          <p>Every file is stored in its own document field. Next, press <b>Read the documents</b>: only the resume, passport, Aadhaar and education certificates are sent to the online reader, and the details fill in as each one is read.</p>
         </div>
       </section>
     )

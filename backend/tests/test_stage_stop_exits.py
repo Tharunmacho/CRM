@@ -66,19 +66,17 @@ def test_a_stopping_exit_at_every_stage_closes_the_application(workflow, stage, 
     env = workflow
     app_id = mapped(env)
     reach(env, app_id, stage)
-    # Feedback is required: the exit is refused until the recruiter has written it.
     draft = save(env, app_id, {"stop": choice})
-    assert draft.status_code == 200, draft.text
-    refused = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": draft.json()["lockVersion"]})
-    assert refused.status_code == 422 and refused.json()["detail"]["missing"] == ["Feedback"], refused.text
-    result = complete(env, app_id, {"stop": choice})
+    response = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": draft.json()["lockVersion"]})
+    assert response.status_code == 200, response.text
+    result = response.json()
     assert result["status"] == "closed" and result["closureReason"] == reason
     assert result["currentStage"] == stage and result["nextTaskId"] is None
     with env.sessions() as db:
         app = db.get(Application, app_id)
         assert app.status == ApplicationStatus.closed and app.current_stage == stage
         record = db.scalar(select(ApplicationStage).where(ApplicationStage.application_id == app_id, ApplicationStage.stage == stage))
-        assert record.outcome == outcome and record.data["stop"] == choice and record.data["feedback"]
+        assert record.outcome == outcome and record.data["stop"] == choice and not record.data.get("feedback")
         # No task is left open for the closed application, so it drops out of the recruiter's Follow-up.
         assert not db.scalar(select(Task.id).where(Task.application_id == app_id, Task.completed_at.is_(None), Task.cancelled_at.is_(None)))
         assert db.get(Candidate, "candidate").status == (CandidateStatus.not_interested if stage == 2 or reason in CANDIDATE_SAID_NO else CandidateStatus.new)  # the candidate's own no parks them as Not interested

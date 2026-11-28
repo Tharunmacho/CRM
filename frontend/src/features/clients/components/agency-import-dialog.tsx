@@ -90,7 +90,6 @@ export function AgencyImportDialog({ onClose, onImported }: { onClose: () => voi
 
   const close = () => { if (!flight.current) onClose() }
   return <Dialog open onClose={close} title="Import agencies" width="xl" scroll="inside"
-    description="Upload an Excel or CSV file, review the names and contacts, then confirm."
     icon={<FileSpreadsheet size={23} />}
     footer={result ? <Button variant="primary" onClick={close}>Done</Button> : <>
       <Button variant="ghost" disabled={!!busy} onClick={close}>Cancel</Button>
