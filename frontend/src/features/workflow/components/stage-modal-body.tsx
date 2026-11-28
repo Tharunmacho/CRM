@@ -223,8 +223,8 @@ export function StageModal({
                     {interviewDate && <div className="text-sm">Interview date: <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${schedule.time.slice(0, 5)}`}</time></div>}
                   </div>
                   <div className="sm-monitor-answers">
-                    {answer && <Badge tone={negative ? 'stamp' : greenStageAnswer(stage.no, answer) ? 'green' : 'neutral'}>{answer}</Badge>}
-                    {current && <Badge tone={draftAnswer && greenStageAnswer(stage.no, draftAnswer) ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
+                    {answer && <Badge tone={negative ? 'stamp' : greenStageAnswer(stage.no, answer, latest?.data) ? 'green' : 'neutral'}>{answer}</Badge>}
+                    {current && <Badge tone={draftAnswer && greenStageAnswer(stage.no, draftAnswer, app.draft) ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
                   </div>
                   {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
                 </div>
@@ -237,7 +237,9 @@ export function StageModal({
   )
 }
 
-function greenStageAnswer(stage: number, answer: string) {
+function greenStageAnswer(stage: number, answer: string, data?: Record<string, unknown> | null) {
+  if (stage === ADVANCE_STAGE && (answer === 'Received' || answer === 'Not received')) return true
+  if (typeof data?.feedback === 'string' && data.feedback.trim() === answer) return true
   return stage <= 3 || (stage === 4 && answer === 'Selected') || (stage === 5 && answer === 'Agreed')
 }
 
@@ -663,7 +665,7 @@ function CurrentStage({
 
         <div className="sm-feedback">
           {canWork && <StageReplies key={`${store.me?.id}:${def.no}`} userId={store.me!.id} stage={def.no} disabled={busy || completed}
-            status={data.advanceStatus} onChoose={(reply, status) => status
+            status={data.advanceStatus} feedback={data.feedback} onChoose={(reply, status) => status
               ? applyReply(reply, { advanceStatus: status }, ['Advance payment received.', 'Advance payment not received.'])
               : applyReply(reply)} />}
           <details open={Boolean(data.feedback) || undefined}>

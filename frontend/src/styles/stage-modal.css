@@ -313,3 +313,9 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
   .sm-monitor-answers { justify-content: flex-end; }
   .sm-monitor-row time { grid-column: 1 / -1; }
 }
+
+.sm .sm-quick-replies .ui-button[aria-pressed="true"] {
+  background: var(--success-fill);
+  border-color: var(--success-ink);
+  color: var(--success-ink);
+}

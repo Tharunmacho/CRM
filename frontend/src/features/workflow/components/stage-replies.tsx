@@ -12,13 +12,15 @@ function readReplies(key: string): string[] {
   }
 }
 
-export function StageReplies({ userId, stage, disabled, status, onChoose }: {
+export function StageReplies({ userId, stage, disabled, status, feedback, onChoose }: {
   userId: string
   stage: number
   disabled: boolean
   status: unknown
+  feedback: unknown
   onChoose: (text: string, status?: AdvanceStatus) => void
 }) {
+  const selectedLines = new Set(typeof feedback === 'string' ? feedback.split('\n').map(line => line.trim()) : [])
   const key = `crm.stageReplies.${userId}.${stage}`
   const [replies, setReplies] = useState(() => readReplies(key))
   const [editing, setEditing] = useState(false)
@@ -49,12 +51,12 @@ export function StageReplies({ userId, stage, disabled, status, onChoose }: {
 
   return <fieldset className="mb-4 space-y-2" disabled={disabled}>
     <legend className="mb-2 font-semibold">Quick replies</legend>
-    <div className="sm-decision-row">
+    <div className="sm-decision-row sm-quick-replies">
       {stage === ADVANCE_STAGE && <>
-        <Button size="sm" aria-pressed={status === 'collected'} variant={status === 'collected' ? 'primary' : 'secondary'} onClick={() => onChoose('Advance payment received.', 'collected')}>Received</Button>
-        <Button size="sm" aria-pressed={status === 'pending'} variant={status === 'pending' ? 'primary' : 'secondary'} onClick={() => onChoose('Advance payment not received.', 'pending')}>Not received</Button>
+        <Button size="sm" aria-pressed={status === 'collected'} onClick={() => onChoose('Advance payment received.', 'collected')}>Received</Button>
+        <Button size="sm" aria-pressed={status === 'pending'} onClick={() => onChoose('Advance payment not received.', 'pending')}>Not received</Button>
       </>}
-      {replies.map(reply => <Button key={reply} size="sm" onClick={() => onChoose(reply)}>{reply}</Button>)}
+      {replies.map(reply => <Button key={reply} size="sm" aria-pressed={selectedLines.has(reply)} onClick={() => onChoose(reply)}>{reply}</Button>)}
       <Button size="sm" aria-expanded={editing} onClick={() => setEditing(!editing)}>{editing ? 'Done' : replies.length ? 'Manage replies' : 'Create a reply'}</Button>
     </div>
     {editing && <div className="space-y-2">
