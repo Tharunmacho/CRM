@@ -223,10 +223,10 @@ export function StageModal({
                     {interviewDate && <div className="text-sm">Interview date: <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${schedule.time.slice(0, 5)}`}</time></div>}
                   </div>
                   <div className="sm-monitor-answers">
+                    {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
                     {answer && <Badge tone={negative ? 'stamp' : greenStageAnswer(stage.no, answer, latest?.data) ? 'green' : 'neutral'}>{answer}</Badge>}
                     {current && <Badge tone={draftAnswer && greenStageAnswer(stage.no, draftAnswer, app.draft) ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
                   </div>
-                  {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
                 </div>
               </li>
             })}
@@ -365,13 +365,14 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
   const negative = NEGATIVE_OUTCOMES.includes(record.outcome)
   // An advance saved before it had a status reads as Collected when it holds an amount; the same words the tracker sheet uses.
   const data = record.stage === ADVANCE_STAGE ? withAdvanceStatus(record.data) : record.data
+  const answer = stageAnswer(def, data, record.outcome)
   const advanceLine = record.stage === ADVANCE_STAGE ? advanceSummary(data, store.settings.defaultAdvanceCurrency) : null
 
   return (
     <section>
       <header className="sm-attempt-head">
-        {record.outcome && record.outcome !== 'Completed manually' && <Badge tone={negative ? 'stamp' : 'green'} variant="dot">{record.outcome}</Badge>}
-        <time className="ml-auto" dateTime={record.completedAt}>{dateTimeLabel(record.completedAt)}</time>
+        <time dateTime={record.completedAt}>{dateTimeLabel(record.completedAt)}</time>
+        {answer && <Badge tone={negative ? 'stamp' : 'green'}>{answer}</Badge>}
       </header>
 
       <dl className="sm-record-fields">

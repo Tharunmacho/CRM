@@ -117,7 +117,7 @@ details.sm-card:hover { border-color: var(--border-hover); }
 details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
 .sm-done-body { display: grid; gap: 16px; padding: 20px 24px 24px; border-top: 1px solid var(--border-faint); }
 .sm-record-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
-.sm-attempt-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-bottom: 12px; }
+.sm-attempt-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; margin-bottom: 12px; }
 .sm-attempt-head h3 { font-size: 14px; font-weight: 600; color: var(--text-main); }
 .sm-attempt-head p { font-size: 13px; color: var(--text-muted); }
 .sm-hint { margin-top: 12px; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
@@ -304,14 +304,13 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
   .sm-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "company company" "country country" "job job" "passport expiry" "agent recruiter"; }
 }
 
-.sm-monitor-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 17ch; align-items: center; gap: 12px; min-height: 64px; padding: 12px 20px; overflow-wrap: anywhere; }
-.sm-monitor-answers { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.sm-monitor-row { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(65%); align-items: center; gap: 12px; min-height: 64px; padding: 12px 20px; overflow-wrap: anywhere; }
+.sm-monitor-answers { justify-content: flex-end; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .sm-monitor-row time { text-align: right; }
 .sm-timeline .sm-step .sm-node { top: 50%; transform: translateY(-50%); }
 @media (max-width: 600px) {
-  .sm-monitor-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding: 12px; }
-  .sm-monitor-answers { justify-content: flex-end; }
-  .sm-monitor-row time { grid-column: 1 / -1; }
+  .sm-monitor-row { grid-template-columns: minmax(0, 1fr) fit-content(65%); gap: 4px 8px; padding: 12px; }
+  .sm-monitor-answers time { white-space: nowrap; }
 }
 
 .sm .sm-quick-replies .ui-button[aria-pressed="true"] {
