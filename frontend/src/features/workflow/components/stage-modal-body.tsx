@@ -184,13 +184,13 @@ export function StageModal({
     return <div className="sm sm-embedded" data-sm-stage={selectedStage.no}>
       {!canWork && <p className="sm-note"><Lock className="h-4 w-4" aria-hidden="true" />{readOnlyReason}</p>}
       {!owner?.active && <p className="sm-note">Assign an active recruiter before moving or reopening a stage. You can still save a draft.</p>}
-      {app.status === 'closed' && <ClosedRow app={app} canReopen={canReopenApplication(app.status, canWork)} disabled={!owner?.active || pending || reopening} onRecorded={onStageRecorded} onDone={onStageChanged} />}
+      {app.status === 'closed' && selectedStage.no === app.currentStage && <ClosedRow app={app} canReopen={canReopenApplication(app.status, canWork)} disabled={!owner?.active || pending || reopening} onRecorded={onStageRecorded} onDone={onStageChanged} />}
       {fileError && <p className="sm-alert" role="alert">We could not load the documents. Feedback is still available. <button type="button" className="underline" onClick={() => setFileRetry((value) => value + 1)}>Retry documents</button></p>}
       {current ? editor
         : <section className="sm-card sm-inline-history">
           <header className="sm-inline-title"><div><small>Stage {selectedStage.no} of {STAGES.length}</small><h3>{selectedStage.title}</h3></div>{activeRecords.length > 0 && <Badge tone="green" variant="dot">Saved history</Badge>}</header>
           {selectedRecords.map((record) => <div className="sm-inline-attempt" key={`${record.stage}-${record.attempt}`}>{record.reopenedReason && <ReopenedNote record={record} reopenings={reopenings} />}<CompletedStage record={record} files={files} app={app} /></div>)}
-          {canWork && activeRecords.length > 0 && <ReopenStage app={app} stage={selectedStage.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Discard unsaved feedback and reopen this stage?')} onStageChanged={onStageChanged} />}
+          {canWork && !(app.status === 'closed' && selectedStage.no === app.currentStage) && activeRecords.length > 0 && <ReopenStage app={app} stage={selectedStage.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Discard unsaved feedback and reopen this stage?')} onStageChanged={onStageChanged} />}
         </section>}
       {current && selectedRecords.length > 0 && <details className="sm-extra"><summary>Earlier feedback and attempts ({selectedRecords.length})</summary><div className="mt-4 space-y-6">{selectedRecords.map((record) => <div key={`${record.stage}-${record.attempt}`}>{record.reopenedReason && <ReopenedNote record={record} reopenings={reopenings} />}<CompletedStage record={record} files={files} app={app} /></div>)}</div></details>}
     </div>
@@ -231,6 +231,9 @@ export function StageModal({
                     {answer && <Badge tone={negative ? 'stamp' : greenStageAnswer(stage.no, answer, latest?.data) ? 'green' : 'neutral'}>{answer}</Badge>}
                     {current && <Badge tone={draftAnswer && greenStageAnswer(stage.no, draftAnswer, app.draft) ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
                     {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
+                    {stage.no === app.currentStage && closureTab(app.closureReason) === 'Declined' && canReopenApplication(app.status, canWork) &&
+                      <ReopenApplication app={app} stageTitle={stage.title} disabled={!owner?.active || pending || reopening}
+                        onRecorded={onStageRecorded} onDone={onStageChanged} />}
                   </div>
                 </div>
                 {current && canWork && <div className="sm-embedded">
@@ -940,7 +943,7 @@ function ClosedRow({ app, canReopen = false, disabled = false, onRecorded, onDon
         ? 'The candidate was removed from this order (or moved to another job) and its open tasks were cancelled. They are on the Tasks list again and can be matched to another order.'
         : tab === 'Declined'
           ? 'The candidate is on the Declined tab of the Tasks page and in All, and can be offered other orders.'
-          : 'The candidate is on the Rejected tab of the Tasks page and in All, and can be matched to another order.'} Finished stages and files are above.{canReopen ? ` Reopen the application to continue from ${stageTitle}.` : ''} An admin can also reopen a finished stage, and must give a reason.</p>
+          : 'The candidate is on the Rejected tab of the Tasks page and in All, and can be matched to another order.'} Finished stages and files are above.{canReopen ? ` Reopen ${stageTitle} to continue.` : ''} An admin can also reopen a finished stage, and must give a reason.</p>
       {canReopen && <div className="mt-3"><ReopenApplication app={app} stageTitle={stageTitle} disabled={disabled} onRecorded={onRecorded} onDone={onDone} /></div>}
     </div>
   </section>

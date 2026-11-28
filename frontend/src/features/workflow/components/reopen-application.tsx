@@ -28,7 +28,7 @@ export function ReopenApplication({ app, stageTitle, disabled = false, onRecorde
       await api.post(`/applications/${app.id}/reopen-application`, { reason: reason.trim(), lock_version: app.lockVersion })
       if (!store.isCurrentSession()) return
       onRecorded?.()
-      store.notify('Application reopened. The candidate is back on the Tasks Current list.')
+      store.notify(`${stageTitle} reopened.`)
       setOpen(false); setReason('')
       try { await store.refresh({ keepCurrent: true }) } catch { /* the live refresh catches up */ }
       onDone?.()
@@ -39,11 +39,11 @@ export function ReopenApplication({ app, stageTitle, disabled = false, onRecorde
     } finally { setBusy(false) }
   }
   return <>
-    <Button variant="primary" size="sm" disabled={disabled} icon={<RotateCcw className="h-4 w-4" />} onClick={() => setOpen(true)}>Reopen application</Button>
-    <Dialog open={open} onClose={close} title="Reopen application" description={reopenExplanation(stageTitle)} width="sm"
+    <Button variant="primary" size="sm" disabled={disabled} icon={<RotateCcw className="h-4 w-4" />} onClick={() => setOpen(true)}>Reopen stage</Button>
+    <Dialog open={open} onClose={close} title={`Reopen ${stageTitle}?`} description={reopenExplanation(stageTitle)} width="sm"
       footer={<>
         <Button disabled={busy} onClick={close}>Cancel</Button>
-        <Button variant="primary" disabled={busy || disabled || !reopenReasonOk(reason)} onClick={() => void submit()}>{busy ? 'Reopening…' : 'Reopen application'}</Button>
+        <Button variant="primary" disabled={busy || disabled || !reopenReasonOk(reason)} onClick={() => void submit()}>{busy ? 'Reopening…' : 'Reopen stage'}</Button>
       </>}>
       {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
       <Field label="Reason for reopening" required hint={`At least ${MIN_REOPEN_REASON} characters.`}>

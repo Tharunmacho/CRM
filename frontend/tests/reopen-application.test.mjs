@@ -69,7 +69,8 @@ test('a closed application shows the button in the stage panel and the closed ro
   assert.match(body, /function ClosedRow\(\{ app, canReopen = false/)
   assert.match(body, /\{canReopen && <div className="mt-3"><ReopenApplication app=\{app\}/)
   const uses = body.match(/<ClosedRow app=\{app\} canReopen=\{canReopenApplication\(app\.status, canWork\)\}/g) ?? []
-  assert.equal(uses.length, 1, 'only the application form offers reopening')
+  assert.match(body, /stage\.no === app\.currentStage && closureTab\(app\.closureReason\) === 'Declined' && canReopenApplication\(app\.status, canWork\) &&\s*<ReopenApplication/)
+  assert.equal(uses.length, 1, 'the embedded form has one closed-stage summary')
   assert.match(body, /onRecorded=\{onStageRecorded\} onDone=\{onStageChanged\}/, 'the Tasks page re-reads at once, the host screen reloads')
   assert.doesNotMatch(body, /Reopen the application to continue working on its stages\./)
   assert.doesNotMatch(body, /emptyStageHint\(app\.status, app\.currentStage, canReopenApplication\(app\.status, canWork\)\)/)
