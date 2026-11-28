@@ -16,11 +16,11 @@ const SOURCE_NAME: Record<ScanKind, string> = { resume: 'resume', passport: 'pas
 const SOURCE_SHORT: Record<ScanKind, string> = { resume: 'Resume', passport: 'Passport', aadhaar: 'Aadhaar' }
 
 /** One section of the form card: icon, bold title, one-line subtitle, a thin divider, then its content. */
-export function FormSection({ id, icon: Icon, title, subtitle, aside, children }: {
-  id?: string; icon: LucideIcon; title: string; subtitle?: ReactNode; aside?: ReactNode; children: ReactNode
+export function FormSection({ id, hidden, icon: Icon, title, subtitle, aside, children }: {
+  id?: string; hidden?: boolean; icon: LucideIcon; title: string; subtitle?: ReactNode; aside?: ReactNode; children: ReactNode
 }) {
   return (
-    <section id={id} className="ac-sec">
+    <section id={id} hidden={hidden} className="ac-sec">
       <header className="ac-sec-head">
         <span className="ac-tile" aria-hidden><Icon size={17} /></span>
         <div className="ac-sec-title">

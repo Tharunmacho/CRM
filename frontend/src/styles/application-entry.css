@@ -221,3 +221,21 @@
   .ac .ac-photo-box { flex-direction: column; align-items: flex-start; }
   .ac .ac-phone { grid-template-columns: minmax(88px, 112px) minmax(0, 1fr); }
 }
+
+.ac .ac-section-workspace { display: flex; flex-direction: column; max-height: max(340px, calc(100dvh - 190px)); }
+.ac .ac-section-nav { display: flex; align-items: center; flex: none; overflow-x: auto; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border-main); }
+.ac .ac-section-picker { display: none; }
+.ac .ac-section-nav button { flex: none; padding: 8px 10px; white-space: nowrap; border-bottom: 2px solid transparent; color: var(--text-muted); }
+.ac .ac-section-nav button[aria-pressed="true"] { color: var(--primary); border-color: var(--primary); font-weight: 600; }
+.ac .ac-section-nav .ac-progress-toggle { margin-left: auto; }
+.ac .ac-section-scroll { min-height: 0; overflow: auto; }
+.ac .ac-section-scroll .ac-sec[hidden] { display: none; }
+.ac .ac-section-workspace .ac-savebar { flex: none; padding: 10px 16px; }
+@media (max-width: 700px) {
+  .ac .ac-section-workspace { max-height: max(240px, calc(100dvh - 280px)); }
+  .ac .ac-section-nav button[aria-controls] { display: none; }
+  .ac .ac-section-picker { display: block; flex: 1; min-width: 0; padding: 8px; background: var(--bg-card); color: var(--text-main); }
+  .ac .ac-section-workspace .ac-savebar-copy { display: none; }
+  .ac .ac-section-workspace .ac-savebar-actions { flex-direction: row; flex-wrap: wrap; }
+  .ac .ac-section-workspace .ac-savebar-actions .ui-button { width: auto; flex: 1 1 auto; }
+}

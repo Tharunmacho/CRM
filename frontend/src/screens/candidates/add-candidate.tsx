@@ -55,6 +55,12 @@ type LiveCheck = { status: 'idle' | 'checking' | 'none' | 'found' | 'conflict' |
 const SLA_MS = 48 * 3600 * 1000
 const VALIDATION_MESSAGE = 'Please fix the fields marked in red, then save again. Nothing you typed was lost.'
 
+const entrySections = [
+  ['documents', 'Documents'], ['personal', 'Personal'], ['contact', 'Contact'],
+  ['passport', 'Passport'], ['education', 'Education'], ['experience', 'Experience'],
+  ['work', 'Job preference'], ['assessment', 'Assessment'], ['source', 'Source'],
+] as const
+
 export default function AddCandidatePage() {
   const store = useStore()
   // Only an admin or MD chooses the recruiter; a staff member who adds a candidate keeps it.
@@ -67,6 +73,10 @@ export default function AddCandidatePage() {
   // The blank form: empty, except for the nationality the agency chose to pre-fill (none unless an admin sets one).
   const blank = useMemo(() => ({ ...EMPTY, nationality: store.settings.defaultNationality ?? '' }), [store.settings.defaultNationality])
   const [form, setForm] = useState(blank)
+  const [section, setSection] = useState('candidate-personal')
+  const [showProgress, setShowProgress] = useState(false)
+  const panel = useRef<HTMLDivElement>(null)
+  useEffect(() => { panel.current?.scrollTo(0, 0) }, [section])
   const [saving, setSaving] = useState(false)
   const [bundleSource, setBundleSource] = useState<string | null>(null)
   const [savedCandidateId, setSavedCandidateId] = useState<string | null>(null)
@@ -298,8 +308,14 @@ export default function AddCandidatePage() {
     setErrors(next)
     if (Object.keys(next).length) {
       setSaveError(VALIDATION_MESSAGE)
-      // The form is long; bring the first problem into view.
-      requestAnimationFrame(() => document.querySelector('.ac-f[data-invalid]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }))
+      requestAnimationFrame(() => {
+        const invalid = panel.current?.querySelector<HTMLElement>('.ac-f[data-invalid]')
+        const target = invalid?.closest('section')
+        if (target?.id) {
+          setSection(target.id)
+          requestAnimationFrame(() => invalid?.querySelector<HTMLElement>('input, button, textarea, select')?.focus())
+        }
+      })
       return
     }
 
@@ -456,12 +472,15 @@ export default function AddCandidatePage() {
   })
   const documentsAdded = { resume: presence.resume, passport: presence.passport, photo: Boolean(photoJob) }
   const passportAvailable = Boolean(form.passportNo.trim()) || documentsAdded.passport
-  const jump = (anchor: string) => document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  /** "Upload passport" and the like: bring the upload zone (or the photo slot) into view and open its file picker. */
+  const jump = (anchor: string) => {
+    setSection(anchor)
+    setShowProgress(false)
+    panel.current?.scrollTo(0, 0)
+  }
   const promptUpload = (kind: 'passport' | 'resume' | 'photo') => {
+    jump(kind === 'photo' ? 'candidate-personal' : 'candidate-documents')
     const slot = document.getElementById(kind === 'photo' ? 'photo-box' : 'upload-zone')
-    slot?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    window.setTimeout(() => slot?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.click(), 350)
+    slot?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.click()
   }
   const sectionMissing = (...labels: string[]) => {
     const count = completeness.missing.filter((item) => labels.includes(item.key)).length
@@ -538,12 +557,22 @@ export default function AddCandidatePage() {
             </div>
           </EntrySection>}
 
-          <EntryProgress completeness={completeness} reading={reading} filledByDocuments={filledCount} next={nextDocument(documentsAdded)} onJump={jump} onUpload={promptUpload} />
-
-          <div className="ac-form-card">
+          <div className="ac-form-card ac-section-workspace">
+            <nav className="ac-section-nav" aria-label="Candidate form sections">
+              <select className="ac-section-picker" aria-label="Candidate form section" value={section} onChange={event => jump(event.target.value)}>
+                {entrySections.map(([key, label]) => <option key={key} value={`candidate-${key}`}>{label}</option>)}
+              </select>
+              {entrySections.map(([key, label]) => {
+                const id = `candidate-${key}`
+                return <button type="button" key={key} aria-controls={id} aria-pressed={section === id} onClick={() => jump(id)}>{label}</button>
+              })}
+              <button type="button" className="ac-progress-toggle" aria-expanded={showProgress} onClick={() => setShowProgress(value => !value)}>{completeness.percent}% complete</button>
+            </nav>
+            <div className="ac-section-scroll" ref={panel}>
+              {showProgress && <EntryProgress completeness={completeness} reading={reading} filledByDocuments={filledCount} next={nextDocument(documentsAdded)} onJump={jump} onUpload={promptUpload} />}
             <fieldset disabled={disabledAll} className="ac-fieldset">
               {/* ------------------------------------------------------------------ Documents first */}
-              <FormSection id="candidate-documents" icon={FolderOpen} title="Upload documents">
+              <FormSection id="candidate-documents" hidden={section !== 'candidate-documents'} icon={FolderOpen} title="Upload documents">
                 <div className="ac-docs">
                   <EntryUploadZone rows={documentRows} chips={chips} reports={readReports} progress={readProgress(documentRows)} disabled={disabledAll} max={MAX_DOCUMENT_FILES} problems={addProblems}
                     onAdd={(files) => void addDocuments(files)} onRemove={removeDocument} onRetry={retryFile} onPlacePage={placePage}
@@ -571,7 +600,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Personal information */}
-              <FormSection id="candidate-personal" icon={UserRound} title="Personal information" subtitle="Name and mobile number are required unless a document is attached." aside={sectionMissing('name', 'fatherName', 'dob', 'maritalStatus', 'gender', 'nationality', 'languages', 'phone', 'currentAddress')}>
+              <FormSection id="candidate-personal" hidden={section !== 'candidate-personal'} icon={UserRound} title="Personal information" subtitle="Name and mobile number are required unless a document is attached." aside={sectionMissing('name', 'fatherName', 'dob', 'maritalStatus', 'gender', 'nationality', 'languages', 'phone', 'currentAddress')}>
                 <div className="ac-personal">
                   <div id="photo-box" className="ac-photo-box">
                     <div className="ac-photo-frame">
@@ -621,7 +650,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Contact details */}
-              <FormSection id="candidate-contact" icon={Contact} title="Contact details">
+              <FormSection id="candidate-contact" hidden={section !== 'candidate-contact'} icon={Contact} title="Contact details">
                 <div className="ac-g">
                   {F('phone', 'Mobile number', <PhoneField value={form.phone} onChange={(value) => set('phone', value)} invalid={Boolean(errors.phone)} />, { cls: 's-4', required: true })}
                   {F('whatsapp', 'WhatsApp number', <PhoneField value={effectiveWhatsapp(form)} disabled={whatsappIsSame(form)} onChange={(value) => set('whatsapp', value)} showHint={false} />,
@@ -633,7 +662,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Passport */}
-              <FormSection id="candidate-passport" icon={IdCard} title="Passport details"
+              <FormSection id="candidate-passport" hidden={section !== 'candidate-passport'} icon={IdCard} title="Passport details"
                 aside={<span className={`ac-pill ${passportAvailable ? 'is-good' : 'is-muted'}`}><i aria-hidden />{passportAvailable ? 'Passport available' : 'No passport yet'}</span>}>
                 <div className="ac-g">
                   {text('passportNo', 'Passport number', { cls: 's-3', placeholder: 'M1234567' })}
@@ -644,12 +673,12 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Education */}
-              <FormSection id="candidate-education" icon={GraduationCap} title="Educational details" aside={sectionMissing('education')}>
+              <FormSection id="candidate-education" hidden={section !== 'candidate-education'} icon={GraduationCap} title="Educational details" aside={sectionMissing('education')}>
                 <EntryRowsEditor kind="education" value={form.education} onChange={(value) => set('education', value)} source={sources.education} suggestions={{ level: labels(OPT.educationLevel), institute: served.institutes }} />
               </FormSection>
 
               {/* ------------------------------------------------------------------ Work experience */}
-              <FormSection id="candidate-experience" icon={BriefcaseBusiness} title="Previous experience" subtitle="Total, in India and abroad (whole years), then each employer." aside={sectionMissing('totalExperience', 'workHistory')}>
+              <FormSection id="candidate-experience" hidden={section !== 'candidate-experience'} icon={BriefcaseBusiness} title="Previous experience" subtitle="Total, in India and abroad (whole years), then each employer." aside={sectionMissing('totalExperience', 'workHistory')}>
                 <div className="ac-g">
                   {years('totalExperience', 'Total experience', 's-4')}
                   {years('experienceIndia', 'Experience in India', 's-4')}
@@ -660,7 +689,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Job preference */}
-              <FormSection id="candidate-work" icon={Target} title="Job preference">
+              <FormSection id="candidate-work" hidden={section !== 'candidate-work'} icon={Target} title="Job preference">
                 <div className="ac-g">
                   <div className="ac-f s-6" data-from={sources.designation ? '' : undefined}>
                     <TagField label="Job preference" value={form.designation} onChange={(value) => set('designation', value)} suggestions={designationSuggestions}
@@ -678,7 +707,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Assessment */}
-              <FormSection id="candidate-assessment" icon={Gauge} title="Assessment & preferences">
+              <FormSection id="candidate-assessment" hidden={section !== 'candidate-assessment'} icon={Gauge} title="Assessment & preferences">
                 <div className="ac-g">
                   {F('serviceChargesStatus', 'Service charges', <FormOptionSelect category={OPT.serviceCharges} value={form.serviceChargesStatus} onChange={(value) => set('serviceChargesStatus', value)} label="Service charges" allowAdd />, { cls: 's-4' })}
                   <EntryField label="Interest level" className="s-12" hint="Tap the chosen card again to clear it.">
@@ -688,7 +717,7 @@ export default function AddCandidatePage() {
               </FormSection>
 
               {/* ------------------------------------------------------------------ Source, follow-up, assignment */}
-              <FormSection id="candidate-source" icon={Share2} title="Source & follow-up">
+              <FormSection id="candidate-source" hidden={section !== 'candidate-source'} icon={Share2} title="Source & follow-up">
                 <div className="ac-g">
                   <EntryField label="Source" className="s-3">
                     {/* "Not recorded" is saved as the catch-all source "Other" (the column cannot be empty); the list is the admin-managed one. */}
@@ -709,6 +738,7 @@ export default function AddCandidatePage() {
                 </div>
               </FormSection>
             </fieldset>
+            </div>
 
             {!savedCandidateId && <footer className="ac-savebar">
               <div className="ac-savebar-copy">
