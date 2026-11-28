@@ -38,6 +38,8 @@ export function StageReplies({ userId, stage, disabled, status, feedback, onSele
   onChoose: (text: string) => void
 }) {
   const selectedLines = new Set(typeof feedback === 'string' ? feedback.split('\n').map(line => line.trim()) : [])
+  const pair = stageReplyPairs[stage]
+  const isBuiltIn = (reply: string) => pair?.choices.some(([text]) => text.toLowerCase() === reply.trim().toLowerCase())
   const key = `crm.stageReplies.${userId}.${stage}`
   const [replies, setReplies] = useState(() => readReplies(key))
   const [editing, setEditing] = useState(false)
@@ -59,7 +61,7 @@ export function StageReplies({ userId, stage, disabled, status, feedback, onSele
     const text = label.trim()
     if (!text) return
     const current = readReplies(key)
-    if (current.some(reply => reply.toLowerCase() === text.toLowerCase())) {
+    if (isBuiltIn(text) || current.some(reply => reply.toLowerCase() === text.toLowerCase())) {
       setError('That quick reply already exists.')
       return
     }
@@ -69,9 +71,9 @@ export function StageReplies({ userId, stage, disabled, status, feedback, onSele
   return <fieldset className="mb-4 space-y-2" disabled={disabled}>
     <legend className="sr-only">Stage replies</legend>
     <div className="sm-decision-row sm-quick-replies">
-      {stageReplyPairs[stage]?.choices.map(([text, value]) => <Button key={text} size="sm" aria-pressed={status === value}
-        onClick={() => onSelect(stageReplyPairs[stage]!.field, value)}>{text}</Button>)}
-      {replies.map(reply => <Button key={reply} size="sm" aria-pressed={selectedLines.has(reply)} onClick={() => onChoose(reply)}>{reply}</Button>)}
+      {pair?.choices.map(([text, value]) => <Button key={text} size="sm" aria-pressed={status === value}
+        onClick={() => onSelect(pair.field, value)}>{text}</Button>)}
+      {replies.filter(reply => !isBuiltIn(reply)).map(reply => <Button key={reply} size="sm" aria-pressed={selectedLines.has(reply)} onClick={() => onChoose(reply)}>{reply}</Button>)}
       <Button size="sm" aria-expanded={editing} onClick={() => setEditing(!editing)}>{editing ? 'Done' : 'Create reply'}</Button>
     </div>
     {editing && <div className="space-y-2">

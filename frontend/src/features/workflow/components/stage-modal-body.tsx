@@ -30,6 +30,7 @@ import {
   closureLabels,
   closureTab,
   fieldVisible,
+  isPendingReply,
   stageByNo,
   userRefId,
   userRefName,
@@ -529,6 +530,7 @@ function CurrentStage({
   const [busy, setBusy] = useState(false)
   const [uploadingFields, setUploadingFields] = useState<string[]>([])
   const uploading = uploadingFields.length > 0
+  const pendingReply = isPendingReply(data.customReply)
   const result = useMemo(() => def.evaluate(data), [def, data])
   const [attempted, setAttempted] = useState(false)
   const [error, setError] = useState('')
@@ -593,7 +595,7 @@ function CurrentStage({
       if (!store.isCurrentSession()) return
       setData(saved.draft); setLockVersion(saved.lockVersion)
       setDirty(false)
-      store.notify('Draft saved')
+      store.notify(pendingReply ? 'Saved as pending' : 'Draft saved')
       await refreshAfterWrite()
     } catch (cause) { reportFailure(cause) } finally {
       setBusy(false)
@@ -694,17 +696,17 @@ function CurrentStage({
         <footer className="sm-foot">
           <div className="sm-foot-actions">
             {uploading ? <span role="status" className="sm-unsaved">Uploading files…</span> : dirty && <span className="sm-unsaved">Changes not saved</span>}
-            <Button variant="secondary" onClick={save} disabled={!canWork || !dirty || busy || uploading || completed || refreshRequired}>
-              {busy ? 'Saving…' : 'Save draft'}
+            <Button variant={pendingReply ? "primary" : "secondary"} onClick={save} disabled={!canWork || !dirty || busy || uploading || completed || refreshRequired}>
+              {busy ? 'Saving…' : pendingReply ? 'Save as pending' : 'Save draft'}
             </Button>
-            <Button
+            {!pendingReply && <Button
               variant={result.closes ? 'danger' : 'primary'}
               onClick={complete}
-              disabled={!canWork || busy || uploading || completed || refreshRequired || !ownerActive || String(data.customReply ?? '').trim().toLowerCase() === 'pending'}
+              disabled={!canWork || busy || uploading || completed || refreshRequired || !ownerActive}
               icon={result.closes ? <CircleSlash className="h-4 w-4" /> : <Check className="h-4 w-4" />}
             >
               {busy ? 'Saving…' : result.repeats ? 'Save feedback and plan another medical' : result.closes ? data.stop === 'declined' ? 'Save as declined' : 'Save and close order' : def.no === STAGES.length ? 'Save and mark Deployed' : 'Save and move'}
-            </Button>
+            </Button>}
           </div>
         </footer>
       </section>

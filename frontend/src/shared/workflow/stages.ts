@@ -7,6 +7,9 @@ import type { ClosureReason } from '@/shared/model/types'
  * numbers other code names are the constants below.
  */
 
+export const isPendingReply = (reply: unknown) =>
+  typeof reply === 'string' && reply.trim().toLowerCase() === 'pending'
+
 export type FieldType =
   | 'radio'
   | 'select'
@@ -713,7 +716,7 @@ for (const definition of STAGES) {
   ]
   const evaluate = definition.evaluate
   definition.evaluate = (data) => {
-    if (typeof data.customReply === 'string' && data.customReply.trim().toLowerCase() === 'pending') {
+    if (isPendingReply(data.customReply)) {
       return { canComplete: false, missing: ['Choose a stage outcome when ready'], outcome: '' }
     }
     const invalid: string[] = []
