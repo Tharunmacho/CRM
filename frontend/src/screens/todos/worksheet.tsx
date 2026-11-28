@@ -97,7 +97,7 @@ export function DailyWorksheet() {
       {sectionKeys.map((section, index) => <section key={section}>
         <h3>{index + 1}. {sections[section].label}</h3>
         {rows.filter(row => row.section === section).map((row, rowIndex) => <div className={'td-sheet-row td-sheet-' + section} key={row.id}>
-          {fields(section).map(({key: label, name}) => <label key={label}><span className={rowIndex && section === "recruitment" ? "td-repeat-label" : undefined}>{name}</span>
+          {fields(section).map(({key: label, name}) => <label key={label}><span className={rowIndex && fields(section).length <= 6 ? "td-repeat-label" : undefined}>{name}</span>
             {label === 'Priority' ? <Select value={row.values.Priority || 'normal'} onChange={e => change(row, label, e.target.value)}>
               <option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option>
             </Select> : <Input type={label === 'Time' ? 'time' : label.endsWith('date') ? 'date' : 'text'} value={row.values[label] || ''}
