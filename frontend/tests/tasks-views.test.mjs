@@ -80,7 +80,7 @@ test('an item without `outcome`, with a null one or with an unknown kind is a cu
     assert.equal(m.outcomeOf(row).kind, 'current')
     assert.equal(m.isClosed(row), false)
   }
-  assert.equal(m.rowAction(item('a', { applicationId: 'x' })), 'Complete')
+  assert.equal(m.rowAction(item('a', { applicationId: 'x' })), 'View')
 })
 
 test('a closed row reads its label, reason, stage and date; the label follows the kind', () => {
@@ -279,7 +279,7 @@ test('a closed row: the outcome replaces the progress dashes; TODAY is a dash; D
   assert.match(store, /\/applications\/\$\{encodeURIComponent\(applicationId\)\}\/ended-remarks`/)
   assert.match(store, /ended-remarks\/clear/)
   assert.match(table, /<StageCell item=\{row\} zone=\{zone\} \/>/)
-  assert.match(table, /closed \? 'View stage'|moved \|\| closed \? 'View stage'/)
+  assert.match(table, /label: 'View stage'/)
   assert.match(table, /noCountry && !closed/)
 })
 

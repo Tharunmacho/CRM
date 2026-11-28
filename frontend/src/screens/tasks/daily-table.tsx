@@ -142,11 +142,11 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
       <td data-label="Actions" className="is-actions">
         {done && <span className="dw-done-tag"><CheckCircle2 size={13} aria-hidden="true" />Done{item.completedAt ? ` ${clockTime(item.completedAt, zone)}` : ''}</span>}
         <div className="dw-actions">
-          <Button size="sm" variant={done ? 'secondary' : 'primary'} className="dw-act" onClick={onOpen} aria-label={`${action === 'Complete' ? 'Complete the stage for' : action} ${item.candidate}`}>
+          <Button size="sm" variant={done ? 'secondary' : 'primary'} className="dw-act" onClick={onOpen} aria-label={`${action} ${item.candidate}`}>
             {action}
           </Button>
           <RowMenu candidate={item.candidate} items={[
-            ...(item.applicationId ? [{ label: done ? 'View stage' : 'Open stage', icon: ArrowRight, onSelect: onOpen }] : []),
+            ...(item.applicationId ? [{ label: 'View stage', icon: ArrowRight, onSelect: onOpen }] : []),
             { label: 'Open candidate profile', icon: UserRound, onSelect: onProfile },
             ...(noCountry ? [{ label: 'Add preferred country', icon: Globe, onSelect: onProfile }] : []),
           ]} />

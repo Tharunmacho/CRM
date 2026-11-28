@@ -1,4 +1,4 @@
-import { ArrowRight, Ban, Globe, RotateCcw, SendHorizontal, Trash2, UserRound, UserX } from 'lucide-react'
+import { ArrowRight, Ban, Globe, SendHorizontal, Trash2, UserRound, UserX } from 'lucide-react'
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { countryCode } from '@/shared/lib/country-flag'
@@ -224,10 +224,9 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
                 <td data-label="Actions" className="is-actions">
                   <div className="dw-actions">
                     <Button size="sm" variant={called || moved || closed ? 'secondary' : 'primary'} className="dw-act" onClick={() => onOpen(row)}
-                      aria-label={`${action === 'Complete' ? 'Complete the stage for' : action} ${row.candidate}`}>{action}</Button>
+                      aria-label={`${action} ${row.candidate}`}>{action}</Button>
                     <RowMenu candidate={row.candidate} items={[
-                      ...(row.applicationId ? [{ label: moved || closed ? 'View stage' : 'Open stage', icon: ArrowRight, onSelect: () => onOpen(row) }] : []),
-      ...(row.applicationId && closed && work ? [{ label: 'Reopen application', icon: RotateCcw, onSelect: () => onOpen(row) }] : []),
+                      ...(row.applicationId ? [{ label: 'View stage', icon: ArrowRight, onSelect: () => onOpen(row) }] : []),
                       { label: 'Open candidate profile', icon: UserRound, onSelect: () => onProfile(row) },
                       ...(noCountry && !closed ? [{ label: 'Add preferred country', icon: Globe, onSelect: () => onProfile(row) }] : []),
                       ...(!row.applicationId && !closed && work ? [

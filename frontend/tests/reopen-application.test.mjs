@@ -69,17 +69,17 @@ test('a closed application shows the button in the stage panel and the closed ro
   assert.match(body, /function ClosedRow\(\{ app, canReopen = false/)
   assert.match(body, /\{canReopen && <div className="mt-3"><ReopenApplication app=\{app\}/)
   const uses = body.match(/<ClosedRow app=\{app\} canReopen=\{canReopenApplication\(app\.status, canWork\)\}/g) ?? []
-  assert.equal(uses.length, 2, 'the application form panel and the stage dialog both show it')
+  assert.equal(uses.length, 1, 'only the application form offers reopening')
   assert.match(body, /onRecorded=\{onStageRecorded\} onDone=\{onStageChanged\}/, 'the Tasks page re-reads at once, the host screen reloads')
   assert.doesNotMatch(body, /Reopen the application to continue working on its stages\./)
-  assert.match(body, /emptyStageHint\(app\.status, app\.currentStage, canReopenApplication\(app\.status, canWork\)\)/)
+  assert.doesNotMatch(body, /emptyStageHint\(app\.status, app\.currentStage, canReopenApplication\(app\.status, canWork\)\)/)
   // Reopening a finished STAGE stays as it was (admin only)
   assert.match(body, /Reopen stage \{stage\}/)
 })
 
-test('the Tasks row menu offers Reopen application on Declined / Rejected rows that have a placement, for people who may work them', async () => {
+test('the Tasks row menu opens the monitor without a reopen action', async () => {
   const table = await code('../src/screens/tasks/task-table.tsx')
-  assert.match(table, /\.\.\.\(row\.applicationId && closed && work \? \[\{ label: 'Reopen application', icon: RotateCcw, onSelect: \(\) => onOpen\(row\) \}\] : \[\]\)/)
+  assert.doesNotMatch(table, /\.\.\.\(row\.applicationId && closed && work \? \[\{ label: 'Reopen application', icon: RotateCcw, onSelect: \(\) => onOpen\(row\) \}\] : \[\]\)/)
 })
 
 test('the application form footnote uses the closed wording', async () => {

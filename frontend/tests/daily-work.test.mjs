@@ -40,7 +40,7 @@ test('the list is split into the candidates to work and the Done today group, ea
 })
 
 test('a row offers Complete on a placement, Open (the application form) without one, and View once done today', () => {
-  assert.equal(m.rowAction(item({ applicationId: 'app-1' })), 'Complete')
+  assert.equal(m.rowAction(item({ applicationId: 'app-1' })), 'View')
   assert.equal(m.rowAction(item()), 'Open')
   assert.equal(m.rowAction(item({ applicationId: 'app-1', status: 'done' })), 'View')
 })
@@ -83,7 +83,7 @@ test('the table has the agreed sheet columns and no Deadline column; the Recruit
   const screen = await code('../src/screens/tasks/daily-work.tsx')
   assert.match(screen, /navigate\(applicationFormHref\(row\.candidateId\)\)/)
   assert.match(table, /Open candidate profile/)
-  assert.match(table, /Open stage/)
+  assert.match(table, /View stage/)
   assert.doesNotMatch(table, /Add remark/, 'no typing in the Remarks cell: it is a dropdown of remark templates')
   assert.match(table, /Remark for/)
 })
@@ -246,7 +246,7 @@ test('what a recruiter did today: called, stage moved, remarked; the board count
 
 test('rowAction: View once done today, Complete on a placement, Open otherwise', () => {
   assert.equal(m.rowAction(item({ status: 'done', applicationId: 'a1' })), 'View')
-  assert.equal(m.rowAction(item({ applicationId: 'a1' })), 'Complete')
+  assert.equal(m.rowAction(item({ applicationId: 'a1' })), 'View')
   assert.equal(m.rowAction(item()), 'Open')
 })
 

@@ -317,8 +317,8 @@ export function referralLabel(referral: DailyItem['referral']): string {
 }
 
 /** The row's button: Complete (a placement to finish a stage on), Open (the application form), View once done today or when the placement ended. */
-export function rowAction(item: Pick<DailyItem, 'status' | 'applicationId'> & { outcome?: DailyItem['outcome'] }): 'Complete' | 'Open' | 'View' {
-  return item.status === 'done' || isClosed(item) ? 'View' : item.applicationId ? 'Complete' : 'Open'
+export function rowAction(item: Pick<DailyItem, 'status' | 'applicationId'> & { outcome?: DailyItem['outcome'] }): 'Open' | 'View' {
+  return item.applicationId || item.status === 'done' || isClosed(item) ? 'View' : 'Open'
 }
 
 // ------------------------------------------------------------------------------------------------ status views (Declined, Rejected, Travelled)

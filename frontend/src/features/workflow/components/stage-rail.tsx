@@ -40,7 +40,7 @@ export function StageRail({
           <li
             key={stage.no}
             className={cn('sr-seg', `is-${state}`)}
-            title={state === 'todo' ? `${label} (not started)` : state === 'now' ? `${label} (current)` : state === 'closed' ? `${label} (closed here)` : `${label} (done)`}
+            title={state === 'todo' ? label : state === 'now' ? `${label} (current)` : state === 'closed' ? `${label} (closed here)` : `${label} (done)`}
             aria-current={state === 'now' ? 'step' : undefined}
           >
             {numbered ? <span className="tnum">{stage.no}</span> : <span className="sr-sr">{label}</span>}

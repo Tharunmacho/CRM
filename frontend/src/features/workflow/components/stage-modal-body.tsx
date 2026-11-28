@@ -6,16 +6,12 @@ import {
   Building2,
   Check,
   CheckCircle2,
-  ChevronDown,
   CircleDot,
   CircleSlash,
-  FileText,
   ListChecks,
   Lock,
   MessageSquarePlus,
   RotateCcw,
-  ShieldCheck,
-  Trophy,
   User,
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
@@ -37,7 +33,6 @@ import {
   closureLabels,
   closureTab,
   fieldVisible,
-  MEDICAL_STAGE,
   stageByNo,
   userRefId,
   userRefName,
@@ -48,7 +43,7 @@ import { advanceSummary, withAdvanceStatus } from '@/shared/workflow/advance'
 import type { Application, FileVersion, StageRecord } from '@/shared/model/types'
 import { Dialog } from '@/shared/ui/overlay'
 import { ReopenApplication } from './reopen-application'
-import { canReopenApplication, emptyStageHint } from '../reopen-application'
+import { canReopenApplication } from '../reopen-application'
 import { Badge } from '@/shared/ui/display'
 import {
   Button,
@@ -64,7 +59,6 @@ import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { refreshSilently, refreshUntil } from '@/shared/state/refresh-retry'
 import { useCandidateDocuments } from '@/features/candidates/use-candidate-documents'
 import { SlaMeter, StageRail } from './stage-rail'
-import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
 import { agentName } from '@/features/candidates/data-bank-search'
 import { StageReplies } from './stage-replies'
 import '@/styles/candidate-v2.css'
@@ -106,33 +100,22 @@ export function StageModal({
     const timer = window.setTimeout(() => {
       const section = document.querySelector<HTMLElement>(`[data-sm-stage="${focusStage}"]`)
       if (!section) return
-      section.querySelector('details')?.setAttribute('open', '')
       section.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }, 80)
     return () => window.clearTimeout(timer)
   }, [open, focusStage, snapshot.ready, applicationId, embedded])
-  // Open on the stage that needs work: finished stages stay collapsed above, so the current one is the first thing you edit.
-  useEffect(() => {
-    if (embedded || !open || !snapshot.ready || focusStage) return
-    const timer = window.setTimeout(() => {
-      const steps = document.querySelectorAll<HTMLElement>('.sm-timeline > .sm-step')
-      const target = document.querySelector<HTMLElement>('.sm-timeline > .sm-step.is-current') ?? steps[steps.length - 1]
-      target?.scrollIntoView({ block: 'start' })
-    }, 120)
-    return () => window.clearTimeout(timer)
-  }, [open, snapshot.ready, applicationId, embedded])
   const app = store.applications.find((a) => a.id === applicationId)
   // Who reopened an earlier try, and when. A failed read is not an error: the reason is still shown.
   const [reopenings, setReopenings] = useState<Reopening[]>([])
   const reopenCount = app ? app.stages.filter((record) => record.reopenedReason).length : 0
   useEffect(() => {
-    if (!open || !applicationId || reopenCount === 0) { setReopenings([]); return }
+    if (!embedded || !open || !applicationId || reopenCount === 0) { setReopenings([]); return }
     let current = true
     api.get<Reopening[]>(`/applications/${encodeURIComponent(applicationId)}/reopenings`)
       .then((rows) => { if (current && Array.isArray(rows)) setReopenings(rows) })
       .catch(() => { if (current) setReopenings([]) })
     return () => { current = false }
-  }, [open, applicationId, reopenCount])
+  }, [embedded, open, applicationId, reopenCount])
   const [files, setFiles] = useState<ApplicationFile[]>([])
   const [fileError, setFileError] = useState(false)
   const [fileRetry, setFileRetry] = useState(0)
@@ -144,17 +127,17 @@ export function StageModal({
   useEffect(() => { reportBusy?.(pending || reopening); return () => reportBusy?.(false) }, [pending, reopening, reportBusy])
 
   useEffect(() => {
-    if (!open || !applicationId) return
+    if (!embedded || !open || !applicationId) return
     let live = true
     setFiles([])
     setFileError(false)
     // The files of a stage are the assigned recruiter's to open (the server refuses anyone else); nothing to fetch for a read-only visitor.
-    if (!canWorkCandidate(store.me, app ? store.candidate(app.candidateId) : undefined)) return
+    if (!app || !store.me || store.me.id !== store.candidate(app.candidateId)?.ownerId) return
     api.get<ApplicationFile[]>(`/files?entity_type=application&entity_id=${encodeURIComponent(applicationId)}`)
       .then((rows) => { if (live) setFiles((current) => [...rows, ...current.filter((file) => !rows.some((row) => row.id === file.id))]) })
       .catch(() => { if (live) setFileError(true) })
     return () => { live = false }
-  }, [applicationId, open, fileRetry])
+  }, [embedded, applicationId, open, fileRetry])
 
   const cand = app ? store.candidate(app.candidateId) : undefined
   const order = app ? store.order(app.orderId) : undefined
@@ -187,12 +170,10 @@ export function StageModal({
   }
   const owner = store.user(cand.ownerId)
 
-  const canWork = canWorkCandidate(store.me, cand)
-  const readOnlyReason = workRefusal(store.me, cand, owner?.name)
+  const canWork = !!store.me && store.me.id === cand.ownerId
+  const readOnlyReason = owner ? `Stage entry is assigned to ${owner.name}.` : 'Assign a recruiter to enter stage feedback.'
   const effective = app.stages.filter((record) => !record.reopenedReason)
-  const superseded = app.stages.filter((record) => record.reopenedReason)
   const live = app.status === 'active' ? app.currentStage : null
-  const doneStages = STAGES.filter((definition) => effective.some((record) => record.stage === definition.no) && definition.no !== live)
   const recorded = new Set(effective.map((record) => record.stage)).size
 
   if (embedded) {
@@ -208,10 +189,9 @@ export function StageModal({
       {fileError && <p className="sm-alert" role="alert">We could not load the documents. Feedback is still available. <button type="button" className="underline" onClick={() => setFileRetry((value) => value + 1)}>Retry documents</button></p>}
       {current ? <CurrentStage key={`${app.id}-${app.currentStage}-${app.stages.length}`} app={app} canWork={canWork && !reopening} onDirtyChange={setDirty} onBusyChange={setPending} files={files} onUploaded={(file) => setFiles((items) => [...items.filter((item) => item.id !== file.id), file])} onStageChanged={onStageChanged} onStageRecorded={onStageRecorded} compact />
         : <section className="sm-card sm-inline-history">
-          <header className="sm-inline-title"><div><small>Stage {selectedStage.no} of {STAGES.length}</small><h3>{selectedStage.title}</h3></div><Badge tone={activeRecords.length ? 'green' : 'neutral'} variant="dot">{activeRecords.length ? 'Saved history' : 'Not started'}</Badge></header>
-          {selectedRecords.length === 0 && <p className="sm-hint">No feedback has been saved for this stage yet. {emptyStageHint(app.status, app.currentStage, canReopenApplication(app.status, canWork))}</p>}
+          <header className="sm-inline-title"><div><small>Stage {selectedStage.no} of {STAGES.length}</small><h3>{selectedStage.title}</h3></div>{activeRecords.length > 0 && <Badge tone="green" variant="dot">Saved history</Badge>}</header>
           {selectedRecords.map((record) => <div className="sm-inline-attempt" key={`${record.stage}-${record.attempt}`}>{record.reopenedReason && <ReopenedNote record={record} reopenings={reopenings} />}<CompletedStage record={record} files={files} app={app} /></div>)}
-          {activeRecords.length > 0 && <ReopenStage app={app} stage={selectedStage.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Discard unsaved feedback and reopen this stage?')} onStageChanged={onStageChanged} />}
+          {canWork && activeRecords.length > 0 && <ReopenStage app={app} stage={selectedStage.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Discard unsaved feedback and reopen this stage?')} onStageChanged={onStageChanged} />}
         </section>}
       {current && selectedRecords.length > 0 && <details className="sm-extra"><summary>Earlier feedback and attempts ({selectedRecords.length})</summary><div className="mt-4 space-y-6">{selectedRecords.map((record) => <div key={`${record.stage}-${record.attempt}`}>{record.reopenedReason && <ReopenedNote record={record} reopenings={reopenings} />}<CompletedStage record={record} files={files} app={app} /></div>)}</div></details>}
     </div>
@@ -220,7 +200,7 @@ export function StageModal({
   return (
     <Dialog
       open={open}
-      onClose={() => { if (!pending && !reopening && (!dirty || window.confirm('Throw away changes you have not saved?'))) onClose() }}
+      onClose={onClose}
       width="full"
       title="Stages for this order"
       hideHeading
@@ -229,88 +209,22 @@ export function StageModal({
         <div className="sm-wrap">
           <ApplicationHeader app={app} recorded={recorded} effective={effective} />
 
-          {!owner?.active && <p role="status" className="sm-note"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Give this candidate an active recruiter (on their profile) before you finish or reopen a stage. You can still save drafts.</p>}
-          {!canWork && (
-            <p className="sm-note">
-              <Lock className="h-4 w-4" aria-hidden="true" />
-              {readOnlyReason} You can read the stages, but you cannot fill them in.
-            </p>
-          )}
-
-          <ol className="sm-timeline" aria-label="All recruitment stages">
-            {fileError && <li className="sm-alert" role="alert">We could not load the files. <button type="button" className="underline" onClick={() => setFileRetry((v) => v + 1)}>Try again</button></li>}
-            {doneStages.map((definition) => {
-              const records = effective.filter((record) => record.stage === definition.no)
-              const latest = records[records.length - 1]
-              const negative = NEGATIVE_OUTCOMES.includes(latest.outcome)
-              return <li key={`${definition.no}-${latest.attempt}`} data-sm-stage={definition.no} className={cn('sm-step', negative ? 'is-closed' : 'is-done')}>
-                <span className="sm-node" aria-hidden="true">{negative ? definition.no : <Check className="h-4 w-4" />}</span>
-                <details className="sm-card group">
-                  <summary className="sm-summary">
-                    <span className="sm-summary-copy"><b>{definition.no}. {definition.title}</b><span>Completed by {store.user(latest.completedBy)?.name ?? 'Former team member'} · {dateTimeLabel(latest.completedAt)}</span></span>
-                    <Badge tone={negative ? 'stamp' : 'green'} variant="dot">{latest.outcome}</Badge>
-                    <ChevronDown className="sm-chev h-4 w-4" aria-hidden="true" />
-                  </summary>
-                  <div className="sm-done-body">{records.map((record) => <CompletedStage key={`${record.stage}-${record.attempt}`} record={record} files={files} app={app} />)}
-                    <ReopenStage app={app} stage={definition.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Reopening replaces the stage you are on and throws away changes you have not saved. Continue?')} onStageChanged={onStageChanged} />
-                  </div>
-                </details>
+          <ol className="sm-timeline" aria-label="Recruitment stages">
+            {STAGES.map(stage => {
+              const latest = effective.filter(record => record.stage === stage.no)
+                .reduce<StageRecord | undefined>((last, record) => !last || record.attempt > last.attempt ? record : last, undefined)
+              const negative = latest && NEGATIVE_OUTCOMES.includes(latest.outcome)
+              const current = stage.no === live
+              const title = latest && !negative && stage.key === 'prescreening' ? 'Prescreened' : stage.title
+              return <li key={stage.no} data-sm-stage={stage.no} className={cn('sm-step', current ? 'is-current' : negative ? 'is-closed' : latest ? 'is-done' : 'is-upcoming')}>
+                <span className="sm-node" aria-hidden="true">{latest && !negative ? <Check className="h-4 w-4" /> : stage.no}</span>
+                <div className="sm-card flex flex-wrap items-center justify-between gap-2 px-5 py-4">
+                  <b>{title}</b>
+                  {latest?.completedAt && <time className="ml-auto text-right tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
+                </div>
               </li>
             })}
-            {live === MEDICAL_STAGE && effective.some((record) => record.stage === MEDICAL_STAGE) && <li className="sm-step is-done">
-              <span className="sm-node" aria-hidden="true">6</span>
-              <details className="sm-card">
-                <summary className="sm-summary">
-                  <span className="sm-summary-copy"><b>Previous medical attempts ({effective.filter((record) => record.stage === MEDICAL_STAGE).length})</b><span>The medical is being done again. Earlier tries stay on record.</span></span>
-                  <Badge tone="amber" variant="dot">Unfit: reapplying</Badge>
-                  <ChevronDown className="sm-chev h-4 w-4" aria-hidden="true" />
-                </summary>
-                <div className="sm-done-body">{effective.filter((record) => record.stage === MEDICAL_STAGE).map((record) => <CompletedStage key={record.attempt} record={record} files={files} app={app} />)}</div>
-              </details>
-            </li>}
-            {app.status === 'active' ? (
-              <li className="sm-step is-current" data-sm-stage={app.currentStage}>
-                <span className="sm-node" aria-hidden="true">{app.currentStage}</span>
-                <CurrentStage
-                  key={`${app.id}-${app.currentStage}-${app.stages.length}`}
-                  app={app}
-                  canWork={canWork && !reopening}
-                  onDirtyChange={setDirty}
-                  onBusyChange={setPending}
-                  files={files}
-                  onUploaded={(file) => setFiles((current) => [...current.filter((item) => item.id !== file.id), file])}
-                  onStageChanged={onStageChanged}
-                  onStageRecorded={onStageRecorded}
-                />
-              </li>
-            ) : app.status === 'deployed' ? (
-              <li className="sm-step is-deployed"><span className="sm-node" aria-hidden="true"><Trophy className="h-4 w-4" /></span><DeployedRow /></li>
-            ) : (
-              <li className="sm-step is-closed"><span className="sm-node" aria-hidden="true"><CircleSlash className="h-4 w-4" /></span><ClosedRow app={app} canReopen={canReopenApplication(app.status, canWork)} disabled={!owner?.active || pending || reopening} onRecorded={onStageRecorded} onDone={onStageChanged} /></li>
-            )}
-            {STAGES.filter((definition) => definition.no > app.currentStage && !effective.some((record) => record.stage === definition.no)).map((definition) => (
-              <li key={definition.no} className="sm-step is-upcoming" data-sm-stage={definition.no}>
-                <span className="sm-node" aria-hidden="true">{definition.no}</span>
-                <details className="sm-card">
-                  <summary className="sm-summary">
-                    <span className="sm-summary-copy"><b>{definition.no}. {definition.title}</b><span>Not started</span></span>
-                    <ChevronDown className="sm-chev h-4 w-4" aria-hidden="true" />
-                  </summary>
-                  <div className="sm-done-body"><p className="sm-hint">{definition.summary}</p><p className="sm-hint">No feedback has been saved for this stage. {app.status === 'active' ? 'Save feedback and complete the current stage to continue in order.' : 'The application must be reopened before work can continue.'}</p></div>
-                </details>
-              </li>
-            ))}
           </ol>
-
-          {superseded.length > 0 && <details className="sm-extra">
-            <summary>Earlier tries kept after reopening ({superseded.length})</summary>
-            <p className="sm-hint">These earlier tries stay on record. They do not count towards the progress now.</p>
-            <div className="mt-4 space-y-6">{superseded.map((record) => <div key={`${record.stage}-${record.attempt}`}>
-              <ReopenedNote record={record} reopenings={reopenings} />
-
-              <CompletedStage record={record} files={files} app={app} />
-            </div>)}</div>
-          </details>}
         </div>
       </div>
     </Dialog>
@@ -360,21 +274,14 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
   const client = store.company(order.companyId)!
   const designation = store.designation(order.designationId)!
   const owner = store.user(cand.ownerId)
-  const { documents: candidateDocuments, loading: documentsLoading } = useCandidateDocuments(cand)
-  const clearance = candidateDocuments.find(slot => slot.key === 'emigration')
-  const clearanceFile = newestFileVersions(clearance?.versions ?? [])[0]
-  const clearanceRecorded = clearanceFile || clearance?.uploaded || clearance?.fileUploaded || clearance?.manualStatus?.uploaded
   const referrer = agentName(cand)
-  const referringLabel = /^care\s*india(?:\s+overseas)?(?:\s+(?:pvt\.?|private)\s*(?:ltd\.?|limited))?$/i.test(referrer) ? 'CareIndia' : referrer
+  const referringLabel = /^care\s*india(?:\s+overseas)?(?:\s+(?:pvt\.?|private)\s*(?:ltd\.?|limited))?$/i.test(referrer) ? 'Care India' : referrer
   const facts: [string, typeof User, string, string?][] = [
-    ['Company name', Building2, client.name, order.country?.trim() || 'Not recorded'],
-    ['Job position', Briefcase, designation.title],
-    ['Referring agent', User, referringLabel || 'Not recorded'],
-    ['Recruiter', User, owner?.name ?? 'Not assigned'],
-    ['Passport number', BookUser, cand.passportNo || 'Not recorded'],
-    ['Passport expiry date', BookUser, cand.passportExpiry ? dateLabel(cand.passportExpiry) : 'Not recorded'],
-    ['Emigration status', ShieldCheck, clearanceRecorded ? 'Document on file' : documentsLoading ? 'Loading...' : 'No document recorded'],
-    ['Emigration document', FileText, clearanceFile?.name || (documentsLoading ? 'Loading...' : 'Not recorded')],
+    ['Company name', Building2, client.name, order.country?.trim()],
+    ['Job title', Briefcase, designation.title],
+    ['Referring agent', User, referringLabel],
+    ['Recruiter', User, owner?.name ?? ''],
+    ['Passport number', BookUser, cand.passportNo || ''],
   ]
   const statusTone = app.status === 'closed' ? 'stamp' : app.status === 'deployed' ? 'green' : 'navy'
   const statusLabel = app.status === 'active' ? 'Active' : app.status === 'deployed' ? 'Deployed' : 'Closed'
@@ -418,7 +325,6 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
 function CompletedStage({ record, files, app }: { record: StageRecord; files: ApplicationFile[]; app: Application }) {
   const store = useStore()
   const def = stageByNo(record.stage)
-  const by = store.user(record.completedBy)
   const negative = NEGATIVE_OUTCOMES.includes(record.outcome)
   // An advance saved before it had a status reads as Collected when it holds an amount; the same words the tracker sheet uses.
   const data = record.stage === ADVANCE_STAGE ? withAdvanceStatus(record.data) : record.data
@@ -427,11 +333,8 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
   return (
     <section>
       <header className="sm-attempt-head">
-        <div>
-          <h3>Attempt {record.attempt}</h3>
-          <p>Recorded by {by?.name ?? 'Former team member'} on {dateTimeLabel(record.completedAt)}</p>
-        </div>
-        <Badge tone={negative ? 'stamp' : 'green'} variant="dot">{record.outcome}</Badge>
+        {record.outcome && record.outcome !== 'Completed manually' && <Badge tone={negative ? 'stamp' : 'green'} variant="dot">{record.outcome}</Badge>}
+        <time className="ml-auto" dateTime={record.completedAt}>{dateTimeLabel(record.completedAt)}</time>
       </header>
 
       <dl className="sm-record-fields">
@@ -1084,18 +987,6 @@ function StageFieldInput({
 }
 
 /* ----------------------------------------------------------- Terminal rows */
-
-function DeployedRow() {
-  return (
-    <section className="sm-card sm-end is-deployed animate-stamp-in">
-      <span className="sm-end-icon" aria-hidden="true"><Trophy className="h-5 w-5" /></span>
-      <div>
-        <b>Deployed</b>
-        <p>All 13 stages are done. The order's deployed count went up by one. When deployed equals openings, the order becomes Filled.</p>
-      </div>
-    </section>
-  )
-}
 
 function ClosedRow({ app, canReopen = false, disabled = false, onRecorded, onDone }: { app: Application; canReopen?: boolean; disabled?: boolean; onRecorded?: () => void; onDone?: () => void }) {
   const tab = closureTab(app.closureReason)
