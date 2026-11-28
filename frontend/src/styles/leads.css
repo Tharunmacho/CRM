@@ -359,7 +359,7 @@
 .ld-rm-chip.is-bad { background: var(--error-fill); color: var(--error-ink); }
 
 .ld-rm-day + .ld-rm-day { margin-top: 6px; }
-.ld-rm-day > h4 { margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-faint); font-size: 12px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--text-muted); }
+.ld-rm-day > h4 { margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-faint); font-size: 12px; font-weight: 600; letter-spacing: .03em; text-transform: none; color: var(--text-muted); }
 .ld-rm-events { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
 .ld-rm-event { position: relative; display: flex; gap: 12px; padding-bottom: 14px; }
 .ld-rm-event:not(:last-child)::before { content: ''; position: absolute; left: 13px; top: 30px; bottom: 2px; width: 2px; border-radius: 2px; background: var(--border-main); }

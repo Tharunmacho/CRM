@@ -11,7 +11,7 @@
  */
 :root:root .tb-blue .ui-data-table.ui-data-table thead tr { border: 0; background: none; }
 :root:root .tb-blue .ui-data-table.ui-data-table thead th {
-  height: 44px; padding: 0 14px; overflow: hidden; vertical-align: middle; text-align: var(--table-align, center); text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap;
+  height: 44px; padding: 0 14px; overflow: hidden; vertical-align: middle; text-align: var(--table-align, center); text-overflow: ellipsis; text-transform: none; white-space: nowrap;
   border-color: var(--primary); border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); box-shadow: none;
   font-size: 11.5px; font-weight: 700; letter-spacing: .05em; line-height: 1.2;
 }

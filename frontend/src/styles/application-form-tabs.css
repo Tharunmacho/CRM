@@ -69,7 +69,7 @@
 .af .af-complete-docs { gap: 8px; padding-top: 16px; }
 .af .af-complete-docs-line { font-size: 12.5px; line-height: 16px; }
 .af .af-card.af-missing-card { padding: 20px 20px 12px; }
-.af .af-side-h { margin: 0 0 8px; font-size: 12px; font-weight: 700; line-height: 16px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.af .af-side-h { margin: 0 0 8px; font-size: 12px; font-weight: 700; line-height: 16px; letter-spacing: .06em; text-transform: none; color: var(--text-muted); }
 .af .af-missing li { min-height: 40px; padding: 4px 0; gap: 8px; font-size: 13px; line-height: 16px; }
 .af .af-missing.has-action li { grid-template-columns: 16px minmax(0, 1fr) 88px; }
 .af .af-missing-dot { width: 8px; height: 8px; box-shadow: 0 0 0 4px var(--warning-fill); }
@@ -93,7 +93,7 @@
 .af .af-context-cells { display: grid; flex: 1 1 auto; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);   /* one equal column per fact that is shown (client, job, [recruiter], stage, DOC): an absent recruiter no longer shifts the stage into a narrow column */ align-items: stretch; min-width: 0; margin: 0; }
 .af .af-ctx { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 0 16px; border-left: 1px solid var(--af-line); }
 .af .af-ctx:first-child { padding-left: 0; border-left: 0; }
-.af .af-ctx dt { margin: 0; font-size: 12px; font-weight: 600; line-height: 16px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.af .af-ctx dt { margin: 0; font-size: 12px; font-weight: 600; line-height: 16px; letter-spacing: .04em; text-transform: none; color: var(--text-muted); }
 .af .af-ctx dd { display: flex; align-items: flex-start; gap: 8px; min-width: 0; margin: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 20px; color: var(--text-main); }
 .af .af-ctx dd > svg { flex: none; width: 16px; height: 16px; position: relative; top: 2px; color: var(--primary); }
 .af .af-ctx dd > span { min-width: 0; }
@@ -322,7 +322,7 @@
 .af .af-docs-progress { gap: 12px; }
 .af .af-docs-count { font-size: 12.5px; }
 .af .af-docgroups { display: flex; flex-direction: column; gap: 24px; }
-.af .af-docgroup h3 { display: flex; align-items: center; gap: 8px; height: 16px; margin: 0 0 12px; font-size: 12px; font-weight: 700; line-height: 16px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.af .af-docgroup h3 { display: flex; align-items: center; gap: 8px; height: 16px; margin: 0 0 12px; font-size: 12px; font-weight: 700; line-height: 16px; letter-spacing: .06em; text-transform: none; color: var(--text-muted); }
 .af .af-docgroup h3 small { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-light); }
 .af .af-docgroup .af-doclist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 288px), 1fr)); gap: 12px; align-items: stretch; border: 0; border-radius: 0; overflow: visible; }
 .af .af-docgroup .af-docrow {
@@ -366,7 +366,7 @@
 /* On a phone a group folds to one 44px line (name, how many, a chevron) so Documents is two screens at most. */
 .af .af-docgroup.is-foldable h3 { height: auto; margin: 0; }
 .af .af-docgroup.is-foldable:not(.is-folded) h3 { margin: 0 0 8px; }
-.af .af-docgroup-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--af-line); border-radius: 8px; background: var(--tint-1); color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; text-align: left; cursor: pointer; }
+.af .af-docgroup-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--af-line); border-radius: 8px; background: var(--tint-1); color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: none; text-align: left; cursor: pointer; }
 .af .af-docgroup-toggle small { margin-left: auto; }
 .af .af-docgroup-toggle svg { flex: none; width: 16px; height: 16px; transition: transform .14s; }
 .af .af-docgroup-toggle[aria-expanded='true'] svg { transform: rotate(180deg); }

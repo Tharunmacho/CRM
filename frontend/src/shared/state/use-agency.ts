@@ -10,7 +10,7 @@ export function useAgency() {
   const { settings, publicAgency } = useStore()
   const name = agencyName(settings, publicAgency)
   const shortName = agencyShortName(settings, publicAgency)
-  useEffect(() => { document.title = documentTitle(name).toLowerCase() }, [name])
+  useEffect(() => { document.title = documentTitle(name) }, [name])
   return { name, shortName }
 }
 

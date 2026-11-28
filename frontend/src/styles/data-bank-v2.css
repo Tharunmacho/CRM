@@ -62,7 +62,7 @@
 /* ---------- Filters ---------- */
 .db-filters { padding: 0 22px 18px; border-bottom: 1px solid var(--border-main); }
 .db-filterbar { display: grid; grid-template-columns: auto repeat(var(--db-cols, 6), minmax(0, 1fr)) auto; align-items: center; gap: 10px; }
-.db-filterbar-label { margin-right: 4px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.db-filterbar-label { margin-right: 4px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: none; color: var(--text-muted); }
 .db-sel { display: block; min-width: 0; }
 .db .db-filterbar .custom-select { display: block; width: 100%; }
 .db :is(.db-filterbar, .db-more, .db-foot) .custom-select-trigger { width: 100%; height: 40px; min-height: 40px; padding-inline: 12px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); font-size: 13px; box-shadow: none; }
@@ -84,7 +84,7 @@
 .db-more-grid .ui-field > span:first-child { margin-bottom: 4px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
 .db-more-grid .ui-input { width: 100%; height: 38px; font-size: 13.5px; background: var(--bg-card); border-radius: 8px; }
 .db-skill-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
-.db-skill-title { margin-right: 4px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.db-skill-title { margin-right: 4px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: none; color: var(--text-muted); }
 .db-skill-select { width: 220px; }
 .db-skill-mode { width: 200px; }
 
@@ -208,7 +208,7 @@
 .db-mini-head > .db-pill { flex: none; }
 .db-mini-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin: 0; padding: 14px 0; border-top: 1px solid var(--border-faint); border-bottom: 1px solid var(--border-faint); }
 .db-mini-meta > div { min-width: 0; }
-.db-mini-meta dt { font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
+.db-mini-meta dt { font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: none; color: var(--text-muted); }
 .db-mini-meta dd { margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 500; color: var(--text-main); }
 .db-mini-meta .db-owner, .db-mini-meta .db-source { font-size: 13.5px; }
 .db-mini-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 10px; margin-top: auto; }

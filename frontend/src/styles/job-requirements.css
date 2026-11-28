@@ -22,7 +22,7 @@
 .jr-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; color: var(--text-main); font-size: 13px; line-height: 1.35; }
 .jr-table :is(th, td) { box-sizing: border-box; padding: 6px 8px; border: 0; border-bottom: 1px solid var(--rt-line); background: var(--bg-card); text-align: center; vertical-align: middle; overflow-wrap: anywhere; }
 .jr-table tbody :is(td):not(:last-child) { border-right: 1px solid var(--rt-line); }
-.jr-table thead th { height: 44px; padding: 4px 8px; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-transform: uppercase; white-space: normal; word-break: keep-all; }
+.jr-table thead th { height: 44px; padding: 4px 8px; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-transform: none; white-space: normal; word-break: keep-all; }
 .jr-table thead th:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--on-primary) 60%, var(--primary)); }
 .jr-table thead th.is-left, .jr-table tbody td.is-left { text-align: left; padding-left: 14px; }
 .jr-table tbody td { height: 60px; }
@@ -124,7 +124,7 @@
   .jr-table tbody tr:last-child { border-bottom: 0; }
   .jr-table tbody td, .jr-table tbody .jr-row:nth-child(even) > td, .jr-table tbody .jr-row:hover > td { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 8px; height: auto; min-height: 44px; padding: 4px 0; border: 0; border-bottom: 1px dashed var(--rt-line); background: transparent; text-align: left; }
   .jr-table tbody td:last-child { border-bottom: 0; }
-  .jr-table tbody td::before { content: attr(data-label); color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .jr-table tbody td::before { content: attr(data-label); color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: none; }
   .jr-table tbody td.jr-serial { font-size: 14px; }
   .jr-table tbody td.jr-serial::before { content: 'S.No'; }
   .jr-table tbody td > * { justify-self: start; }
@@ -156,7 +156,7 @@
 @media (max-width: 640px) { .jr-cards .workspace-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .jr-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; padding: 10px 16px 12px; border-bottom: 1px solid var(--rt-line); background: var(--tint-1); }
 .jr-filter { display: grid; gap: 3px; min-width: 0; width: 178px; }
-.jr-filter > span { color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.jr-filter > span { color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .03em; text-transform: none; }
 .jr-filter-dates { width: auto; }
 .jr-daterange { display: flex; gap: 8px; }
 .jr-viewchip { align-self: center; padding: 3px 10px; border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border-control)); border-radius: 999px; background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); color: var(--primary); font-size: 12px; font-weight: 700; }
@@ -268,7 +268,7 @@
 .jr .jr-table .custom-select { display: block; width: 100%; }
 .jr .jr-table .custom-select .custom-select-trigger { width: 100%; padding-inline: 8px; }
 /* the header's Add field button fits the actions column */
-.jr .jr-addfield { gap: 3px; padding: 0 6px; font-size: 11px; letter-spacing: 0; text-transform: uppercase; }
+.jr .jr-addfield { gap: 3px; padding: 0 6px; font-size: 11px; letter-spacing: 0; text-transform: none; }
 .jr .jr-addfield svg { width: 12px; height: 12px; }
 /* beat the global table padding (8px 14px) of the shared table styles */
 html:root:root .jr .jr-table tbody td { padding: 8px 5px; }
@@ -317,6 +317,6 @@ html:root:root .jr .jr-table tbody td.is-left { padding-left: 10px; }
 
 /* the "Add field" header cell reads like the other headings: same type, centred, the whole cell is the button */
 .jr .jr-table thead th.jr-th-add { padding: 0; }
-.jr .jr-addfield { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; min-height: 44px; padding: 0 6px; border: 0; border-radius: 0; background: transparent; color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.jr .jr-addfield { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; min-height: 44px; padding: 0 6px; border: 0; border-radius: 0; background: transparent; color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: none; white-space: nowrap; }
 .jr .jr-addfield:hover { background: color-mix(in srgb, var(--on-primary) 14%, transparent); }
 .jr .jr-addfield:focus-visible { outline: 2px solid var(--on-primary); outline-offset: -3px; }

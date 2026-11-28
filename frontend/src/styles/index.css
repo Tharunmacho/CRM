@@ -72,9 +72,3 @@
     transition-duration: 0.01ms !important;
   }
 }
-
-@media screen {
-  body, body *, body ::placeholder, body ::before, body ::after, body ::file-selector-button {
-    text-transform: lowercase !important;
-  }
-}

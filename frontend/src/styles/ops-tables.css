@@ -67,7 +67,7 @@
 .ops-fees col.fc-balance { width: 8%; }
 .ops-fees col.fc-status { width: 11%; }
 .ops-fees col.fc-manage { width: 7%; }
-:root:root .ops-fees thead th { box-sizing: border-box; height: 44px; padding: 0 10px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: center; text-transform: uppercase; white-space: nowrap; overflow: hidden; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); }
+:root:root .ops-fees thead th { box-sizing: border-box; height: 44px; padding: 0 10px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: center; text-transform: none; white-space: nowrap; overflow: hidden; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); }
 :root:root .ops-fees thead th:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-header-line); }
 :root:root .ops-fees tbody td { height: 56px; padding: 8px 10px; vertical-align: middle; text-align: center; font-size: 13px; line-height: 1.35; overflow-wrap: break-word; border-bottom: var(--table-line-width, 1px) solid var(--table-line); }
 :root:root .ops-fees tbody td:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-column-line, color-mix(in srgb, var(--border-main) 55%, var(--bg-card))); }
@@ -84,7 +84,7 @@
 
 /* ---------- client detail: the candidates of a job, the same look inside the job card ---------- */
 .cd-order-list .cd-cands { box-sizing: border-box; width: calc(100% - 40px); margin: 0 20px 20px; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); border-radius: var(--table-frame-radius, 6px); overflow: hidden; }
-:root:root .cd-order-list .cd-cands thead th { box-sizing: border-box; height: 44px; padding: 0 10px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: center; text-transform: uppercase; white-space: nowrap; overflow: hidden; border-top: 0; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); }
+:root:root .cd-order-list .cd-cands thead th { box-sizing: border-box; height: 44px; padding: 0 10px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-align: center; text-transform: none; white-space: nowrap; overflow: hidden; border-top: 0; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong, var(--border-control)); }
 :root:root .cd-order-list .cd-cands thead th:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-header-line); }
 :root:root .cd-order-list .cd-cands tbody td { height: 56px; padding: 8px 10px; vertical-align: middle; text-align: center; overflow-wrap: break-word; border-bottom: var(--table-line-width, 1px) solid var(--table-line); }
 :root:root .cd-order-list .cd-cands tbody td:not(:last-child) { border-right: var(--table-line-width, 1px) solid var(--table-column-line, color-mix(in srgb, var(--border-main) 55%, var(--bg-card))); }

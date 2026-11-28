@@ -82,7 +82,7 @@
 .tw-chip.is-none { border-color: var(--warning-edge); background: var(--warning-fill); color: var(--warning-ink); }
 
 .dwb-work.is-quiet { opacity: .55; }
-.dwb-work em { flex: 0 0 56px; font-size: 11px; font-style: normal; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-light); align-self: center; }
+.dwb-work em { flex: 0 0 56px; font-size: 11px; font-style: normal; font-weight: 600; letter-spacing: .04em; text-transform: none; color: var(--text-light); align-self: center; }
 .dwb-work { flex-wrap: nowrap; gap: 4px 12px; }
 .dwb-work > span { white-space: nowrap; }
 .dwb-work { min-height: 20px; }

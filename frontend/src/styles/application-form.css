@@ -248,7 +248,7 @@ body.af-open { overflow: hidden; }
   display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; box-sizing: border-box;
   background: var(--af-brand); color: #fff; border-radius: 4px 4px 0 0;
 }
-.af-section-head h2 { margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; min-width: 0; color: inherit; }
+.af-section-head h2 { margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: none; font-weight: 700; min-width: 0; color: inherit; }
 .af-section-no { flex: none; font-size: 12px; font-weight: 700; opacity: .9; }
 .af-section-no::after { content: '.'; }
 .af-section-no.is-plain { opacity: .75; }

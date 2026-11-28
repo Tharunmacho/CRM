@@ -131,7 +131,7 @@
 .tv-table .dw-doc-input:focus { outline: 2px solid var(--primary); outline-offset: 0; border-color: var(--primary); }
 .tv-table .dw-doc-input.is-error { border-color: var(--error-ink); background: var(--error-fill, var(--bg-card)); }
 .tv-table .dw-doc-input:disabled { opacity: .6; cursor: progress; }
-.tv-table th { position: sticky; top: var(--topbar-h, 64px); z-index: 2; box-sizing: border-box; height: 44px; padding: 0 8px; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); text-align: center; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 16px; text-transform: uppercase; color: var(--on-primary); white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.tv-table th { position: sticky; top: var(--topbar-h, 64px); z-index: 2; box-sizing: border-box; height: 44px; padding: 0 8px; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); text-align: center; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 16px; text-transform: none; color: var(--on-primary); white-space: nowrap; overflow: hidden; text-overflow: clip; }
 .tv-table th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
 .tv-table td { box-sizing: border-box; height: 56px; padding: 8px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: middle; text-align: center; color: var(--text-main); }
 .tv-table td:not(:last-child) { border-right: var(--table-line-width) solid var(--table-column-line); }
@@ -244,7 +244,7 @@ body.tv-sheet-open { overflow: hidden; }
   :root:root:root .tv-table { overflow: visible; border: 0; border-radius: 0; }
   .tv-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; padding: 12px 16px; }
   :root:root .tv-table td { height: auto; padding: 6px 0; border: 0; font-size: 14px; text-align: left; }
-  .tv-table td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
+  .tv-table td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: none; color: var(--text-muted); }
   .tv-table td { min-width: 0; overflow-wrap: break-word; }
   /* cells: 1 S NO, 2 DOC, 3 Date of travel, 4 Candidate, 5 Client, 6 Country, 7 Job, 8 Agency, 9 Uploaded documents, 10 Recruiter; every one keeps its label */
   .tv-table td:is(:nth-child(1), :nth-child(2), :nth-child(3)) { white-space: normal; }

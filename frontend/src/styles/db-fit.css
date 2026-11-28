@@ -79,7 +79,7 @@
 .db-colmenu { position: relative; display: inline-flex; }
 .db-colmenu .db-refresh.is-on { border-color: var(--primary); color: var(--primary); }
 .db-colmenu-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; display: flex; flex-direction: column; gap: 6px; width: 300px; max-width: calc(100vw - 32px); padding: 10px 8px 8px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); box-shadow: 0 12px 32px rgba(15, 23, 42, .18); }
-.db-colmenu-pop p { margin: 0 6px 4px; font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
+.db-colmenu-pop p { margin: 0 6px 4px; font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: none; color: var(--text-muted); }
 .db-colmenu-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; font-size: 13.5px; color: var(--text-main); cursor: pointer; }
 .db-colmenu-row:hover { background: var(--tint-1); }
 .db-colmenu-pop p.is-sub { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-faint); }

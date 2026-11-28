@@ -32,7 +32,7 @@
 .sw-weeklabel strong { font-size: 15px; font-weight: 600; line-height: 1.35; letter-spacing: -.01em; color: var(--text-main); }
 .sw-weeklabel span { font-size: 12.5px; line-height: 1.35; color: var(--sw-muted); }
 .sw-custom { display: flex; flex-wrap: wrap; gap: 14px 16px; }
-.sw-custom label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.sw-custom label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: none; color: var(--text-muted); }
 .sw-custom :is(input) { min-width: 0; text-transform: none; letter-spacing: 0; font-weight: 400; }
 
 
@@ -259,7 +259,7 @@
  */
 :root:root .sw-scroll { border-radius: var(--table-frame-radius, 6px); }
 :root:root:root .sw-table { border-collapse: separate; border-spacing: 0; }
-:root:root:root .sw-table thead th { box-sizing: border-box; height: 44px; padding: 0 8px 0 10px; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-transform: uppercase; vertical-align: middle; white-space: nowrap; }
+:root:root:root .sw-table thead th { box-sizing: border-box; height: 44px; padding: 0 8px 0 10px; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1; text-transform: none; vertical-align: middle; white-space: nowrap; }
 :root:root:root .sw-table thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
 :root:root:root .sw-table thead th :is(button, span) { color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
 :root:root:root .sw-table thead th.num { padding: 0 14px 0 8px; text-align: right; }
@@ -297,7 +297,7 @@
   :root:root:root .sw-scroll .sw-table.sw-staff thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   :root:root:root .sw-scroll .sw-table.sw-staff :is(tbody, tfoot) tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin-top: 10px; padding: 12px; border: var(--table-line-width) solid var(--table-line); border-radius: var(--table-frame-radius, 6px); }
   :root:root:root .sw-scroll .sw-table.sw-staff :is(tbody, tfoot) :is(td, th) { display: block; height: auto; min-width: 0; padding: 0; border: 0; text-align: left; overflow-wrap: break-word; }
-  :root:root:root .sw-scroll .sw-table.sw-staff :is(tbody, tfoot) td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+  :root:root:root .sw-scroll .sw-table.sw-staff :is(tbody, tfoot) td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: none; color: var(--text-muted); }
   :root:root:root .sw-scroll .sw-table.sw-staff :is(tbody, tfoot) :is(th:first-child, td:first-child, td[colspan]) { grid-column: 1 / -1; position: static; }
   :root:root:root .sw-scroll .sw-table.sw-staff :is(tbody, tfoot) td:is(:first-child, [colspan])::before { display: none; }
   :root:root:root .sw-scroll .sw-table.sw-staff :is(tbody, tfoot) td:empty { display: none; }
@@ -309,7 +309,7 @@
   :root:root:root .sw-scroll .sw-table.sw-leads thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   :root:root:root .sw-scroll .sw-table.sw-leads :is(tbody, tfoot) tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin-top: 10px; padding: 12px; border: var(--table-line-width) solid var(--table-line); border-radius: var(--table-frame-radius, 6px); }
   :root:root:root .sw-scroll .sw-table.sw-leads :is(tbody, tfoot) :is(td, th) { display: block; height: auto; min-width: 0; padding: 0; border: 0; text-align: left; overflow-wrap: break-word; }
-  :root:root:root .sw-scroll .sw-table.sw-leads :is(tbody, tfoot) td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+  :root:root:root .sw-scroll .sw-table.sw-leads :is(tbody, tfoot) td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: none; color: var(--text-muted); }
   :root:root:root .sw-scroll .sw-table.sw-leads :is(tbody, tfoot) :is(th:first-child, td:first-child, td[colspan]) { grid-column: 1 / -1; position: static; }
   :root:root:root .sw-scroll .sw-table.sw-leads :is(tbody, tfoot) td:is(:first-child, [colspan])::before { display: none; }
   :root:root:root .sw-scroll .sw-table.sw-leads :is(tbody, tfoot) td:empty { display: none; }
@@ -321,7 +321,7 @@
   :root:root:root .sw-scroll .sw-table.sw-matrix thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   :root:root:root .sw-scroll .sw-table.sw-matrix :is(tbody, tfoot) tr { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px 14px; margin-top: 10px; padding: 12px; border: var(--table-line-width) solid var(--table-line); border-radius: var(--table-frame-radius, 6px); }
   :root:root:root .sw-scroll .sw-table.sw-matrix :is(tbody, tfoot) :is(td, th) { display: block; height: auto; min-width: 0; padding: 0; border: 0; text-align: left; overflow-wrap: break-word; }
-  :root:root:root .sw-scroll .sw-table.sw-matrix :is(tbody, tfoot) td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+  :root:root:root .sw-scroll .sw-table.sw-matrix :is(tbody, tfoot) td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: none; color: var(--text-muted); }
   :root:root:root .sw-scroll .sw-table.sw-matrix :is(tbody, tfoot) :is(th:first-child, td:first-child, td[colspan]) { grid-column: 1 / -1; position: static; }
   :root:root:root .sw-scroll .sw-table.sw-matrix :is(tbody, tfoot) td:is(:first-child, [colspan])::before { display: none; }
   :root:root:root .sw-scroll .sw-table.sw-matrix :is(tbody, tfoot) td:empty { display: none; }

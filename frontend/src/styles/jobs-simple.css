@@ -21,7 +21,7 @@
 /* The jobs table: 44 px header with single-line uppercase 11.5px/600 labels, rows of at least 56 px with every cell centred, 14 px side padding on header
    and cells alike, a line under every row, and the Actions header and buttons centred under it. */
 @media (min-width: 1280px) {
-  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1.2; text-align: center; text-transform: uppercase; white-space: nowrap; }
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1.2; text-align: center; text-transform: none; white-space: nowrap; }
   :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid thead th button { font: inherit; letter-spacing: inherit; text-transform: inherit; }
   :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }

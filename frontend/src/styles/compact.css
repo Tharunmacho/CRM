@@ -4,7 +4,7 @@
  */
 .form-stack { display: grid; gap: 22px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .form-context { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 12px 14px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--tint-1); }
-.form-context-label { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.form-context-label { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: none; color: var(--text-muted); }
 .form-context-title { font-size: 15px; font-weight: 600; color: var(--text-main); }
 .form-context-title span { display: block; margin-top: 1px; font-size: 13px; font-weight: 400; color: var(--text-muted); }
 .form-context-skills { display: flex; flex-wrap: wrap; gap: 6px; }

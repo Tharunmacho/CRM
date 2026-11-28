@@ -121,7 +121,7 @@ export default function ApplicationFormPage() {
     const title = document.title
     return () => { document.body.classList.remove('af-open'); document.title = title }
   }, [])
-  useEffect(() => { document.title = ['Application form', name, subtitle].filter(Boolean).join(' - ').toLowerCase() }, [name, subtitle])
+  useEffect(() => { document.title = ['Application form', name, subtitle].filter(Boolean).join(' - ') }, [name, subtitle])
 
   useEffect(() => {
     if (!dirty && !stageDirty) return

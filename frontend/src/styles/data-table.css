@@ -29,7 +29,7 @@
 :root:root .ui-data-table.is-grid thead tr { border: 0; background: var(--primary); }
 :root:root .ui-data-table.is-grid thead th {
   position: relative; box-sizing: border-box; height: 44px; padding: 0 14px; vertical-align: middle;
-  font-size: 11.5px; font-weight: 700; letter-spacing: .05em; line-height: 1; text-transform: uppercase; white-space: nowrap; overflow-wrap: normal; color: var(--on-primary);
+  font-size: 11.5px; font-weight: 700; letter-spacing: .05em; line-height: 1; text-transform: none; white-space: nowrap; overflow-wrap: normal; color: var(--on-primary);
   background: var(--primary); border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); box-shadow: none;
 }
 :root:root .ui-data-table.is-grid thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }

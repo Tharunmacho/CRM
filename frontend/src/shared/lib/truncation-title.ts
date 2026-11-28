@@ -45,18 +45,14 @@ function apply(start: EventTarget | null) {
   for (let depth = 0; el && depth < 5; depth += 1, el = el.parentElement) {
     if (el === document.body) return
     const owned = el.hasAttribute(MARK)
-    if (el.hasAttribute('title') && !owned) {
-      const lowercase = el.title.toLowerCase()
-      if (el.title !== lowercase) el.title = lowercase
-      return
-    }
+    if (el.hasAttribute('title') && !owned) return // someone wrote a better tooltip on the way up
     if (el instanceof HTMLInputElement && !['text', 'email', 'tel', 'url', 'search'].includes(el.type)) continue
     const text = textOf(el)
     const clipped = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
       ? el.scrollWidth > el.clientWidth + 1
       : isClipped(probe(el))
     if (clipped && text) {
-      el.setAttribute('title', text.toLowerCase())
+      el.setAttribute('title', text)
       el.setAttribute(MARK, '')
       return
     }

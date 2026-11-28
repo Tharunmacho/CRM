@@ -167,7 +167,7 @@
 .mb-sender-line { overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
 .mb-provenance { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0 4px; }
 .mb-body { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-faint); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14.5px; line-height: 1.7; color: var(--text-main); }
-.mb-label { margin-bottom: 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.mb-label { margin-bottom: 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: none; color: var(--text-muted); }
 .mb-attachments { margin-top: 24px; }
 .mb-attachments ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 8px; list-style: none; }
 .mb-attachment { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 8px 6px 8px 10px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); transition: border-color .14s; }

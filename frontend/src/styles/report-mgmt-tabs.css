@@ -33,7 +33,7 @@
 /* the filter row */
 .rm-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; padding: 10px 16px 12px; border-bottom: 1px solid var(--rt-line); background: var(--tint-1); }
 .rm-filter { display: grid; gap: 3px; min-width: 0; width: 196px; }
-.rm-filter > span { color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.rm-filter > span { color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .03em; text-transform: none; }
 .rm-filter-wide { width: 216px; }
 .rm-stepper { display: flex; align-items: center; gap: 6px; }
 .rm-month { height: 36px; width: 176px; min-width: 0; padding: 0 10px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 14px; }
@@ -47,7 +47,7 @@
 :root:root:root .rm-table { border: 0; border-radius: 0; overflow: visible; width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; color: var(--text-main); font-size: 13px; line-height: 1.35; }
 :root:root:root .rm-table :is(th, td) { box-sizing: border-box; padding: 6px 8px; border: 0; border-bottom: 1px solid var(--rt-line); background: var(--bg-card); text-align: center; vertical-align: middle; font-weight: 400; overflow-wrap: anywhere; }
 :root:root:root .rm-table tbody :is(td, th):not(:last-child) { border-right: 1px solid var(--rt-line); }
-:root:root:root .rm-table thead th { height: 44px; padding: 4px 8px; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-transform: uppercase; white-space: normal; overflow-wrap: normal; word-break: keep-all; text-wrap: balance; }
+:root:root:root .rm-table thead th { height: 44px; padding: 4px 8px; border-bottom: var(--table-frame-width, 1px) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-transform: none; white-space: normal; overflow-wrap: normal; word-break: keep-all; text-wrap: balance; }
 :root:root:root .rm-table thead th:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--on-primary) 60%, var(--primary)); }
 :root:root:root .rm-table :is(thead th.is-left, tbody th.is-left, tbody td.is-left, tfoot th.is-left) { padding-left: 14px; text-align: left; }
 :root:root:root .rm-table tbody th { font-weight: 600; }
@@ -100,7 +100,7 @@ button.rm-who:focus-visible { outline: 2px solid var(--primary); outline-offset:
   :root:root:root .rm-table.is-cards tbody tr > * { height: auto; }
   :root:root:root .rm-table.is-cards tbody td, :root:root:root .rm-table.is-cards tbody tr:hover > td { display: grid; grid-template-columns: 130px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 40px; padding: 4px 0; border: 0; border-bottom: 1px dashed var(--rt-line); background: transparent; text-align: left; }
   :root:root:root .rm-table.is-cards tbody td:last-child { border-bottom: 0; }
-  :root:root:root .rm-table.is-cards tbody td::before { content: attr(data-label); color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  :root:root:root .rm-table.is-cards tbody td::before { content: attr(data-label); color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: none; }
   :root:root:root .rm-table.is-cards tbody td > * { justify-self: start; text-align: left; }
   :root:root:root .rm-table.is-cards tbody th, :root:root:root .rm-table.is-cards tbody tr:hover > th { padding: 0 0 8px; border: 0; background: transparent; text-align: left; }
   :root:root:root .rm-table.is-cards td > .rm-dash { text-align: left; }

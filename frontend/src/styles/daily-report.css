@@ -171,7 +171,7 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
 .dwr-pillbtn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .dwr-changed { margin-left: 8px; font-size: 11.5px; color: var(--text-light); }
 .dr-block { padding: 4px 0 18px; }
-.dr-block h3 { margin-bottom: 8px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.dr-block h3 { margin-bottom: 8px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: none; color: var(--text-muted); }
 .dr-note-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; color: var(--text-main); }
 .dr-muted { margin-top: 8px; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
 .dr-mini { min-width: 0; }
@@ -198,7 +198,7 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
 @container dw (min-width: 1080px) {
   :root .dwr .tk-table-wrap { overflow: hidden; }
   :root .dwr .dwr-table.dw-table.dw-main { width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
-  :root .dwr .dwr-table.dw-table.dw-main thead th { box-sizing: border-box; height: 44px; padding: 4px 8px; overflow: visible; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: var(--table-align, center); text-transform: uppercase; text-wrap: wrap; white-space: normal; overflow-wrap: normal; word-break: normal; vertical-align: middle; }
+  :root .dwr .dwr-table.dw-table.dw-main thead th { box-sizing: border-box; height: 44px; padding: 4px 8px; overflow: visible; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: var(--table-align, center); text-transform: none; text-wrap: wrap; white-space: normal; overflow-wrap: normal; word-break: normal; vertical-align: middle; }
   :root .dwr .dwr-table.dw-table.dw-main thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
   :root .dwr .dwr-table.dw-table.dw-main thead th:is(.is-num, .is-tail) { padding: 4px 8px; text-align: var(--table-align, center); }
   :root .dwr .dwr-table.dw-table.dw-main thead th.dwr-name-head { padding: 4px 10px 4px 16px; text-align: var(--table-align-text, left); }
@@ -245,7 +245,7 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
 :root .dwr .dwr-status > table.dw-table tr { display: table-row; }
 :root .dwr .dwr-status > table.dw-table :is(td, th) { display: table-cell; }
 :root .dwr .dwr-status > table.dw-table { box-sizing: border-box; width: 100%; table-layout: auto; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--table-frame-radius, 6px); overflow: hidden; font-size: 13px; }
-:root .dwr .dwr-status > table.dw-table thead th { box-sizing: border-box; height: 44px; padding: 0 8px 0 10px; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: var(--table-align, center); text-transform: uppercase; white-space: normal; overflow-wrap: normal; }
+:root .dwr .dwr-status > table.dw-table thead th { box-sizing: border-box; height: 44px; padding: 0 8px 0 10px; border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: var(--table-align, center); text-transform: none; white-space: normal; overflow-wrap: normal; }
 :root .dwr .dwr-status > table.dw-table thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
 :root .dwr .dwr-status > table.dw-table thead th.is-num { padding: 4px 8px; text-align: var(--table-align, center); }
 :root .dwr .dwr-status > table.dw-table tbody :is(td, th) { box-sizing: border-box; height: 56px; padding: 8px 8px 8px 10px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); text-align: var(--table-align, center); vertical-align: middle; overflow-wrap: break-word; }

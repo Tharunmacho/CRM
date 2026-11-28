@@ -36,7 +36,7 @@
 /* ---------- Filters ---------- */
 .jv-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 14px 22px; border-bottom: 1px solid var(--border-faint); }
 .jv-filters.is-compact { padding: 12px 22px; }
-.jv-filters-label { font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-light); }
+.jv-filters-label { font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: none; color: var(--text-light); }
 .jv-chips-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .jv-chip { min-height: 34px; padding: 0 13px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); font-size: 13px; font-weight: 500; color: var(--text-muted); transition: border-color .12s, color .12s, background .12s; }
 .jv-chip:hover { border-color: var(--border-hover); color: var(--text-main); }

@@ -20,7 +20,7 @@
 .rp-seg button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .rp-dates { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; }
 .rp-filter { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-.rp-filter > span { color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.rp-filter > span { color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .03em; text-transform: none; }
 .rp-filter .ui-select, .rp-filter select { min-width: 190px; }
 .rp-link { padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: 13px; font-weight: 600; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--primary) 40%, transparent); text-underline-offset: 3px; cursor: pointer; }
 .rp-link:hover { text-decoration-color: currentColor; }

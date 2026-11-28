@@ -43,7 +43,7 @@
 .dw-table :is(th, td).is-left:not(.is-actions) { padding-inline: 8px 6px; }
 .dw-table :is(th, td).is-left[data-label='REMARKS']:not(.is-actions) { padding-inline: 5px; }
 /* headers: one alignment with their cells, uppercase, two lines allowed (CLIENT / COUNTRY, GOOGLE REVIEW) in a header tall enough for them */
-.dw-table thead th { height: 44px; padding-top: 0; padding-bottom: 0; border-top: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--tint-1); font-size: 11px; font-weight: 600; letter-spacing: .04em; line-height: 1.3; text-transform: uppercase; text-wrap: balance; color: var(--text-muted); overflow-wrap: normal; }
+.dw-table thead th { height: 44px; padding-top: 0; padding-bottom: 0; border-top: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--tint-1); font-size: 11px; font-weight: 600; letter-spacing: .04em; line-height: 1.3; text-transform: none; text-wrap: balance; color: var(--text-muted); overflow-wrap: normal; }
 .dw-table thead th + th { border-left: var(--table-line-width) solid var(--table-line); }
 /* Tasks screen only (the Reports tables sit under .dwr and keep their own look): the header row is the primary blue, the same fill as the
  * Complete button (var(--primary) with var(--on-primary) on it: white in the light themes, near-black on the lighter dark-theme blue, so
