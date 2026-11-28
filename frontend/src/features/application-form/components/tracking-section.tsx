@@ -1,8 +1,11 @@
 import { CheckSquare, ChevronRight, Square, XSquare } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
-import { TRACKING_STATUS_LABELS, formatFormDate, isOpenableRow, summariseTracking } from '../form-model'
+import { TRACKING_STATUS_LABELS, formatFormDate, isOpenableRow } from '../form-model'
 import type { TrackingRow } from '../types'
 import { Section } from './sections'
+
+/** Done and not-started rows say it with their box alone; only the states that need attention get a word. */
+const QUIET_STATUS: ReadonlySet<TrackingRow['status']> = new Set(['completed', 'not_started'])
 
 function StatusMark({ status }: { status: TrackingRow['status'] }) {
   if (status === 'completed') return <CheckSquare className="af-box is-done" aria-hidden="true" />
@@ -25,10 +28,10 @@ export function TrackingSection({
   onOpen: (row: TrackingRow) => void
   closure?: string
 }) {
-  const summary = summariseTracking(rows)
+  const stages = rows.filter(row => row.stage > 0 || (row.key === 'invoice_generated' && row.status === 'completed'))
   return (
-    <Section no={7} aside={hasOrder && rows.length ? <span className="af-aside-note">{summary.completed} of {summary.total} stages completed{closure ? ` · ${closure}` : ''}</span> : undefined}>
-      {!hasOrder || rows.length === 0 ? (
+    <Section no={7} aside={closure || undefined}>
+      {!hasOrder || stages.length === 0 ? (
         <div className="af-rowtable">
           <div className="af-track-empty">
             {hasOrder ? 'No stage information yet.' : 'This candidate is not matched to a job yet, so there are no stages to track. Choose a job at the top of the page to start the process.'}
@@ -36,33 +39,29 @@ export function TrackingSection({
         </div>
       ) : (
         <>
-          <div className="af-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={summary.percent} aria-label="Recruitment process progress">
-            <span style={{ width: `${summary.percent}%` }} className={cn(summary.failed > 0 && 'has-failed')} />
-          </div>
-          <div className="af-track" role="table" aria-label="Recruitment process tracking">
+          <div className="af-track af-track-compact" role="table" aria-label="Recruitment process tracking">
             <div className="af-track-head" role="row">
-              <span role="columnheader">Recruitment process</span>
-              <span role="columnheader">Status</span>
+              <span role="columnheader">Stage</span>
+              <span role="columnheader">Result</span>
               <span role="columnheader">Date</span>
-              <span role="columnheader" className="af-track-by-h">Completed by</span>
             </div>
-            {rows.map((row) => {
+            {stages.map((row) => {
               const openable = canOpen && isOpenableRow(row)
+              const title = row.stage === 1 && row.status === 'completed' ? 'Prescreened' : row.systemLabel || row.label
+              const outcome = row.outcome && !['completed manually', 'completed'].includes(row.outcome.toLowerCase()) ? row.outcome : ''
+              const result = outcome || (QUIET_STATUS.has(row.status) ? '' : TRACKING_STATUS_LABELS[row.status])
               const content = (
                 <>
                   <span className="af-track-name" role="cell">
                     <StatusMark status={row.status} />
                     <span className="af-track-label">
-                      <b>{row.label}</b>
-                      {row.extra && <small>Additional stage</small>}
-                      {!row.extra && row.systemLabel && row.systemLabel.toLowerCase() !== row.label.toLowerCase() && <small>{row.systemLabel}</small>}
-                      {!row.tracked && <small>Not tracked in this system</small>}
-                      {(row.outcome || row.note) && <small className="af-track-note">{[row.outcome, row.note].filter(Boolean).join(' · ')}</small>}
+                      <b>{title}</b>
                     </span>
                   </span>
-                  <span className="af-track-status" role="cell" data-label="Status"><span className={cn('af-status', `is-${row.status}`)}>{TRACKING_STATUS_LABELS[row.status]}</span></span>
-                  <span className="af-track-date" role="cell" data-label="Date">{row.date ? formatFormDate(row.date) : <span className="af-empty">–</span>}</span>
-                  <span className="af-track-by" role="cell" data-label="Completed by">{row.completedBy || <span className="af-empty">–</span>}</span>
+                  <span className="af-track-status" role="cell" data-label="Status">
+                    {result && <span className={cn('af-status', `is-${row.status}`)}>{result}</span>}
+                  </span>
+                  <span className="af-track-date" role="cell">{row.date ? formatFormDate(row.date) : ''}</span>
                   {openable && <ChevronRight className="af-track-go" aria-hidden="true" />}
                 </>
               )

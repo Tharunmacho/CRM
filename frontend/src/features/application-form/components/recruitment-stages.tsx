@@ -3,7 +3,7 @@ import { cn } from '@/shared/lib/cn'
 import { TOTAL_STAGES } from '@/shared/workflow/stages'
 import { Select } from '@/shared/ui/primitives'
 import { formatFormDate, STAGE_NAMES } from '../form-model'
-import { stageRows, stagesDoneText } from '../process-stages'
+import { stageRows } from '../process-stages'
 import { prescreenRows, type PrescreenState } from '../prescreening'
 import type { ApplicationFormData } from '../types'
 
@@ -41,7 +41,6 @@ export function RecruitmentStages({ form, canOpen, onOpen, selectedStage, prescr
     <section className="af-recruitment-stages" id="af-process" aria-labelledby="af-process-title">
       <div className="af-recruitment-heading">
         <div><Route aria-hidden="true" /><h3 id="af-process-title">Recruitment stages</h3></div>
-        {form.application && <span className="af-stage-total">{stagesDoneText(rows)}</span>}
       </div>
       <div className="af-stage-mobile-picker">
         <label htmlFor="af-stage-picker">Stage</label>

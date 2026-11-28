@@ -381,13 +381,15 @@ body.af-open { overflow: hidden; }
 .af-track-row.is-current { background: color-mix(in srgb, var(--primary) 7%, var(--bg-card)); box-shadow: inset 3px 0 0 var(--primary); }
 .af-track-row.is-failed { background: var(--error-fill); box-shadow: inset 3px 0 0 var(--error-ink); }
 .af-track-row.is-not_applicable { color: var(--text-light); }
-.af-track-name { gap: 9px; }
+.af-track-name { gap: 9px; justify-content: flex-start; }
+.af-track-head > span:first-child { justify-content: flex-start; }
+.af-track-name, .af-track-head > span:first-child { padding-left: 16px; }
 .af-box { width: 16px; height: 16px; flex: none; color: var(--text-light); }
 .af-box.is-done { color: var(--success-ink); }
 .af-box.is-failed { color: var(--error-ink); }
 .af-box.is-now { color: var(--primary); }
 .af-box.is-na { color: var(--border-hover); opacity: .6; }
-.af-track-label { display: flex; flex-direction: column; align-items: center; min-width: 0; line-height: 1.3; text-align: center; }
+.af-track-label { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.3; text-align: left; }
 .af-track-label b { font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
 .af-track-label small { font-size: 11.5px; color: var(--text-light); overflow-wrap: anywhere; }
 .af-track-label .af-track-note { color: var(--text-muted); }
@@ -664,3 +666,27 @@ body.af-open { overflow: hidden; }
   .af .af-docs-progress .af-docs-bar { width: 56px; }
   .af-sheet { padding-left: 8px; padding-right: 8px; }
 }
+
+/* Use the same tracks for the interactive sheet and the printed record. */
+.af-track-compact :is(.af-track-head, .af-track-row) {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(8ch, .8fr);
+  padding: 0;
+}
+.af-track-compact :is(.af-track-head, .af-track-row) > span {
+  grid-column: auto;
+  grid-row: auto;
+  justify-self: stretch;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 6px clamp(4px, 1vw, 12px);
+}
+.af-track-compact :is(.af-track-head, .af-track-row) > span:nth-child(3) {
+  justify-content: flex-end;
+  text-align: right;
+  padding-right: 20px;
+}
+.af-track-compact .af-track-date::before { content: none; }
+.af-track-compact .af-track-go { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
+.af-track-compact .af-status { white-space: normal; }
