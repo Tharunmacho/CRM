@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { Dialog } from '@/shared/ui/overlay'
 import { Trash2 } from 'lucide-react'
 import { format } from 'date-fns'
@@ -92,12 +92,12 @@ export function DailyWorksheet() {
   }
   return <form className="td-sheet" onSubmit={event => { event.preventDefault(); void save() }}>
     <fieldset disabled={busy}>
-      <header><h2>Daily office organiser</h2><label>Date <Input type="date" required value={date} onChange={e => setDate(e.target.value)} /></label>
-        <span>{date && format(new Date(date + 'T12:00'), 'EEEE')}</span><span>Staff in charge · {store.me.name}</span></header>
+      <header><h2>Daily office organiser</h2><div className="td-sheet-meta"><label>Date <Input type="date" required value={date} onChange={e => setDate(e.target.value)} /></label>
+        <div><span>Day</span><strong>{date && format(new Date(date + 'T12:00'), 'EEEE')}</strong></div><div><span>Staff in charge</span><strong>{store.me.name}</strong></div></div></header>
       {sectionKeys.map((section, index) => <section key={section}>
         <h3>{index + 1}. {sections[section].label}</h3>
         {rows.filter(row => row.section === section).map((row, rowIndex) => <div className={'td-sheet-row td-sheet-' + section} key={row.id}>
-          {fields(section).map(({key: label, name}) => <label key={label}><span className={rowIndex ? "td-repeat-label" : undefined}>{name}</span>
+          {fields(section).map(({key: label, name}) => <label key={label}><span className={rowIndex && section === "recruitment" ? "td-repeat-label" : undefined}>{name}</span>
             {label === 'Priority' ? <Select value={row.values.Priority || 'normal'} onChange={e => change(row, label, e.target.value)}>
               <option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option>
             </Select> : <Input type={label === 'Time' ? 'time' : label.endsWith('date') ? 'date' : 'text'} value={row.values[label] || ''}
@@ -114,7 +114,7 @@ export function DailyWorksheet() {
       {error && <p role="alert">{error}</p>}
       <Button type="submit" variant="primary" disabled={busy || !rows.some(row => row.touched)}>Save organiser</Button>
     </fieldset>
-    {editing && <Dialog open title={'Fields ? ' + sections[editing].label} onClose={() => setEditing(null)}
+    {editing && <Dialog open title={sections[editing].label + ' fields'} onClose={() => setEditing(null)}
       footer={<><Button type="button" onClick={() => setEditing(null)}>Cancel</Button><Button type="button" variant="primary" onClick={applyFields}>Save fields</Button></>}>
       <div className="grid gap-2">
         {draft.map((field, index) => <div className="flex items-center gap-2" key={field.key}>
