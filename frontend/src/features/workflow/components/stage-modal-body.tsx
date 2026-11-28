@@ -662,11 +662,17 @@ function CurrentStage({
 
         <div className="sm-feedback">
           {canWork && <StageReplies key={`${store.me?.id}:${def.no}`} userId={store.me!.id} stage={def.no} disabled={busy || completed}
-            status={pair && !data.customReply ? data[pair.field] : undefined} feedback={data.customReply ?? data.feedback} onSelect={(field, value) => {
+            status={pair && !data.customReply ? data[pair.field] : undefined} feedback={data.customReply} onSelect={(field, value) => {
               setData(previous => ({ ...previous, [field]: value, customReply: undefined, stop: pair?.choices[1][1] === value ? 'declined' : undefined,
                 ...(field === 'advanceStatus' ? { collected: value === 'collected' ? 'yes' : 'no' } : {}) }))
               setDirty(true)
             }} onChoose={applyReply} />}
+          {(canWork || Boolean(data.feedback)) && <details>
+            <summary>{data.feedback ? 'Feedback' : 'Add feedback (optional)'}</summary>
+            <Textarea aria-label="Stage feedback" rows={2} maxLength={10000}
+              value={String(data.feedback ?? '')} onChange={event => set('feedback', event.target.value)}
+              disabled={!canWork || busy || completed} />
+          </details>}
         </div>
 
         {visibleFields.length > 0 && <div className="sm-form sm-feedback">
