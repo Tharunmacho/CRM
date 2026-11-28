@@ -298,3 +298,14 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
   .sm-sub { flex-wrap: wrap; row-gap: 0; }
   .sm-facts dd { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
 }
+
+@media (min-width: 901px) {
+  .sm-facts > .sm-passport-number { grid-column: 2; }
+}
+@media (max-width: 900px) {
+  .sm-facts > div:nth-child(3), .sm-facts > div:nth-child(4) { order: 1; }
+}
+@media (max-width: 600px) {
+  .sm-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sm-facts > div:not(.sm-passport-number, .sm-passport-expiry) { grid-column: 1 / -1; }
+}

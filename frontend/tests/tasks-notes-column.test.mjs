@@ -169,8 +169,8 @@ test('the table: NOTES always a column, the Remarks cell holds only the select, 
   assert.doesNotMatch(remarks, /note|Note|Trash|NoteDeleteButton/)
   // the NOTES cell: every note, newest first, no "+N more" and no dialog list
   assert.doesNotMatch(table, /\+\{more\} more|tw-notes-more|setListing/)
-  assert.match(table, /\[\.\.\.pending, \.\.\.notesNewestFirst\(row\.notes \?\? row\.todayNotes\)\]/)
-  assert.match(table, /notes\.map\(\(note\) =>/)
+  assert.match(table, /pending\[0\] \?\? notesNewestFirst\(row\.notes \?\? row\.todayNotes\)\[0\]/)
+  assert.doesNotMatch(table, /notes\.map\(\(note\) =>/)
   assert.match(table, /noteWhen\(note\.at, zone\)/)
   assert.match(table, /<small>\{note\.by\}<\/small>/)
 })

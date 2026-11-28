@@ -26,7 +26,7 @@ import {
  * stage chip and its dashes, and a phone card has a TODAY row.
  * NOTES is a column of its own at every width and REMARKS holds only the select (a remark and a note are different things: the remark is the candidate's
  * status line, notes are free text kept as a list): the NOTES cell has an always-visible input at the top (Enter saves, Shift+Enter is a new line, Escape clears;
- * only for people who may work the candidate) and under it ALL the candidate's notes, newest on top, each with its time ("11:40", or "18 Nov 09:15" on an earlier
+ * only for people who may work the candidate) and below it the latest note, each with its time ("11:40", or "18 Nov 09:15" on an earlier
  * day), its author and its text; every note is shown in full (no height cap, no inner scroll box): the cell and the row grow with the notes. In the cards NOTES is a row of its own.
  * Every note has a small "Delete note" button for the people who may delete it (`canDeleteNote`: the note's author, the candidate's recruiter, Admin and
  * MD; the server enforces the same rule); it asks first in a small dialog, then `onDeleteNote` hides the note at once (the screen restores it and says so
@@ -105,7 +105,7 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
   const box = useRef<HTMLTextAreaElement>(null)
   const typing = canAdd && !!onAdd
   useAutoGrow(box, text, { minRows: 1, maxRows: 3, enabled: typing })
-  const notes = [...pending, ...notesNewestFirst(row.notes ?? row.todayNotes)]
+  const note = pending[0] ?? notesNewestFirst(row.notes ?? row.todayNotes)[0]
   const submit = async () => {
     if (!onAdd || saving) return
     const typed = text
@@ -136,9 +136,8 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
         </div>
       )}
       {error && <p className="tw-note-error" role="alert">{error}</p>}
-      {notes.length > 0 ? (
-        <ul className="tw-note-list" aria-label={`Notes of ${row.candidate}, newest first`}>
-          {notes.map((note) => (
+      {note ? (
+        <ul className="tw-note-list" aria-label={`Latest note for ${row.candidate}`}>
             <li key={note.id} className={cn(note.id.startsWith(PENDING_NOTE) && 'is-pending')}>
               <div className="tw-note-head">
                 <span className="tw-note-when"><time dateTime={note.at}>{noteWhen(note.at, zone)}</time><small>{note.by}</small></span>
@@ -146,7 +145,6 @@ function NotesCell({ row, zone, canAdd, authorName, onAdd, mayDelete, onAsk }: N
               </div>
               <p className="tw-note-body">{note.body}</p>
             </li>
-          ))}
         </ul>
       ) : !typing && <span className="dw-none" title="No notes yet">&mdash;</span>}
     </div>

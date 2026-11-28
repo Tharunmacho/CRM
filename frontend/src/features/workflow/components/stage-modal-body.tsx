@@ -305,7 +305,6 @@ function ApplicationHeader({ app, effective }: { app: Application; effective: St
     ['Job title', Briefcase, designation.title],
     ['Referring agent', User, referringLabel],
     ['Recruiter', User, owner?.name ?? ''],
-    ['Passport number', BookUser, cand.passportNo || ''],
   ]
   const statusTone = app.status === 'closed' ? 'stamp' : app.status === 'deployed' ? 'green' : 'navy'
   const statusLabel = app.status === 'active' ? 'Active' : app.status === 'deployed' ? 'Deployed' : 'Closed'
@@ -328,6 +327,14 @@ function ApplicationHeader({ app, effective }: { app: Application; effective: St
             <dd title={value}>{value}</dd>
             {country !== undefined && <><dt className="mt-2">Country</dt><dd title={country}>{country}</dd></>}
           </div>)}
+          <div className="sm-passport-number">
+            <dt><BookUser className="h-3.5 w-3.5" aria-hidden="true" />Passport number</dt>
+            <dd>{cand.passportNo}</dd>
+          </div>
+          <div className="sm-passport-expiry">
+            <dt><BookUser className="h-3.5 w-3.5" aria-hidden="true" />Passport expiry</dt>
+            <dd>{cand.passportExpiry ? dateLabel(cand.passportExpiry) : ''}</dd>
+          </div>
         </dl>
         <div className="sm-progress">
           <div className="sm-progress-line">
