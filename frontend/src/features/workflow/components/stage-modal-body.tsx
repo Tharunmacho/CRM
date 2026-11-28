@@ -183,7 +183,7 @@ export function StageModal({
       ? (snapshot.error || 'We could not load the stages for this application yet. Check your connection, then try again.')
       : 'Loading the stages…'
     const state = <div className="sm sm-state"><p role={failed ? 'alert' : 'status'} className="text-sm text-ink-600">{message}</p>{failed && <Button className="mt-4" variant="primary" onClick={() => { setStagesRound((value) => value + 1); snapshot.retry() }}>Try again</Button>}</div>
-    return embedded ? state : <Dialog open={open} onClose={onClose} title={cand?.name ?? 'Stages for this order'} description={cand ? 'Stages for this order' : undefined}>{state}</Dialog>
+    return embedded ? state : <Dialog open={open} onClose={onClose} title="Stages for this order" hideHeading>{state}</Dialog>
   }
   const owner = store.user(cand.ownerId)
 
@@ -223,7 +223,7 @@ export function StageModal({
       onClose={() => { if (!pending && !reopening && (!dirty || window.confirm('Throw away changes you have not saved?'))) onClose() }}
       width="full"
       title="Stages for this order"
-      description={cand.name}
+      hideHeading
     >
       <div className="sm">
         <div className="sm-wrap">

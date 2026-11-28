@@ -57,6 +57,7 @@ export function Dialog({
   open,
   onClose,
   title,
+  hideHeading = false,
   description,
   icon,
   children,
@@ -68,6 +69,7 @@ export function Dialog({
   open: boolean
   onClose: () => void
   title: string
+  hideHeading?: boolean
   description?: string
   /** An optional tile shown before the title (the caller styles it). */
   icon?: ReactNode
@@ -109,7 +111,9 @@ export function Dialog({
           widths,
         )}
       >
-        <header className="dialog-head flex shrink-0 items-start justify-between gap-4 border-b border-rule-soft px-6 py-5">
+        {hideHeading ? <div className="flex shrink-0 justify-end px-2">
+          <IconButton label="Close" className="ui-dialog-close" onClick={onClose}><X className="h-4 w-4" /></IconButton>
+        </div> : <header className="dialog-head flex shrink-0 items-start justify-between gap-4 border-b border-rule-soft px-6 py-5">
           {icon && <span className="dialog-icon shrink-0">{icon}</span>}
           <div className="min-w-0 flex-1">
             <h2 className="text-[19px] font-semibold leading-snug tracking-[-0.02em] text-ink [overflow-wrap:anywhere]">{title}</h2>
@@ -118,7 +122,7 @@ export function Dialog({
           <IconButton label="Close" className="ui-dialog-close" onClick={onClose}>
             <X className="h-4 w-4" />
           </IconButton>
-        </header>
+        </header>}
         <div className={cn('dialog-body px-6 py-5', contained ? 'dialog-scroll-body scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain sm:flex-none sm:overflow-visible')}>{children}</div>
         {footer && (
           <footer className="dialog-foot flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-rule-soft bg-white px-6 py-4">
