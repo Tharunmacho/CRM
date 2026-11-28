@@ -485,8 +485,10 @@ export function buildWorkDoneMatrix(report: Pick<DailyReport, 'staff' | 'stages'
   const stages = matrixStages(report)
   const byId = new Map(work.perStaff.map(item => [item.id, item]))
   const known = new Set(report.staff.map(row => row.id))
+  const priority = new Map([['sudhagar', 0], ['gayathri', 1]])
   const people = reportPeople(report.staff).filter(row => !staff || row.id === staff).map(row => ({ id: row.id, name: row.name }))
-    .sort((x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: 'base' }))
+    .sort((x, y) => (priority.get(x.name.trim().toLowerCase()) ?? 2) - (priority.get(y.name.trim().toLowerCase()) ?? 2)
+      || x.name.localeCompare(y.name, undefined, { sensitivity: 'base' }))
   const strangers = work.perStaff.filter(item => !known.has(item.id))
   if (!staff && strangers.length) people.push({ id: 'other', name: 'Other' })
   const rowOf = (id: string, name: string, items: WorkDonePerson[]): WorkDoneRow => {

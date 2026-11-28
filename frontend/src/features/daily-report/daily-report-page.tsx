@@ -113,7 +113,6 @@ export default function DailyReportPage({ view, tabs }: { view: ReportView; tabs
     </>} />
     {tabs}
     <ReportToolbar choice={choice} onChoice={setChoice} range={range} today={today}      people={people} staff={staff === 'all' ? '' : staff} onPickStaff={id => setStaff(id || 'all')} team={scope === 'team'}
-      onHistory={view === 'daily' && scope === 'team' ? () => setHistory(true) : undefined}
       live={<LiveBadge updatedAt={state.updatedAt} busy={state.loading && !!data} />} />
 
     <div className="dw-alerts">

@@ -16,8 +16,6 @@ interface Props {
   onPickStaff: (id: string) => void
   team: boolean
   live: ReactNode
-  /** "Submitted reports" (the day-close history) for the Task report. */
-  onHistory?: () => void
 }
 
 /**
@@ -49,7 +47,6 @@ export function ReportToolbar(props: Props) {
             {props.people.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
           </Select>
         </label>}
-        {props.onHistory && <button type="button" className="rp-link" onClick={props.onHistory}>Submitted reports</button>}
         {props.live}
       </div>
     </div>
