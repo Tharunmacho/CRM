@@ -259,13 +259,13 @@ export function StageModal({
                   {fileError && <button type="button" className="underline" onClick={() => setFileRetry(value => value + 1)}>Retry documents</button>}
                   {editor}
                 </div>}
+                {stage.no === app.currentStage && dailyNotes && <section className="sm-card mt-2 px-3 py-4 sm:px-5" aria-label="Daily notes">
+                  <h3 className="mb-2 font-semibold">Daily notes</h3>
+                  {dailyNotes}
+                </section>}
               </li>
             })}
           </ol>
-          {dailyNotes && <section className="sm-card p-4" aria-label="Daily notes">
-            <h3 className="mb-2 font-semibold">Daily notes</h3>
-            {dailyNotes}
-          </section>}
         </div>
       </div>
     </Dialog>
