@@ -28,9 +28,9 @@ const list = SEEDS.map((text, index) => ({ id: `t${index + 1}`, text, active: tr
 
 test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (supervisors), AGENCY, STAGE, TODAY, REMARKS, NOTES, actions', () => {
   assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.title),
-    ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
+    ['S NO', 'D O C', 'CLIENT', 'JOB TITLE', 'CANDIDATE', 'RECRUITER', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
   assert.deepEqual(daily.taskColumnsFor(false).map((c) => c.title),
-    ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
+    ['S NO', 'D O C', 'CLIENT', 'JOB TITLE', 'CANDIDATE', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])
   assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'today', 'remarks', 'notes', 'actions'])
   assert.equal(daily.taskColumnsFor(true).at(-1).quiet, true, 'the actions header has no visible title')
   for (const c of daily.taskColumnsFor(true)) assert.doesNotMatch(c.title, /\//, 'one short word per header, never "CLIENT / COUNTRY"')
@@ -86,7 +86,7 @@ test('the Tasks table renders the model columns and no longer has a "Remark adde
   assert.match(table, /Nothing yet/)
   assert.match(table, /todayChips\(/)
   const order = [...table.matchAll(/data-label="([^"]+)"/g)].map((m) => m[1])
-  assert.deepEqual(order, ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE NAME', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])   // (the Recruiter cell is left out, not renamed, when it folds under the candidate)
+  assert.deepEqual(order, ['S NO', 'D O C', 'CLIENT', 'JOB TITLE', 'CANDIDATE NAME', 'RECRUITER', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'NOTES', 'Actions'])   // (the Recruiter cell is left out, not renamed, when it folds under the candidate)
   assert.doesNotMatch(await read('../src/styles/daily-work-board.css'), /\.tw-chip\.is-remark/)
 })
 

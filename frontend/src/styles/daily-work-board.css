@@ -95,7 +95,7 @@
 /* narrow panels: each candidate is a labelled card; the name leads it whatever the column order is */
 @container dw (max-width: 1099px) {
   .tw-table .dw-row > td[data-label='CANDIDATE NAME'] { order: -1; }
-  .tw-table .dw-row > td[data-label='DOC'] .dw-doc-add { padding-left: 0; }
+  .tw-table .dw-row > td[data-label='D O C'] .dw-doc-add { padding-left: 0; }
 }
 @media (max-width: 640px), (pointer: coarse) { .dw-doc-add { min-height: 44px; } }
 

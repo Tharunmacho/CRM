@@ -539,11 +539,11 @@ export const TASK_CARD_BREAKPOINT = 1100
  */
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
   { key: 'no', title: 'S NO', width: 44 },
-  { key: 'doc', title: 'DOC', width: 84 },
+  { key: 'doc', title: 'D O C', width: 84 },
   { key: 'client', title: 'CLIENT', width: 99 },
-  { key: 'position', title: 'JOB', width: 92 },
+  { key: 'position', title: 'JOB TITLE', width: 92 },
   { key: 'candidate', title: 'CANDIDATE', width: 134 },
-  { key: 'staff', title: 'Recruiter', width: 87, supervisor: true },
+  { key: 'staff', title: 'RECRUITER', width: 87, supervisor: true },
   { key: 'agency', title: 'AGENCY', width: 99 },
   { key: 'stage', title: 'STAGE', width: 106 },
   { key: 'today', title: 'TODAY', width: 104, roomy: true },

@@ -207,16 +207,16 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
             return (
               <tr key={row.candidateId} className={cn('dw-row', closed && 'is-closed')}>
                 <td className="is-num tnum" data-label="S NO">{index + 1}</td>
-                <td data-label="DOC" className={cn(!row.commencementDate && !(work && row.applicationId) && 'is-empty')}><DocCell item={row} canAdd={work} onSave={(iso) => onSaveDoc(row, iso)} /></td>
+                <td data-label="D O C" className={cn(!row.commencementDate && !(work && row.applicationId) && 'is-empty')}><DocCell item={row} canAdd={work} onSave={(iso) => onSaveDoc(row, iso)} /></td>
                 <td data-label="CLIENT" className={cn(!row.client && 'is-empty')}><ClientCell item={row} country /></td>
-                <td data-label="JOB" className={cn(!row.position && 'is-empty')}><PositionCellView item={row} /></td>
+                <td data-label="JOB TITLE" className={cn(!row.position && 'is-empty')}><PositionCellView item={row} /></td>
                 <td data-label="CANDIDATE NAME">
                   <Link to={applicationFormHref(row.candidateId, null, row.applicationId)} aria-label={`Open application form for ${row.candidate}`}>
                     <RecordIdentity name={row.candidate} />
                   </Link>
                   {staff === 'candidate' && name && <span className="tw-owner-line" title={`Recruiter: ${name}`}>{name}</span>}
                 </td>
-                {supervisor && staff !== 'candidate' && <td data-label="Recruiter">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
+                {supervisor && staff !== 'candidate' && <td data-label="RECRUITER">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
                 <td data-label="AGENCY" className={cn(!agencyLabel(row) && 'is-empty')}><AgencyCell item={row} /></td>
                 <td data-label="STAGE"><StageCell item={row} zone={zone} />{place === 'stage' && !closed && <TodayChips row={row} zone={zone} inStage />}</td>
                 {showToday && (
