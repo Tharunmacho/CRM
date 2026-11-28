@@ -171,7 +171,6 @@ export function StageModal({
   const readOnlyReason = owner ? `Stage entry is assigned to ${owner.name}.` : 'Assign a recruiter to enter stage feedback.'
   const effective = app.stages.filter((record) => !record.reopenedReason)
   const live = app.status === 'active' ? app.currentStage : null
-  const recorded = new Set(effective.map((record) => record.stage)).size
 
   if (embedded) {
     if (!open) return null
@@ -204,20 +203,29 @@ export function StageModal({
     >
       <div className="sm">
         <div className="sm-wrap">
-          <ApplicationHeader app={app} recorded={recorded} effective={effective} />
+          <ApplicationHeader app={app} effective={effective} />
 
           <ol className="sm-timeline" aria-label="Recruitment stages">
             {STAGES.map(stage => {
               const latest = effective.filter(record => record.stage === stage.no)
                 .reduce<StageRecord | undefined>((last, record) => !last || record.attempt > last.attempt ? record : last, undefined)
-              const negative = latest && NEGATIVE_OUTCOMES.includes(latest.outcome)
+              const negative = latest && (NEGATIVE_OUTCOMES.includes(latest.outcome) || (app.status === 'closed' && stage.no === app.currentStage))
               const current = stage.no === live
+              const answer = latest ? stageAnswer(stage, latest.data, latest.outcome) : ''
+              const draftAnswer = current ? stageAnswer(stage, app.draft ?? {}) : ''
               const title = latest && !negative && stage.key === 'prescreening' ? 'Prescreened' : stage.title
               return <li key={stage.no} data-sm-stage={stage.no} className={cn('sm-step', current ? 'is-current' : negative ? 'is-closed' : latest ? 'is-done' : 'is-upcoming')}>
                 <span className="sm-node" aria-hidden="true">{latest && !negative ? <Check className="h-4 w-4" /> : stage.no}</span>
                 <div className="sm-card flex flex-wrap items-center justify-between gap-2 px-5 py-4">
                   <b>{title}</b>
-                  {latest?.completedAt && <time className="ml-auto text-right tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
+                  <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
+                    {latest && <Badge tone={negative ? 'stamp' : 'green'} variant="dot">
+                      {current ? 'Recorded' : negative ? 'Closed' : 'Completed'}
+                      {answer && <> &middot; {answer}</>}
+                    </Badge>}
+                    {current && <Badge tone="navy" variant="dot">In progress{draftAnswer && <> &middot; {draftAnswer}</>}</Badge>}
+                    {latest?.completedAt && <time className="text-right tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
+                  </div>
                 </div>
               </li>
             })}
@@ -226,6 +234,25 @@ export function StageModal({
       </div>
     </Dialog>
   )
+}
+
+function stageAnswer(stage: typeof STAGES[number], data: Record<string, unknown>, outcome = ''): string {
+  const stop = stage.stops?.find(option => option.value === data.stop)
+  if (stop) return stop.label
+  const decision = stage.fields.find(field => field.name === stage.decision?.field)
+  const selected = decision?.options?.find(option => option.value === data[decision.name])
+  if (selected) return selected.label
+  if (stage.no === ADVANCE_STAGE) {
+    const status = withAdvanceStatus(data).advanceStatus
+    if (status === 'collected') return 'Received'
+    if (status === 'pending') return 'Not received'
+  }
+  if (outcome && !['Completed manually', 'Completed'].includes(outcome)) return outcome
+  for (const field of stage.fields) {
+    const choice = field.options?.find(option => option.value === data[field.name])
+    if (choice) return ['yes', 'no'].includes(choice.value) ? `${field.label}: ${choice.label}` : choice.label
+  }
+  return typeof data.feedback === 'string' ? data.feedback.trim() : ''
 }
 
 const NEGATIVE_OUTCOMES = ['Failed', 'Rejected', 'Declined', 'Not received', 'Unfit', 'Not forwarded']
@@ -264,7 +291,7 @@ function ReopenedNote({ record, reopenings }: { record: StageRecord; reopenings:
   return <p className="sm-reopened-note">{lead}: {record.reopenedReason || found?.reason}</p>
 }
 
-function ApplicationHeader({ app, recorded, effective }: { app: Application; recorded: number; effective: StageRecord[] }) {
+function ApplicationHeader({ app, effective }: { app: Application; effective: StageRecord[] }) {
   const store = useStore()
   const cand = store.candidate(app.candidateId)!
   const order = store.order(app.orderId)!
@@ -274,7 +301,7 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
   const referrer = agentName(cand)
   const referringLabel = /^care\s*india(?:\s+overseas)?(?:\s+(?:pvt\.?|private)\s*(?:ltd\.?|limited))?$/i.test(referrer) ? 'Care India' : referrer
   const facts: [string, typeof User, string, string?][] = [
-    ['Company name', Building2, client.name, order.country?.trim()],
+    ['Company name', Building2, client.name, order.country?.trim() || client.country?.trim() || store.client(client.clientId)?.country?.trim() || ''],
     ['Job title', Briefcase, designation.title],
     ['Referring agent', User, referringLabel],
     ['Recruiter', User, owner?.name ?? ''],
@@ -299,13 +326,12 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
           {facts.map(([label, Icon, value, country]) => <div key={label}>
             <dt><Icon className="h-3.5 w-3.5" aria-hidden="true" />{label}</dt>
             <dd title={value}>{value}</dd>
-            {country && <><dt className="mt-2">Country</dt><dd title={country}>{country}</dd></>}
+            {country !== undefined && <><dt className="mt-2">Country</dt><dd title={country}>{country}</dd></>}
           </div>)}
         </dl>
         <div className="sm-progress">
           <div className="sm-progress-line">
             <p className="sm-progress-label"><b>{progressLead}</b></p>
-            <Badge className="tnum">{recorded} of {STAGES.length} stages done</Badge>
           </div>
           <StageRail status={app.status} currentStage={app.currentStage} reached={[...new Set(effective.map(item => item.stage))]} numbered />
         </div>

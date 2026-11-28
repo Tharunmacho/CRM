@@ -83,16 +83,29 @@ export function PageLoading({ fullScreen = false, onRetry, retryLabel = 'Retry c
 }
 
 /** A failed page download or render should offer recovery instead of a blank screen. */
-export class PageBoundary extends Component<{ children: ReactNode }, { failed: boolean; reason: string }> {
-  state = { failed: false, reason: '' }
+export class PageBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
 
-  static getDerivedStateFromError(error: unknown) {
-    // A short, safe reason (an error name and message, never page data) so a failure can be reported and fixed.
-    const reason = error instanceof Error ? `${error.name}: ${error.message}`.replace(/\s+/g, ' ').slice(0, 220) : ''
-    return { failed: true, reason }
+  static getDerivedStateFromError() {
+    return { failed: true }
   }
 
   componentDidCatch(error: unknown, info: { componentStack?: string | null }) {
+    // A tab opened before deployment can still refer to a removed route chunk.
+    // Recover on navigation, never during a speculative background prefetch.
+    if (error instanceof Error && /failed to fetch dynamically imported module|loading chunk [\w-]+ failed|importing a module script failed|unable to preload css/i.test(error.message)) {
+      try {
+        const key = 'crm.route-download-retry'
+        const now = Date.now()
+        if (now - Number(sessionStorage.getItem(key) || 0) > 60_000) {
+          sessionStorage.setItem(key, String(now))
+          window.location.reload()
+          return
+        }
+      } catch {
+        // Keep manual reload available when browser storage is disabled.
+      }
+    }
     console.error('Page failed to render', error, info.componentStack?.split('\n').slice(0, 6).join('\n'))
   }
 
@@ -102,8 +115,6 @@ export class PageBoundary extends Component<{ children: ReactNode }, { failed: b
       <div className="flex min-h-screen items-center justify-center bg-canvas px-6">
         <div role="alert" className="max-w-sm text-center">
           <h1 className="text-h3 font-semibold text-ink">This page did not open</h1>
-          <p className="mt-2 text-sm text-ink-500">Reload the page to try again. If it keeps happening, tell your administrator.</p>
-          {this.state.reason && <p className="mt-2 break-words text-xs text-ink-400" data-testid="page-failure-reason">{this.state.reason}</p>}
           <button
             type="button"
             onClick={() => window.location.reload()}
