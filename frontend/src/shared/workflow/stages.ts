@@ -713,6 +713,9 @@ for (const definition of STAGES) {
   ]
   const evaluate = definition.evaluate
   definition.evaluate = (data) => {
+    if (typeof data.customReply === 'string' && data.customReply.trim().toLowerCase() === 'pending') {
+      return { canComplete: false, missing: ['Choose a stage outcome when ready'], outcome: '' }
+    }
     const invalid: string[] = []
     if (data.feedback != null && typeof data.feedback !== 'string') invalid.push('Stage feedback')
     else if (typeof data.feedback === 'string' && data.feedback.trim().length > 10000) invalid.push('Stage feedback: use 10,000 characters or fewer')

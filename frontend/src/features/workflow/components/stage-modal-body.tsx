@@ -253,6 +253,7 @@ function greenStageAnswer(stage: number, answer: string, data?: Record<string, u
 }
 
 function stageAnswer(stage: typeof STAGES[number], data: Record<string, unknown>, outcome = ''): string {
+  if (typeof data.customReply === 'string' && data.customReply.trim()) return data.customReply.trim()
   const stop = stage.stops?.find(option => option.value === data.stop)
   if (stop && data.stop !== 'declined') return stop.label
   const pair = stageReplyPairs[stage.no]
@@ -557,12 +558,13 @@ function CurrentStage({
     setDirty(true)
   }
 
-  const applyReply = (reply: string, fields: Record<string, string> = {}, alternatives: string[] = []) => {
-    setData(current => {
-      const lines = String(current.feedback ?? '').split('\n').filter(line => !alternatives.includes(line.trim()))
-      if (!lines.some(line => line.trim() === reply)) lines.push(reply)
-      return { ...current, ...fields, feedback: lines.join('\n').trim() }
-    })
+  const applyReply = (reply: string) => {
+    const pair = stageReplyPairs[def.no]
+    if (!pair) return
+    setData(current => ({
+      ...current, [pair.field]: undefined, stop: undefined, customReply: reply,
+      ...(def.no === ADVANCE_STAGE ? { collected: undefined } : {}),
+    }))
     setDirty(true)
   }
 
@@ -658,8 +660,8 @@ function CurrentStage({
 
         <div className="sm-feedback">
           {canWork && <StageReplies key={`${store.me?.id}:${def.no}`} userId={store.me!.id} stage={def.no} disabled={busy || completed}
-            status={pair ? data[pair.field] : undefined} feedback={data.feedback} onSelect={(field, value) => {
-              setData(previous => ({ ...previous, [field]: value, stop: pair?.choices[1][1] === value ? 'declined' : undefined,
+            status={pair && !data.customReply ? data[pair.field] : undefined} feedback={data.customReply ?? data.feedback} onSelect={(field, value) => {
+              setData(previous => ({ ...previous, [field]: value, customReply: undefined, stop: pair?.choices[1][1] === value ? 'declined' : undefined,
                 ...(field === 'advanceStatus' ? { collected: value === 'collected' ? 'yes' : 'no' } : {}) }))
               setDirty(true)
             }} onChoose={applyReply} />}
@@ -698,7 +700,7 @@ function CurrentStage({
             <Button
               variant={result.closes ? 'danger' : 'primary'}
               onClick={complete}
-              disabled={!canWork || busy || uploading || completed || refreshRequired || !ownerActive}
+              disabled={!canWork || busy || uploading || completed || refreshRequired || !ownerActive || String(data.customReply ?? '').trim().toLowerCase() === 'pending'}
               icon={result.closes ? <CircleSlash className="h-4 w-4" /> : <Check className="h-4 w-4" />}
             >
               {busy ? 'Saving…' : result.repeats ? 'Save feedback and plan another medical' : result.closes ? data.stop === 'declined' ? 'Save as declined' : 'Save and close order' : def.no === STAGES.length ? 'Save and mark Deployed' : 'Save and move'}

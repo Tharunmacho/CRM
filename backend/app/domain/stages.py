@@ -56,6 +56,7 @@ class StageInput(BaseModel):
 
     # Optional in drafts and completed stage records.
     feedback: str | None = Field(default=None, max_length=10000)
+    customReply: str | None = Field(default=None, max_length=240)
     # The stopping exit every stage offers: instead of moving on, the application closes here (see STOP_EXITS for what each stage allows).
     stop: Literal["rejected", "declined", "not_possible", "not_available", "not_paid", "visa_rejected", "refused", "not_travelling", "not_cleared"] | None = None
 
@@ -409,6 +410,8 @@ def _validated(stage: int, evaluate: Callable[[dict], Evaluation]):
             clean = validate_payload(stage, data, options)
         except ValidationError as exc:
             return _need(*(f"{' / '.join(map(str, item['loc']))}: {item['msg']}" for item in exc.errors()))
+        if (clean.get("customReply") or "").casefold() == "pending":
+            return _need("Choose a stage outcome when ready")
         if stage == TICKET_STAGE and clean.get("ticketStatus") == "pending" and clean.get("stop") == "declined":
             return _close("stage_declined", "Declined", "Declined")
         if clean.get("stop"):

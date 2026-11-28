@@ -256,3 +256,9 @@ def test_google_review_is_optional_and_the_visa_stage_still_accepts_a_legacy_tic
 def test_interview_date_and_declined_ticket_reply():
     assert not stage_by_no(3).evaluate({"scheduled": "yes"}).can_complete
     assert stage_by_no(13).evaluate({"ticketStatus": "pending", "stop": "declined"}).closes == "stage_declined"
+
+
+def test_pending_custom_reply_cannot_complete_or_decline():
+    for stage in range(1, 14):
+        result = stage_by_no(stage).evaluate({"customReply": "Pending", "stop": "declined"})
+        assert not result.can_complete and result.closes is None
