@@ -459,7 +459,7 @@ function ReopenStage({ app, stage, inMenu = false, disabled, onBusyChange, befor
       await api.post(`/applications/${app.id}/reopen`, { stage, reason: reason.trim(), lock_version: app.lockVersion })
       if (!store.isCurrentSession()) return
       setSaved(true)
-      store.notify(`Stage ${stage} reopened. Earlier tries stay on record.`)
+      store.notify(`Stage ${stage} reopened.`)
       try { await store.refresh({ keepCurrent: true }); onStageChanged?.() }
       catch { setError('Reopened. Refresh to see the current stage.') }
     } catch (cause) {
@@ -470,7 +470,6 @@ function ReopenStage({ app, stage, inMenu = false, disabled, onBusyChange, befor
     {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
     {saved ? <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(() => setError('We could not refresh. Please try again.'))}>Refresh</Button>
       : editing ? <div className="space-y-3">
-        <p className="text-[13px] leading-5 text-ink-600">This starts stage {stage} again, sets aside the results of any later stages, and replaces the task that is open now. Earlier records and files stay on record. Reopening a deployment also changes the order's deployed count.</p>
         <Field label="Reason for reopening" required><Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={2000} disabled={busy || disabled} placeholder="What needs to be corrected?" /></Field>
         <div className="flex flex-wrap gap-2"><Button variant="primary" disabled={busy || disabled || !reason.trim()} onClick={() => void reopen()}>{busy ? 'Reopening…' : `Reopen stage ${stage}`}</Button><Button disabled={busy || disabled} onClick={() => { setEditing(false); setError('') }}>Cancel</Button></div>
       </div> : inMenu ? <RowMenu label={`Actions for ${stageByNo(stage).title}`} items={[{
@@ -984,17 +983,11 @@ function StageFieldInput({
 /* ----------------------------------------------------------- Terminal rows */
 
 function ClosedRow({ app, canReopen = false, disabled = false, onRecorded, onDone }: { app: Application; canReopen?: boolean; disabled?: boolean; onRecorded?: () => void; onDone?: () => void }) {
-  const tab = closureTab(app.closureReason)
   const stageTitle = stageByNo(Math.max(1, app.currentStage))?.title ?? 'Prescreening'
   return <section className="sm-card sm-end is-closed">
     <span className="sm-end-icon" aria-hidden="true"><CircleSlash className="h-5 w-5" /></span>
     <div>
       <b>Closed: {app.closureReason ? closureLabels[app.closureReason] : 'Closed'}</b>
-      <p>{tab === null
-        ? 'The candidate was removed from this order (or moved to another job) and its open tasks were cancelled. They are on the Tasks list again and can be matched to another order.'
-        : tab === 'Declined'
-          ? 'The candidate is on the Declined tab of the Tasks page and in All, and can be offered other orders.'
-          : 'The candidate is on the Rejected tab of the Tasks page and in All, and can be matched to another order.'} Finished stages and files are above.{canReopen ? ` Reopen ${stageTitle} to continue.` : ''} Admins and MDs can reopen a finished stage by giving a reason.</p>
       {canReopen && <div className="mt-3"><ReopenApplication app={app} stageTitle={stageTitle} disabled={disabled} onRecorded={onRecorded} onDone={onDone} /></div>}
     </div>
   </section>

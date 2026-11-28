@@ -6,7 +6,7 @@ import { useStore } from '@/shared/state/crm-store'
 import { RowMenu } from '@/shared/ui/table'
 import { Dialog } from '@/shared/ui/overlay'
 import { Button, Field, Textarea } from '@/shared/ui/primitives'
-import { MIN_REOPEN_REASON, reopenExplanation, reopenFailure, reopenReasonOk } from '../reopen-application'
+import { reopenFailure, reopenReasonOk } from '../reopen-application'
 
 /**
  * "Reopen application" for a closed placement: a button that opens a small dialog asking for a reason, then
@@ -43,13 +43,13 @@ export function ReopenApplication({ app, stageTitle, inMenu = false, disabled = 
     {inMenu ? <RowMenu label={`Actions for ${stageTitle}`} items={[{
       label: 'Reopen stage', icon: RotateCcw, onSelect: () => setOpen(true), disabledReason: disabled ? 'Reopening is unavailable' : undefined,
     }]} /> : <Button variant="primary" size="sm" disabled={disabled} icon={<RotateCcw className="h-4 w-4" />} onClick={() => setOpen(true)}>Reopen stage</Button>}
-    <Dialog open={open} onClose={close} title={`Reopen ${stageTitle}?`} description={reopenExplanation(stageTitle)} width="sm"
+    <Dialog open={open} onClose={close} title={`Reopen ${stageTitle}?`} width="sm"
       footer={<>
         <Button disabled={busy} onClick={close}>Cancel</Button>
         <Button variant="primary" disabled={busy || disabled || !reopenReasonOk(reason)} onClick={() => void submit()}>{busy ? 'Reopening…' : 'Reopen stage'}</Button>
       </>}>
       {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
-      <Field label="Reason for reopening" required hint={`At least ${MIN_REOPEN_REASON} characters.`}>
+      <Field label="Reason for reopening (3 characters minimum)" required>
         <Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} disabled={busy} placeholder="Why does this candidate continue?" />
       </Field>
     </Dialog>
