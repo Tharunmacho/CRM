@@ -14,7 +14,7 @@ import { live } from '@/shared/state/live'
 import type { Candidate, DocumentSlot } from '@/shared/model/types'
 
 /** The slots the workspace snapshot has always listed; a profile read also carries the application form's other slots. */
-const WORKSPACE_SLOTS = ['resume', 'passport', 'aadhaar', 'source_bundle', 'photo', 'education', 'experience']
+const WORKSPACE_SLOTS = ['resume', 'passport', 'aadhaar', 'source_bundle', 'photo', 'education', 'experience', 'emigration']
 
 export function useCandidateDocuments(candidate: Candidate | null | undefined): { documents: DocumentSlot[]; loading: boolean } {
   const id = candidate?.id

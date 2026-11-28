@@ -13,8 +13,6 @@ import {
   ListChecks,
   Lock,
   MessageSquarePlus,
-  Phone,
-  PhoneCall,
   RotateCcw,
   ShieldCheck,
   Trophy,
@@ -23,7 +21,7 @@ import {
 import { cn } from '@/shared/lib/cn'
 import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
 import { currencyChoices, currencyLabel, homeDigits } from '@/shared/lib/agency'
-import { formatPhone, samePhone } from '@/shared/lib/phone'
+import { formatPhone } from '@/shared/lib/phone'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { applicationFileSlot, applicationFileVersions, newestFileVersions, type ApplicationFile } from '@/shared/lib/document-files'
 import { useStore } from '@/shared/state/crm-store'
@@ -65,16 +63,14 @@ import { FileDrop, type StoredFile } from '@/shared/ui/file-drop'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { refreshSilently, refreshUntil } from '@/shared/state/refresh-retry'
 import { PersonAvatar } from './person-avatar'
-import { DocumentList } from '@/features/candidates/components/profile-documents'
 import { useCandidateDocuments } from '@/features/candidates/use-candidate-documents'
 import { SlaMeter, StageRail } from './stage-rail'
 import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
-import { shortRef } from '@/features/candidates/components/data-bank-columns'
+import { agentName } from '@/features/candidates/data-bank-search'
+import { StageReplies } from './stage-replies'
 import '@/styles/candidate-v2.css'
 import '@/styles/stage-modal.css'
 import '@/styles/touch-targets.css'
-import { careIdOf, idLine, primaryId } from '@/features/candidates/candidate-ids'
-import { callAnswerWords } from '@/features/candidates/call-outcome'
 
 /**
  * One scrolling application: completed sections keep their saved feedback,
@@ -228,7 +224,7 @@ export function StageModal({
       onClose={() => { if (!pending && !reopening && (!dirty || window.confirm('Throw away changes you have not saved?'))) onClose() }}
       width="full"
       title="Stages for this order"
-      description={`${cand.name} · ${order.ref}`}
+      description={cand.name}
     >
       <div className="sm">
         <div className="sm-wrap">
@@ -358,36 +354,31 @@ function ReopenedNote({ record, reopenings }: { record: StageRecord; reopenings:
   return <p className="sm-reopened-note">{lead}: {record.reopenedReason || found?.reason}</p>
 }
 
-/**
- * Header: candidate name, photo, phone, passport number, client, order, designation, owner,
- * current stage and overall status, with a numbered progress strip for the stages reached.
- * The full candidate record opens below it on request.
- */
 function ApplicationHeader({ app, recorded, effective }: { app: Application; recorded: number; effective: StageRecord[] }) {
   const store = useStore()
-  const [record, setRecord] = useState(false)
   const cand = store.candidate(app.candidateId)!
   const order = store.order(app.orderId)!
   const client = store.company(order.companyId)!
   const designation = store.designation(order.designationId)!
   const owner = store.user(cand.ownerId)
-  const { documents: candidateDocuments } = useCandidateDocuments(cand)
+  const { documents: candidateDocuments, loading: documentsLoading } = useCandidateDocuments(cand)
   const photo = newestFileVersions(candidateDocuments.find(document => document.key === 'photo')?.versions ?? [])[0]
-  // The order and the stage are already in the title line and the progress strip, so they are not repeated here.
-  const facts: [string, React.ReactNode, React.ReactNode, boolean?][] = [
-    ['Phone', <Phone key="i" className="h-3.5 w-3.5" aria-hidden="true" />, formatPhone(cand.phone, homeDigits(store.settings.homeCallingCode)), true],
-    ['Passport', <BookUser key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.passportNo ?? 'Not saved', !!cand.passportNo],
-    ['Passport expires', <BookUser key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.passportExpiry ? dateLabel(cand.passportExpiry) : 'Not saved'],
-    ['Recruiter', <User key="i" className="h-3.5 w-3.5" aria-hidden="true" />, owner?.name ?? 'Not assigned'],
-    ['Client', <Building2 key="i" className="h-3.5 w-3.5" aria-hidden="true" />, client.name],
-    ['Job title', <Briefcase key="i" className="h-3.5 w-3.5" aria-hidden="true" />, designation.title],
-    ['Matched on', <FileText key="i" className="h-3.5 w-3.5" aria-hidden="true" />, dateLabel(app.createdAt)],
-    ['Last update', <ListChecks key="i" className="h-3.5 w-3.5" aria-hidden="true" />, smartTime(app.updatedAt)],
+  const clearance = candidateDocuments.find(slot => slot.key === 'emigration')
+  const clearanceFile = newestFileVersions(clearance?.versions ?? [])[0]
+  const clearanceRecorded = clearanceFile || clearance?.uploaded || clearance?.fileUploaded || clearance?.manualStatus?.uploaded
+  const facts: [string, typeof User, string][] = [
+    ['Company name', Building2, client.name],
+    ['Job position', Briefcase, designation.title],
+    ['Referring agent', User, agentName(cand) || 'Not recorded'],
+    ['Recruiter', User, owner?.name ?? 'Not assigned'],
+    ['Passport number', BookUser, cand.passportNo || 'Not recorded'],
+    ['Passport expiry date', BookUser, cand.passportExpiry ? dateLabel(cand.passportExpiry) : 'Not recorded'],
+    ['Emigration status', ShieldCheck, clearanceRecorded ? 'Document on file' : documentsLoading ? 'Loading...' : 'No document recorded'],
+    ['Emigration document', FileText, clearanceFile?.name || (documentsLoading ? 'Loading...' : 'Not recorded')],
   ]
   const statusTone = app.status === 'closed' ? 'stamp' : app.status === 'deployed' ? 'green' : 'navy'
   const statusLabel = app.status === 'active' ? 'Active' : app.status === 'deployed' ? 'Deployed' : 'Closed'
   const progressLead = app.status === 'active' ? `Stage ${app.currentStage} of ${STAGES.length} · ${stageByNo(app.currentStage).title}` : app.status === 'deployed' ? 'Deployed' : `Closed at stage ${app.currentStage}${app.closureReason ? ` · ${closureLabels[app.closureReason]}` : ''}`
-  const progressText = app.status === 'active' ? 'Write feedback and choose Save and move to advance manually. Documents are optional for stage movement.' : app.status === 'deployed' ? 'All 13 stages are done. Open any stage to read its saved feedback.' : 'This order is closed for this candidate. Saved feedback, results and documents are below.'
   return (
     <>
       <header className="sm-head">
@@ -395,138 +386,27 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
           <PersonAvatar name={cand.name} photoUrl={photo?.url} size={56} />
           <div className="sm-id">
             <h3 className="sm-name" title={cand.name}>{cand.name}</h3>
-            <p className="sm-sub"><span>Order</span><b className="tnum" title={order.ref}>{order.ref}</b><i aria-hidden="true">·</i><span>Candidate</span><b className="tnum" title={idLine(cand)}>{careIdOf(cand) || shortRef(cand.ref)}</b></p>
+            <p className="sm-sub"><span>Contact number</span><b className="tnum">{cand.phone ? formatPhone(cand.phone, homeDigits(store.settings.homeCallingCode)) : 'Not recorded'}</b></p>
           </div>
           <div className="sm-head-side">
             <Badge tone={statusTone} variant="dot">{statusLabel}</Badge>
           </div>
         </div>
         <dl className="sm-facts">
-          {facts.map(([label, icon, value, ident]) => <div key={label}><dt>{icon}{label}</dt><dd className={cn(ident && 'ident')} title={typeof value === 'string' ? value : undefined}>{value}</dd></div>)}
+          {facts.map(([label, Icon, value]) => <div key={label}><dt><Icon className="h-3.5 w-3.5" aria-hidden="true" />{label}</dt><dd title={value}>{value}</dd></div>)}
         </dl>
         <div className="sm-progress">
           <div className="sm-progress-line">
-            <p className="sm-progress-label"><b>{progressLead}</b><span>{progressText}</span></p>
+            <p className="sm-progress-label"><b>{progressLead}</b></p>
             <Badge className="tnum">{recorded} of {STAGES.length} stages done</Badge>
           </div>
           <StageRail status={app.status} currentStage={app.currentStage} reached={[...new Set(effective.map(item => item.stage))]} numbered />
         </div>
         <div className="sm-head-foot">
           <ApplicationFormButton size="sm" variant="primary" candidateId={cand.id} orderId={order.id} />
-          <button type="button" className="sm-record-toggle" aria-expanded={record} onClick={() => setRecord((value) => !value)}>
-            <User className="h-4 w-4" aria-hidden="true" />{record ? 'Hide full candidate details' : 'See full candidate details'}<ChevronDown className="h-4 w-4" aria-hidden="true" />
-          </button>
         </div>
       </header>
-      {record && <CandidateRecord app={app} />}
     </>
-  )
-}
-
-/**
- * The full candidate record, in segments. Collapsed by default so the stage work
- * stays the first thing you see; opening it reveals everything on file.
- */
-function CandidateRecord({ app }: { app: Application }) {
-  const store = useStore()
-  const home = homeDigits(store.settings.homeCallingCode)
-  const cand = store.candidate(app.candidateId)!
-  const order = store.order(app.orderId)!
-  const client = store.company(order.companyId)!
-  const designation = store.designation(order.designationId)!
-  const { documents: candidateDocuments, loading: documentsLoading } = useCandidateDocuments(cand)
-
-  return (
-    <div className="sm-record">
-      <Segment icon={<User className="h-4 w-4" />} title="Personal information" subtitle="Basic details">
-        <Fact label="Name" value={cand.name} />
-        {primaryId(cand) && <Fact label="Care India ID" value={primaryId(cand)} ident />}
-        <Fact label="Date of birth" value={dateLabel(cand.dob)} />
-        <Fact label="Gender" value={cand.gender ?? 'Not provided'} className="capitalize" />
-        <Fact label="Nationality" value={cand.nationality || 'Not provided'} />
-        <Fact label="Current location" value={cand.currentCity || 'Not provided'} />
-        <Fact label="Languages known" value={cand.languages.join(', ') || 'Not provided'} half />
-      </Segment>
-
-      <Segment icon={<Phone className="h-4 w-4" />} title="Contact and source" subtitle="How to reach this candidate and where they came from">
-        <Fact label="Mobile" value={formatPhone(cand.phone, home)} ident />
-        {/* The WhatsApp number is written out only when it is not the mobile number. */}
-        <Fact label="WhatsApp" value={!cand.whatsapp ? 'Not provided' : samePhone(cand.whatsapp, cand.phone, home) ? 'Same as mobile' : formatPhone(cand.whatsapp, home)} ident={!!cand.whatsapp && !samePhone(cand.whatsapp, cand.phone, home)} />
-        <Fact label="Email" value={cand.email ?? 'Not provided'} half />
-        <Fact label="Source" value={cand.source.replace('_', '-') + (cand.sourceDetail ? ` · ${cand.sourceDetail}` : '')} className="capitalize" half />
-        <Fact label="Date added" value={dateLabel(cand.addedAt)} />
-      </Segment>
-
-      <Segment icon={<BookUser className="h-4 w-4" />} title="Passport" subtitle="Passport details we have saved. The original passport is collected at stage 7.">
-        <Fact label="Passport number" value={cand.passportNo ?? 'Not on file'} ident={!!cand.passportNo} />
-        <Fact label="Place of issue" value={cand.passportPlace ?? 'Not provided'} />
-        <Fact label="Issue date" value={dateLabel(cand.passportIssue)} />
-        <Fact label="Expiry date" value={dateLabel(cand.passportExpiry)} />
-      </Segment>
-
-      <Segment icon={<Briefcase className="h-4 w-4" />} title="Work profile" subtitle="Trade, experience and expectations">
-        <Fact label="Preferred job title" value={cand.designations.join(', ') || 'Not provided'} half />
-        <Fact label="Total experience" value={cand.totalExperience == null ? 'Not recorded' : `${cand.totalExperience} years`} />
-        <Fact label="Gulf or overseas experience" value={cand.gulfExperience == null ? 'Not recorded' : `${cand.gulfExperience} years`} />
-        <Fact label="Expected salary" value={money(cand.expectedSalary)} />
-        <div className="sm-fact is-wide">
-          <dt>Skills</dt>
-          <dd className="mt-1.5 flex flex-wrap gap-1.5">
-            {cand.skills.length ? cand.skills.map((sk) => <Badge key={sk}>{sk}</Badge>) : <span className="text-ink-400">Not provided</span>}
-          </dd>
-        </div>
-      </Segment>
-
-      <Segment icon={<Building2 className="h-4 w-4" />} title="Order" subtitle="The order this candidate is matched to">
-        <Fact label="Employer" value={client.name} />
-        <Fact label="Client contact" value={store.client(client.clientId)?.name ?? 'Not available'} />
-        <Fact label="Job title" value={designation.title} />
-        <Fact label="Order number" value={order.ref} ident />
-        <Fact label="Location" value={[order.city, order.country].filter(Boolean).join(', ') || 'Not recorded'} />
-        <Fact label="Salary" value={money(order.salary, order.currency)} />
-        <Fact label="Contract period" value={order.contractPeriod || 'Not recorded'} />
-        <Fact label="Interview date" value={dateLabel(order.interviewDate)} />
-        <Fact label="Order deadline" value={dateLabel(order.deadline)} />
-      </Segment>
-
-      {cand.callOutcome && (
-        <Segment icon={<PhoneCall className="h-4 w-4" />} title="Initial call" subtitle="Result of the first call">
-          <Fact label="Interested" value={callAnswerWords(cand.callOutcome.interested).fact} />
-          <Fact label="Recorded" value={dateTimeLabel(cand.callOutcome.recordedAt)} />
-          <Fact label="Remarks" value={cand.callOutcome.remarks || 'Not provided'} half />
-        </Segment>
-      )}
-
-      <Segment icon={<FileText className="h-4 w-4" />} title="Documents" subtitle="Nothing is overwritten. A new file is saved as a new version.">
-        <div className="sm-fact is-wide">
-          {documentsLoading
-            ? <p role="status" className="text-sm text-ink-500">Loading documents…</p>
-            : <DocumentList documents={candidateDocuments} uploaderName={(id) => store.user(id)?.name || 'Former team member'} />}
-        </div>
-      </Segment>
-    </div>
-  )
-}
-
-function Segment({ icon, title, subtitle, children }: { icon: React.ReactNode; title: string; subtitle: string; children: React.ReactNode }) {
-  return (
-    <section className="sm-seg">
-      <header>
-        <span className="sm-seg-icon">{icon}</span>
-        <div className="min-w-0"><h4>{title}</h4><p>{subtitle}</p></div>
-      </header>
-      <dl className="sm-seg-body">{children}</dl>
-    </section>
-  )
-}
-
-/** A read-only field, boxed so the record scans like a filled-in form. */
-function Fact({ label, value, ident, className, half }: { label: string; value: React.ReactNode; ident?: boolean; className?: string; half?: boolean }) {
-  return (
-    <div className={cn('sm-fact', half && 'is-half')}>
-      <dt>{label}</dt>
-      <dd className={cn(ident && 'ident', className)}>{value}</dd>
-    </div>
   )
 }
 
@@ -722,6 +602,15 @@ function CurrentStage({
     setDirty(true)
   }
 
+  const applyReply = (reply: string, fields: Record<string, string> = {}, alternatives: string[] = []) => {
+    setData(current => {
+      const lines = String(current.feedback ?? '').split('\n').filter(line => !alternatives.includes(line.trim()))
+      if (!lines.some(line => line.trim() === reply)) lines.push(reply)
+      return { ...current, ...fields, feedback: lines.join('\n').trim() }
+    })
+    setDirty(true)
+  }
+
   const reportFailure = (cause: unknown) => {
     if (!store.isCurrentSession()) return
     const details = cause instanceof ApiError && cause.detail && typeof cause.detail === 'object'
@@ -782,7 +671,7 @@ function CurrentStage({
   }
 
   // Short fields (Yes/No, date, time, choices) sit side by side on a 12-column grid; long ones take the whole row.
-  const shownFields = def.fields.filter((f) => f.name !== 'feedback' && fieldVisible(f, data))
+  const shownFields = def.fields.filter((f) => f.name !== 'feedback' && !(def.no === ADVANCE_STAGE && f.name === 'advanceStatus') && fieldVisible(f, data))
   // The choice that decides the stage is asked outright, above the feedback; only the rest is an optional detail.
   const decisionFields = shownFields.filter((f) => def.decision?.fields.includes(f.name))
   const visibleFields = shownFields.filter((f) => !def.decision?.fields.includes(f.name))
@@ -831,7 +720,11 @@ function CurrentStage({
 
         {def.decision && decisionMain && (
           <div className="sm-decision">
-            <DecisionChoice def={def} field={decisionMain} value={data[decisionMain.name] as string | undefined} onChange={(v) => set(decisionMain.name, v)}
+            <DecisionChoice def={def} field={decisionMain} value={data[decisionMain.name] as string | undefined} onChange={(value) => {
+                const options = decisionMain.options ?? []
+                const chosen = options.find(option => option.value === value)
+                if (chosen) applyReply(chosen.label, { [decisionMain.name]: value }, options.map(option => option.label))
+              }}
               disabled={!canWork || busy || completed} stopping={!!result.closes} repeating={!!result.repeats} />
             {decisionExtras.length > 0 && (
               <div className="sm-form sm-decision-more">
@@ -847,6 +740,10 @@ function CurrentStage({
         )}
 
         <div className="sm-feedback">
+          {canWork && <StageReplies key={`${store.me?.id}:${def.no}`} userId={store.me!.id} stage={def.no} disabled={busy || completed}
+            status={data.advanceStatus} onChoose={(reply, status) => status
+              ? applyReply(reply, { advanceStatus: status }, ['Advance payment received.', 'Advance payment not received.'])
+              : applyReply(reply)} />}
           <StageFieldInput field={def.fields.find((field) => field.name === 'feedback')!} value={data.feedback} onChange={(value) => set('feedback', value)} disabled={!canWork || busy || completed} applicationId={app.id} versions={[]} stage={app.currentStage} onUploaded={onUploaded} onUploading={() => {}} />
           {!compact && <p className="sm-hint">Only you move the stage. Missing documents will stay pending in the document checklist.</p>}
         </div>
