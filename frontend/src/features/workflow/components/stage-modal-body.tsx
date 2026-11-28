@@ -232,13 +232,11 @@ export function StageModal({
                     onClick={() => setSelectedHistory(selectedHistory === stage.no ? null : stage.no)}>
                     <b>{title}</b><span aria-hidden="true">{selectedHistory === stage.no ? '\u25B4' : '\u25BE'}</span>
                   </button> : <b>{title}</b>}
+                    {interviewDate && <div className="text-sm">Interview date: <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${interviewTimeLabel(schedule.time)}`}</time></div>}
                   </div>
                   <div className="sm-monitor-answers">
-                    <div className="sm-result-stack">
                     {answer && <Badge tone={negative ? 'stamp' : greenStageAnswer(stage.no, answer, latest?.data) ? 'green' : 'neutral'}>{answer}</Badge>}
                     {current && <Badge tone={draftAnswer && greenStageAnswer(stage.no, draftAnswer, app.draft) ? 'green' : 'navy'}>{draftAnswer || 'In progress'}</Badge>}
-                      {interviewDate && <div className="sm-interview-date">Interview date <time dateTime={interviewDate}>{dateLabel(interviewDate)}{typeof schedule?.time === 'string' && schedule.time && `, ${interviewTimeLabel(schedule.time)}`}</time></div>}
-                    </div>
                     {latest?.completedAt && <time className="tnum" dateTime={latest.completedAt}>{dateTimeLabel(latest.completedAt)}</time>}
                     {latest && !current && canWork && !(app.status === 'closed' && stage.no === app.currentStage) &&
                       <ReopenStage inMenu app={app} stage={stage.no} disabled={!owner?.active || pending || reopening}
